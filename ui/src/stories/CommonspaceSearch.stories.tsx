@@ -364,7 +364,7 @@ export const TypeFilterPending: Story = {
 			await body.findByRole("menuitemcheckbox", { name: "Messages" }),
 		);
 		await userEvent.keyboard("{Escape}");
-		await expect(body.getByText("Searching…")).toBeVisible();
+		await waitFor(() => expect(body.getByText("Searching…")).toBeVisible());
 		await expect(body.queryByRole("listbox")).not.toBeInTheDocument();
 		await userEvent.click(
 			body.getByRole("searchbox", { name: "Search Commonspace" }),
@@ -407,7 +407,7 @@ export const ReturningToPendingQuery: Story = {
 			await body.findByRole("menuitemcheckbox", { name: "Messages" }),
 		);
 		await userEvent.keyboard("{Escape}");
-		await expect(body.getByText("Searching…")).toBeVisible();
+		await waitFor(() => expect(body.getByText("Searching…")).toBeVisible());
 		await userEvent.click(body.getByRole("button", { name: "Clear filters" }));
 		await expect(body.queryByRole("listbox")).not.toBeInTheDocument();
 		await expect(body.getByText("Searching…")).toBeVisible();
