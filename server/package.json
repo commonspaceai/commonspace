@@ -15,8 +15,8 @@
 		"clean": "node ../scripts/clean.mjs dist"
 	},
 	"dependencies": {
-		"@agentclientprotocol/claude-agent-acp": "0.75.0",
-		"@agentclientprotocol/codex-acp": "1.8.0",
+		"@agentclientprotocol/claude-agent-acp": "0.76.0",
+		"@agentclientprotocol/codex-acp": "1.11.0",
 		"@agentclientprotocol/sdk": "1.4.0",
 		"@commonspace/shared": "workspace:*",
 		"@modelcontextprotocol/sdk": "1.30.0",
@@ -24,12 +24,12 @@
 		"jsonc-parser": "3.3.1",
 		"node-notifier": "10.0.1",
 		"pino": "^10.0.0",
-		"zod": "^4.5.4"
+		"zod": "^4.6.2"
 	},
 	"devDependencies": {
-		"@google/gemini-cli": "0.43.0",
+		"@google/gemini-cli": "0.59.0",
 		"@types/express": "^5.0.0",
-		"opencode-ai": "1.18.29",
+		"opencode-ai": "1.18.30",
 		"tsx": "^4.23.13",
 		"typescript": "5.9.3"
 	}
