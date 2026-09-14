@@ -98,6 +98,7 @@ export interface CommonspaceSidebarProps {
 	store: CommonspaceStore;
 	colorMode?: CommonspaceColorMode;
 	onSetColorMode?: (mode: CommonspaceColorMode) => void;
+	onSettingsOpenChange?: (open: boolean) => void;
 	inboxActive?: boolean;
 	threadsActive?: boolean;
 	conversationActive?: boolean;
@@ -409,6 +410,7 @@ export function CommonspaceSidebar({
 	store,
 	colorMode = "light",
 	onSetColorMode,
+	onSettingsOpenChange,
 	inboxActive = false,
 	threadsActive = false,
 	conversationActive = false,
@@ -470,6 +472,10 @@ export function CommonspaceSidebar({
 		null,
 	);
 	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [settingsError, setSettingsError] = useState<string | null>(null);
+	const settingsPanelRef = useRef<HTMLFormElement>(null);
+	const settingsTriggerRef = useRef<HTMLButtonElement>(null);
+	const settingsCloseRef = useRef<HTMLButtonElement>(null);
 	const [defaultModel, setDefaultModel] = useState("");
 	const [defaultReasoning, setDefaultReasoning] =
 		useState<CommonspaceReasoning>("max");
@@ -509,6 +515,9 @@ export function CommonspaceSidebar({
 		});
 	const [savingNotifications, setSavingNotifications] = useState(false);
 	const [notificationsSaved, setNotificationsSaved] = useState(false);
+	const [notificationSaveError, setNotificationSaveError] = useState<
+		string | null
+	>(null);
 	const [verifyingNotifications, setVerifyingNotifications] = useState(false);
 	const [notificationVerification, setNotificationVerification] =
 		useState<CommonspaceNotificationVerification | null>(null);
@@ -516,6 +525,19 @@ export function CommonspaceSidebar({
 	useEffect(() => {
 		void store.refresh();
 	}, [store]);
+	useEffect(() => {
+		onSettingsOpenChange?.(settingsOpen);
+		if (!settingsOpen) return;
+		const panel = settingsPanelRef.current;
+		settingsCloseRef.current?.focus();
+		return () => {
+			if (
+				document.activeElement === document.body ||
+				panel?.contains(document.activeElement)
+			)
+				settingsTriggerRef.current?.focus();
+		};
+	}, [settingsOpen, onSettingsOpenChange]);
 	useEffect(() => {
 		void inboxActive;
 		void conversationActive;
@@ -1018,6 +1040,7 @@ export function CommonspaceSidebar({
 			},
 		};
 		setSavingInference(true);
+		setSettingsError(null);
 		try {
 			if (typeof store.updateWorkspaceSettings === "function") {
 				await store.updateWorkspaceSettings(request);
@@ -1026,6 +1049,8 @@ export function CommonspaceSidebar({
 				await store.mutate({ action: "set-defaults", ...request.defaults });
 			}
 			setSettingsOpen(false);
+		} catch (error) {
+			setSettingsError(error instanceof Error ? error.message : String(error));
 		} finally {
 			setSavingInference(false);
 		}
@@ -1034,12 +1059,19 @@ export function CommonspaceSidebar({
 	const saveNotifications = async () => {
 		if (savingNotifications) return;
 		setSavingNotifications(true);
+		setNotificationsSaved(false);
+		setNotificationSaveError(null);
+		setNotificationVerification(null);
 		try {
 			await store.mutate({
 				action: "set-notifications",
 				notifications: notificationSettings,
 			});
 			setNotificationsSaved(true);
+		} catch (error) {
+			setNotificationSaveError(
+				error instanceof Error ? error.message : String(error),
+			);
 		} finally {
 			setSavingNotifications(false);
 		}
@@ -1201,6 +1233,9 @@ export function CommonspaceSidebar({
 				result.target.messageId,
 				result.target.threadId,
 			);
+		} else if (result.target.kind === "project") {
+			store.selectProject(result.target.projectId);
+			onOpenProject?.(result.target.projectId);
 		} else if (result.target.kind === "project-file") {
 			store.selectProject(result.target.projectId);
 			onOpenProject?.(result.target.projectId, {
@@ -1266,7 +1301,14 @@ export function CommonspaceSidebar({
 				state !== undefined &&
 				createPortal(
 					<form
+						ref={settingsPanelRef}
 						aria-label="Workspace settings"
+						onKeyDown={(event) => {
+							if (event.key === "Escape" && !event.defaultPrevented) {
+								event.stopPropagation();
+								setSettingsOpen(false);
+							}
+						}}
 						className="fixed top-[52px] right-0 bottom-0 left-[260px] z-40 flex min-h-0 flex-col overflow-hidden bg-background text-foreground max-[780px]:left-0"
 						onSubmit={(event) => {
 							void saveDefaults(event);
@@ -1278,6 +1320,7 @@ export function CommonspaceSidebar({
 							landmark={false}
 							actions={
 								<button
+									ref={settingsCloseRef}
 									type="button"
 									className="grid size-10 place-items-center rounded-sm border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 									aria-label="Close settings"
@@ -1748,6 +1791,14 @@ export function CommonspaceSidebar({
 										</label>
 									</div>
 								</fieldset>
+								{settingsError !== null && (
+									<p
+										role="alert"
+										className="mt-4 rounded-md border border-destructive/30 bg-muted p-3 text-sm text-destructive"
+									>
+										{settingsError}
+									</p>
+								)}
 								<div className="mt-4 flex items-center justify-between gap-6 rounded-md border bg-muted/30 p-4 max-[640px]:grid">
 									<p className="text-xs leading-5 text-muted-foreground">
 										Saves the routing source, connection, and run defaults
@@ -1833,14 +1884,16 @@ export function CommonspaceSidebar({
 										<p
 											className={cn(
 												"text-xs",
-												notificationVerification?.status === "failed"
+												notificationSaveError !== null ||
+													notificationVerification?.status === "failed"
 													? "text-destructive"
 													: "text-[var(--status-success)]",
 											)}
-											role="status"
+											role={notificationSaveError === null ? "status" : "alert"}
 											aria-live="polite"
 										>
-											{notificationVerification?.message ??
+											{notificationSaveError ??
+												notificationVerification?.message ??
 												(notificationsSaved
 													? "Notification settings saved."
 													: "")}
@@ -3395,6 +3448,7 @@ export function CommonspaceSidebar({
 					type="button"
 					className="grid size-11 place-items-center rounded-full border-0 bg-transparent text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground aria-[current=page]:bg-[color-mix(in_srgb,var(--sidebar-foreground)_20%,transparent)]"
 					aria-label="Commonspace settings"
+					ref={settingsTriggerRef}
 					aria-current={settingsOpen ? "page" : undefined}
 					onClick={() => {
 						const defaults = state?.defaults;
@@ -3412,7 +3466,9 @@ export function CommonspaceSidebar({
 						setRoutingApiKey("");
 						setClearRoutingApiKey(false);
 						setInferenceCheckStatus(null);
+						setSettingsError(null);
 						setNotificationsSaved(false);
+						setNotificationSaveError(null);
 						setNotificationSettings({
 							...(state?.notifications ??
 								DEFAULT_COMMONSPACE_NOTIFICATION_SETTINGS),

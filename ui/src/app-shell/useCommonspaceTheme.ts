@@ -31,6 +31,7 @@ export function useCommonspaceTheme() {
 			root.classList.toggle("dark", dark);
 			root.classList.toggle("light", !dark);
 			root.classList.toggle("system", colorMode === "system");
+			root.style.colorScheme = dark ? "dark" : "light";
 		};
 		applyMode();
 		if (colorMode === "system" && media !== null)

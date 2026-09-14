@@ -152,6 +152,52 @@ function bootstrap(): CommonspaceBootstrap {
 }
 
 describe("unified search", () => {
+	it("finds Projects directly without exposing their local roots", async () => {
+		const input = bootstrap();
+		const project = input.state.projects[0];
+		if (project === undefined) throw new Error("Missing Project");
+		project.paths = ["/private/synthetic-root"];
+		const result = await searchCommonspace(input, {
+			query: "storefront",
+			kinds: ["project"],
+			projectId: project.id,
+		});
+		expect(result.results).toMatchObject([
+			{
+				kind: "project",
+				title: "Storefront",
+				projectIds: [project.id],
+				target: { kind: "project", projectId: project.id },
+			},
+		]);
+		expect(JSON.stringify(result)).not.toContain("/private/synthetic-root");
+		const filtered = await searchCommonspace(input, {
+			query: "storefront",
+			kinds: ["project"],
+			projectId: "other",
+		});
+		expect(filtered.results).toEqual([]);
+	});
+
+	it("opens the exact matching reply for messages, runs, and traces", async () => {
+		const result = await searchCommonspace(bootstrap(), {
+			query: "recovery",
+			limit: 50,
+		});
+		for (const id of [
+			"message:message-2",
+			"run:message-2",
+			"trace:message-2:tool-1",
+		]) {
+			expect(
+				result.results.find((item) => item.id === id)?.target,
+			).toMatchObject({
+				kind: "conversation",
+				threadId: "thread-1",
+				messageId: "message-2",
+			});
+		}
+	});
 	it("finds durable message attachments by filename", async () => {
 		const result = await searchCommonspace(bootstrap(), {
 			query: "verification-notes",
@@ -200,7 +246,7 @@ describe("unified search", () => {
 				kind: "conversation",
 				conversation: { kind: "channel", id: "general" },
 				threadId: "thread-1",
-				messageId: "message-1",
+				messageId: "message-2",
 			},
 		});
 		expect(result.results.find((item) => item.kind === "dm")).toMatchObject({

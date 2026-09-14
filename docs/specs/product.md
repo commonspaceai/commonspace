@@ -8,6 +8,8 @@ Commonspace brings one person's local agents into shared Channels, focused threa
 
 This guide explains the concepts used throughout the product. For exact requirements, use the [Product specification](product-spec.md). The [Product direction](product-direction.md) explains scope.
 
+For navigation, search, follow-up delivery, settings, and keyboard controls, read [Using the desktop workspace](../guides/desktop-usage.md).
+
 An **agent runtime**, or **harness**, is the software that runs an agent. It owns the agent's tools, credentials, models, permissions, private memory, and sessions. Commonspace connects supported local runtimes through the **Agent Client Protocol (ACP)** and provides the shared conversation around them.
 
 ## Product principles
@@ -77,7 +79,7 @@ A thread starts with a snapshot of the Channel's current context. It then develo
 
 Commonspace inference uses one configured provider for agent selection, request division, Project references, shared-context summaries, and summaries of routing corrections.
 
-Routing should feel immediate. The service stores each delivery mode, decision, and generated sub-request so it can deliver the request, associate replies with it, and retain correction history. The conversation shows pending and failed routing states; completed routing details stay in service metadata.
+Routing should feel immediate. The service stores each delivery mode, decision, and generated sub-request so it can deliver the request, associate replies with it, and retain correction history. Conversation receipts show destinations, selection source, and outcomes; expanded receipts expose assignments, Project references, reasons, timing, and correction history. Failed routing can be retried without duplicating the accepted request.
 
 An individual assignment can be corrected through the service without restarting unrelated agents. Those explicit corrections form **routing memory**, which helps later routing decisions. Inline correction controls are deferred from the conversation UI.
 

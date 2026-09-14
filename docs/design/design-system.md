@@ -63,6 +63,8 @@ The desktop shell uses the dimensions in [DESIGN.md](../../DESIGN.md#layout). Sc
 
 Every component must support its intended keyboard interaction. Icon-only controls need accessible names, selected items need semantic state, and focus must remain visible. Pickers and suggestions use the appropriate listbox and option semantics. Errors and command outcomes use alert or status roles where appropriate.
 
+Workspace settings leave the sidebar available while the shell marks the covered workspace inert. Focus enters the pane and returns when it closes. Queue changes move focus only when the action's control disappears or becomes disabled; a delayed response must not interrupt focus elsewhere. Search retry preserves inputs, returns focus to the query, and announces progress and result counts. Native browser controls use the resolved theme's `color-scheme`.
+
 Respect `prefers-reduced-motion`. Use text, icons, and semantic state alongside color so that color is never the only way to understand an outcome. Check accessibility in Storybook and the integrated desktop flow.
 
 ## Changing the system

@@ -120,7 +120,7 @@ function messageTarget(
 	const target: Extract<Candidate["target"], { kind: "conversation" }> = {
 		kind: "conversation" as const,
 		conversation: message.conversation,
-		messageId: message.parentMessageId ?? message.id,
+		messageId: message.id,
 	};
 	if (message.threadId !== undefined) target.threadId = message.threadId;
 	return target;
@@ -215,8 +215,7 @@ function liveActivityCandidates(bootstrap: CommonspaceBootstrap): Candidate[] {
 		const target: Extract<Candidate["target"], { kind: "conversation" }> = {
 			kind: "conversation" as const,
 			conversation: activity.conversation,
-			messageId:
-				source?.parentMessageId ?? source?.id ?? activity.sourceMessageId,
+			messageId: source?.id ?? activity.sourceMessageId,
 		};
 		if (activity.threadId !== undefined) target.threadId = activity.threadId;
 		const location = conversationLabel(activity.conversation, bootstrap);
@@ -318,6 +317,18 @@ function agentCandidates(bootstrap: CommonspaceBootstrap): Candidate[] {
 	}));
 }
 
+function projectCandidates(bootstrap: CommonspaceBootstrap): Candidate[] {
+	return bootstrap.state.projects.map((project) => ({
+		id: `project:${project.id}`,
+		kind: "project",
+		title: project.name,
+		detail: `${project.paths.length} ${project.paths.length === 1 ? "folder" : "folders"}`,
+		receipt: "Project",
+		...candidateProjectFields([project.id]),
+		target: { kind: "project", projectId: project.id },
+	}));
+}
+
 function searchKindPriority(kind: CommonspaceSearchKind): number {
 	switch (kind) {
 		case "message":
@@ -325,6 +336,7 @@ function searchKindPriority(kind: CommonspaceSearchKind): number {
 			return 4;
 		case "channel":
 		case "agent":
+		case "project":
 			return 3;
 		case "run":
 			return 2;
@@ -433,15 +445,14 @@ export async function searchCommonspace(
 		Math.min(MAX_LIMIT, Math.trunc(request.limit ?? DEFAULT_LIMIT)),
 	);
 	const all = [
+		...projectCandidates(bootstrap),
 		...memoryCandidates(bootstrap),
 		...agentCandidates(bootstrap),
 		...messageCandidates(bootstrap),
 		...liveActivityCandidates(bootstrap),
-		...(await fileCandidates(
-			bootstrap.state,
-			includedTerms,
-			request.projectId,
-		)),
+		...(!hasKindFilter || allowedKinds.has("file")
+			? await fileCandidates(bootstrap.state, includedTerms, request.projectId)
+			: []),
 	];
 	const matching = all
 		.filter((candidate) => {
@@ -455,7 +466,11 @@ export async function searchCommonspace(
 			)
 				return false;
 			if (includedTerms.length === 0)
-				return candidate.kind === "channel" || candidate.kind === "agent";
+				return (
+					candidate.kind === "channel" ||
+					candidate.kind === "agent" ||
+					candidate.kind === "project"
+				);
 			const searchable = normalized(
 				`${candidate.title} ${candidate.detail} ${candidate.searchText ?? ""}`,
 			);

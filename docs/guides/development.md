@@ -51,6 +51,16 @@ Choose checks by the evidence you need:
 
 The live verifier uses temporary workspace data and test runtimes. It proves production wiring without proving that an authenticated external agent works. Provider-backed harness checks are a separate opt-in step described below.
 
+For the desktop flows documented in [Using the desktop workspace](desktop-usage.md), use these focused checks during iteration:
+
+```bash
+pnpm exec vitest run tests/desktop-usability.spec.tsx
+pnpm test:storybook -- CommonspaceSearch RunDelivery CommonspaceApp
+pnpm test:e2e
+```
+
+The unit regressions protect native-control appearance and queue focus recovery. Storybook covers search error retry with preserved filters, keyboard queue mutations, unavailable delivery controls, and isolated screen states. Assembled browser tests cover routing/deep links, settings focus and save recovery, and Light/Dark/System changes across reloads. Run the complete `pnpm check` and `pnpm verify:live` after focused checks pass; inspect their rendered evidence before claiming visual acceptance.
+
 ## Fast UI loop
 
 Run Storybook while editing components:

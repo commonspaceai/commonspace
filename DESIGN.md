@@ -26,6 +26,8 @@ With no saved destination, Commonspace opens to Inbox. Workspace branding is an 
 
 Each surface should answer three questions: where am I, what is selected, and what can I do next? Keep titles and selection visible. Preserve the user's conversation position when opening a Thread, attachment, context panel, or Project file.
 
+Workspace settings move focus into their pane and remove the covered workspace from keyboard and accessibility navigation while keeping the sidebar available. Closing settings restores focus; Escape closes the nearest active overlay first. [Using the desktop workspace](docs/guides/desktop-usage.md) documents the user flow.
+
 Runtime outcomes belong to Inbox and the conversation or Thread that produced them. Avoid a second surface that repeats the same outcomes without helping the user act.
 
 ## Collections and context
@@ -69,15 +71,19 @@ A selected or deep-linked message keeps a quiet highlight card using a neutral s
 
 Agent activity begins collapsed beneath its reply. When expanded, it presents the reasoning summaries, plans, tool calls, and usage that the harness actually emitted. The composer keeps the current context visible and makes slash commands and references discoverable.
 
-Show pending routing and routing failures where they affect the conversation. Resolved assignment cards, routing reasons, timing, and inline reroute controls are not part of the current conversation layout.
+Show a compact routing receipt with destination, selection source, and delivery outcome. Keep assignment wording, Project references, reasons, timing, and correction history inside the expanded receipt. Failed routing exposes retry and manual agent selection. Inline editing of resolved assignments remains deferred.
 
 Queued follow-ups sit in a compact tray aligned with the composer. Keep previews and delivery status distinct, allow long previews to expand, and keep the composer usable. Reorder and removal controls need accessible names and consistent placement.
+
+After a queue action removes or disables the focused control, move focus to a remaining preview, or to the composer when the queue becomes empty. Do not steal focus after a delayed update if the user has moved elsewhere. Omit unsupported runtime controls.
 
 Before workspace data arrives, show loading. Initial connection failure shows an actionable retry. Refreshing loaded data preserves visible content while reporting errors.
 
 ## Search
 
 Search keeps its query, filters, result count, and keyboard hints fixed. Only results scroll. Type and Project filters show checked choices and removable selections; clearing filters preserves the query. Pending requests hide stale results, and late responses cannot replace the active search.
+
+A search error offers retry without clearing the query or filters. Search progress and result counts are announced, and retry returns focus to the query.
 
 ## Controls and states
 

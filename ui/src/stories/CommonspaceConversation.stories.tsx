@@ -472,12 +472,9 @@ export const NarrowActiveRunComposer: Story = {
 			"queue",
 		);
 
-		const steer = canvas.getByRole("button", { name: "Steer" });
-		await expect(steer).toBeDisabled();
-		await expect(steer).toHaveAttribute(
-			"title",
-			"Live steering requires agent-scoped backend support",
-		);
+		await expect(
+			canvas.queryByRole("button", { name: "Steer" }),
+		).not.toBeInTheDocument();
 		await userEvent.type(composer, "Queue from the keyboard.");
 		fireEvent.keyDown(composer, { key: "Enter", metaKey: true });
 		fireEvent.keyUp(composer, { key: "Enter", metaKey: true });

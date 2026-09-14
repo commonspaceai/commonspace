@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { useState } from "react";
 import { expect, fn, userEvent, within } from "storybook/test";
 import {
 	PendingAdmissions,
@@ -91,12 +92,14 @@ export const ThreadInterruptionSafety: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByRole("button", { name: "Queue" })).toBeEnabled();
-		await expect(canvas.getByRole("button", { name: "Steer" })).toBeDisabled();
 		await expect(
-			canvas.getByRole("button", {
+			canvas.queryByRole("button", { name: "Steer" }),
+		).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByRole("button", {
 				name: "Interrupt and send thread follow-up",
 			}),
-		).toBeDisabled();
+		).not.toBeInTheDocument();
 	},
 };
 export const QueueActions: Story = {
@@ -120,6 +123,41 @@ export const QueueActions: Story = {
 			first.getByRole("button", { name: "Remove queued follow-up" }),
 		);
 		await expect(args.onRemove).toHaveBeenCalledWith("followup-responsive");
+	},
+};
+
+export const KeyboardQueueUpdates: Story = {
+	render: (args) => {
+		const [items, setItems] = useState(args.followups);
+		return (
+			<QueuedFollowups
+				{...args}
+				followups={items}
+				onMove={() => setItems((current) => [...current].reverse())}
+				onRemove={(id) =>
+					setItems((current) => current.filter((item) => item.messageId !== id))
+				}
+			/>
+		);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const firstRow = canvas.getAllByRole("listitem")[0];
+		if (firstRow === undefined) throw new Error("Missing first follow-up");
+		const first = within(firstRow);
+		first.getByRole("button", { name: "Move queued follow-up down" }).focus();
+		await userEvent.keyboard("{Enter}");
+		await expect(
+			canvas.getByRole("button", { name: "Expand queued follow-up 2" }),
+		).toHaveFocus();
+		const lastRow = canvas.getAllByRole("listitem")[1];
+		if (lastRow === undefined) throw new Error("Missing last follow-up");
+		const last = within(lastRow);
+		last.getByRole("button", { name: "Remove queued follow-up" }).focus();
+		await userEvent.keyboard("{Enter}");
+		await expect(
+			canvas.getByRole("button", { name: "Expand queued follow-up 1" }),
+		).toHaveFocus();
 	},
 };
 

@@ -1,6 +1,6 @@
 import { RouterProvider } from "@tanstack/react-router";
 import { CircleAlertIcon, MenuIcon, RefreshCwIcon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CommonspaceWorkspace } from "./app-shell/CommonspaceWorkspace.tsx";
@@ -101,6 +101,7 @@ function CommonspaceAppShell({
 		store.getSnapshot,
 	);
 	const { colorMode, setColorMode } = useCommonspaceTheme();
+	const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = useState(false);
 	const navigation = useCommonspaceNavigation(store, snapshot);
 	const {
 		activeDestination,
@@ -171,6 +172,7 @@ function CommonspaceAppShell({
 						store={store}
 						colorMode={colorMode}
 						onSetColorMode={setColorMode}
+						onSettingsOpenChange={setWorkspaceSettingsOpen}
 						inboxActive={activeDestination === "inbox"}
 						threadsActive={activeDestination === "threads"}
 						conversationActive={activeDestination === "conversation"}
@@ -196,7 +198,11 @@ function CommonspaceAppShell({
 						}}
 					/>
 				</aside>
-				<section className="min-h-0 min-w-0 overflow-hidden bg-background">
+				<section
+					inert={workspaceSettingsOpen}
+					aria-hidden={workspaceSettingsOpen || undefined}
+					className="min-h-0 min-w-0 overflow-hidden bg-background"
+				>
 					<CommonspaceWorkspace
 						navigation={navigation}
 						snapshot={snapshot}

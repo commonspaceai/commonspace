@@ -51,7 +51,7 @@ pnpm build-storybook
 pnpm test:visual
 ```
 
-Run these as separate steps according to the check you need. The Storybook development server opens at `http://localhost:6006`. The visual test command can start that server or reuse an existing one.
+Run these as separate steps according to the check you need. The Storybook development server opens at `http://127.0.0.1:6006`. The visual test command builds Storybook and serves that exact static output on an isolated loopback server.
 
 Stories under `ui/src/stories` use production tokens with local fixture stores and fetchers. They do not require the Commonspace API. Storybook `play` functions test interactions and accessibility in Chromium. The separate `tests/storybook-visual.spec.ts` suite compares selected canvases with approved PNG baselines under `tests/storybook-visual.spec.ts-snapshots`.
 
@@ -60,6 +60,8 @@ The development server also exposes the Components Manifest and an MCP endpoint 
 Do not use `--update-snapshots` as an ordinary verification step. Inspect the affected state, decide whether the change is correct, and update only an accepted baseline.
 
 Dedicated stories cover primitives, workspace startup, routing, sorting, follow-up delivery, search, permissions, and runtime activity. Use Storybook for isolated states; use the live verifier for assembled UI/API behavior.
+
+For desktop recovery changes, include `CommonspaceSearch/RetryPreservesSearch`, `RunDelivery/KeyboardQueueUpdates`, and the assembled settings/theme checks in `tests/e2e/workspace.spec.ts`. Verify that settings exclude covered controls from keyboard navigation, Escape closes the nearest overlay, queue mutation recovers focus, and System reacts to a live color-scheme change after reload. These automated checks complement inspection of Light and Dark screenshots; they do not establish screen-reader or additional-browser acceptance without that review.
 
 ## Visual review protocol
 

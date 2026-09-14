@@ -113,6 +113,49 @@ type Story = StoryObj<typeof meta>;
 
 export const Browse: Story = {};
 
+export const ProjectDestination: Story = {
+	args: {
+		fetcher: async () =>
+			new Response(
+				JSON.stringify({
+					query: "",
+					results: [
+						{
+							id: "project:platform",
+							kind: "project",
+							title: project.name,
+							detail: "1 folder",
+							receipt: "Project",
+							projectIds: [project.id],
+							highlights: [],
+							target: { kind: "project", projectId: project.id },
+						},
+					],
+					appliedFilters: { kinds: [], projectId: null },
+					truncated: false,
+				} satisfies CommonspaceSearchResponse),
+				{ headers: { "content-type": "application/json" } },
+			),
+	},
+	play: async ({ canvasElement, args }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		const option = await body.findByRole("option", {
+			name: "Open Project: Platform",
+		});
+		await waitFor(() => expect(option).toBeVisible());
+		await expect(
+			within(option).getAllByText("Project", { exact: true }),
+		).toHaveLength(1);
+		await userEvent.click(body.getByRole("searchbox"));
+		await userEvent.keyboard("{Enter}");
+		await expect(args.onSelect).toHaveBeenCalledWith(
+			expect.objectContaining({
+				target: { kind: "project", projectId: project.id },
+			}),
+		);
+	},
+};
+
 export const DenseResults: Story = {
 	args: {
 		fetcher: async (input, init) => {
@@ -200,6 +243,42 @@ export const RequestFailed: Story = {
 		await expect(await body.findByRole("alert")).toHaveTextContent(
 			"Search is temporarily unavailable.",
 		);
+	},
+};
+
+export const RetryPreservesSearch: Story = {
+	render: (args) => {
+		let failed = false;
+		const retryFetcher: typeof globalThis.fetch = async (input, init) => {
+			const url = new URL(String(input), "http://storybook.local");
+			if (url.searchParams.get("project") === "platform" && !failed) {
+				failed = true;
+				return errorSearchFetcher(input, init);
+			}
+			return fetcher(input, init);
+		};
+		return <CommonspaceSearchDialog {...args} fetcher={retryFetcher} />;
+	},
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		const input = body.getByRole("searchbox", { name: "Search Commonspace" });
+		await userEvent.type(input, "baseline");
+		await userEvent.click(
+			body.getByRole("button", { name: "Filter by project: All projects" }),
+		);
+		await userEvent.click(
+			await body.findByRole("menuitemradio", { name: "Platform" }),
+		);
+		await expect(await body.findByRole("alert")).toBeVisible();
+		await userEvent.click(body.getByRole("button", { name: "Try again" }));
+		await expect(
+			await body.findByRole("option", { name: /Open Message: Review/ }),
+		).toBeVisible();
+		await expect(input).toHaveValue("baseline");
+		await expect(input).toHaveFocus();
+		await expect(
+			body.getByRole("button", { name: "Filter by project: Platform" }),
+		).toBeVisible();
 	},
 };
 
@@ -305,5 +384,37 @@ export const FilterMenuOpen: Story = {
 			name: "Channels",
 		});
 		await waitFor(() => expect(channels).toBeVisible());
+	},
+};
+
+export const ReturningToPendingQuery: Story = {
+	render: (args) => {
+		let requested = false;
+		const pendingAfterFirst: typeof globalThis.fetch = (input, init) => {
+			if (requested) return new Promise<Response>(() => undefined);
+			requested = true;
+			return fetcher(input, init);
+		};
+		return <CommonspaceSearchDialog {...args} fetcher={pendingAfterFirst} />;
+	},
+	play: async ({ canvasElement, args }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await body.findByRole("listbox");
+		await userEvent.click(
+			body.getByRole("button", { name: "Filter result types: All types" }),
+		);
+		await userEvent.click(
+			await body.findByRole("menuitemcheckbox", { name: "Messages" }),
+		);
+		await userEvent.keyboard("{Escape}");
+		await expect(body.getByText("Searching…")).toBeVisible();
+		await userEvent.click(body.getByRole("button", { name: "Clear filters" }));
+		await expect(body.queryByRole("listbox")).not.toBeInTheDocument();
+		await expect(body.getByText("Searching…")).toBeVisible();
+		await userEvent.click(
+			body.getByRole("searchbox", { name: "Search Commonspace" }),
+		);
+		await userEvent.keyboard("{Enter}");
+		await expect(args.onSelect).not.toHaveBeenCalled();
 	},
 };

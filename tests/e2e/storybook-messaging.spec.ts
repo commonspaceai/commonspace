@@ -78,7 +78,7 @@ test("keeps optimistic admission recoverable without locking the composer", asyn
 	).toBeEnabled();
 });
 
-test("disables unsafe thread-wide steering and interruption", async ({
+test("omits unsupported thread-wide steering and interruption", async ({
 	page,
 }) => {
 	await openStory(page, {
@@ -87,10 +87,10 @@ test("disables unsafe thread-wide steering and interruption", async ({
 		name: "Thread Interruption Safety",
 	});
 	await expect(page.getByRole("button", { name: "Queue" })).toBeEnabled();
-	await expect(page.getByRole("button", { name: "Steer" })).toBeDisabled();
+	await expect(page.getByRole("button", { name: "Steer" })).toHaveCount(0);
 	await expect(
 		page.getByRole("button", {
 			name: "Interrupt and send thread follow-up",
 		}),
-	).toBeDisabled();
+	).toHaveCount(0);
 });

@@ -66,5 +66,23 @@ describe("unified search API", () => {
 			appliedFilters: { kinds: ["file"], projectId: project.id },
 			truncated: false,
 		});
+		url.searchParams.set("q", "Viewer");
+		url.searchParams.set("types", "project");
+		const projectResponse = await fetch(url, {
+			headers: { origin: running.url },
+		});
+		expect(projectResponse.status).toBe(200);
+		const projectResults: unknown = await projectResponse.json();
+		expect(projectResults).toMatchObject({
+			results: [
+				{
+					kind: "project",
+					title: "Viewer",
+					target: { kind: "project", projectId: project.id },
+				},
+			],
+			appliedFilters: { kinds: ["project"], projectId: project.id },
+		});
+		expect(JSON.stringify(projectResults)).not.toContain(workspace);
 	});
 });

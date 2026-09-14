@@ -9,7 +9,7 @@ import {
 	SquareArrowUpIcon,
 	XIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,16 +63,12 @@ function DeliveryOptionButton({
 }) {
 	const option = deliveryOptions[delivery];
 	const Icon = option.icon;
-	const unavailableReason =
-		delivery === "steer" && !steeringAvailable
-			? "Live steering requires agent-scoped backend support"
-			: thread && delivery === "stop-and-send"
-				? "Target one agent before interrupting a Thread run"
-				: undefined;
-	const label =
-		thread && delivery === "stop-and-send"
-			? "Interrupt and send thread follow-up"
-			: option.label;
+	if (
+		(delivery === "steer" && !steeringAvailable) ||
+		(thread && delivery === "stop-and-send")
+	)
+		return null;
+	const label = option.label;
 	return (
 		<Tooltip>
 			<TooltipTrigger
@@ -84,8 +80,7 @@ function DeliveryOptionButton({
 						variant={delivery === "queue" ? "outline" : "ghost"}
 						size={delivery === "queue" ? "sm" : "icon-xs"}
 						className={delivery === "queue" ? "h-8" : "size-8"}
-						disabled={disabled || unavailableReason !== undefined}
-						title={unavailableReason}
+						disabled={disabled}
 					/>
 				}
 				aria-label={label}
@@ -96,7 +91,7 @@ function DeliveryOptionButton({
 			<TooltipContent>
 				<strong>{option.label}</strong>
 				<br />
-				{unavailableReason ?? option.description}
+				{option.description}
 			</TooltipContent>
 		</Tooltip>
 	);
@@ -274,6 +269,7 @@ export interface QueuedFollowupsProps {
 	className?: string;
 	onMove: (messageId: string, direction: "up" | "down") => void;
 	onRemove: (messageId: string) => void;
+	onFocusComposer?: () => void;
 }
 
 export function QueuedFollowups({
@@ -282,12 +278,40 @@ export function QueuedFollowups({
 	className,
 	onMove,
 	onRemove,
+	onFocusComposer,
 }: QueuedFollowupsProps) {
 	const [expandedId, setExpandedId] = useState<string | null>(null);
+	const trayRef = useRef<HTMLElement>(null);
+	const previewRefs = useRef(new Map<string, HTMLButtonElement>());
+	const pendingFocus = useRef<{
+		control: HTMLButtonElement;
+		messageId: string | undefined;
+	} | null>(null);
+	useLayoutEffect(() => {
+		const pending = pendingFocus.current;
+		if (pending === null) return;
+		if (pending.control.isConnected && !pending.control.disabled) return;
+		pendingFocus.current = null;
+		// A delayed queue response must not pull focus back from another control.
+		if (
+			document.activeElement !== document.body &&
+			document.activeElement !== pending.control
+		)
+			return;
+		const target =
+			pending.messageId === undefined
+				? null
+				: previewRefs.current.get(pending.messageId);
+		if (target !== null && target !== undefined) target.focus();
+		else if (followups.length === 0) onFocusComposer?.();
+		else trayRef.current?.focus();
+	}, [followups, onFocusComposer]);
 	if (followups.length === 0) return null;
 	const itemLabel = thread ? "queued thread follow-up" : "queued follow-up";
 	return (
 		<section
+			ref={trayRef}
+			tabIndex={-1}
 			aria-label={thread ? "Queued thread follow-ups" : "Queued follow-ups"}
 			className={cn(
 				"min-w-0 overflow-hidden rounded-md border bg-background",
@@ -314,6 +338,11 @@ export function QueuedFollowups({
 						>
 							<div className="min-w-0 flex-1">
 								<button
+									ref={(element) => {
+										if (element === null)
+											previewRefs.current.delete(followup.messageId);
+										else previewRefs.current.set(followup.messageId, element);
+									}}
 									type="button"
 									aria-expanded={expanded}
 									aria-label={`${expanded ? "Collapse" : "Expand"} ${itemLabel} ${index + 1}`}
@@ -345,7 +374,13 @@ export function QueuedFollowups({
 												size="icon-xs"
 												className="size-7"
 												disabled={index === 0}
-												onClick={() => onMove(followup.messageId, "up")}
+												onClick={(event) => {
+													pendingFocus.current = {
+														control: event.currentTarget,
+														messageId: followup.messageId,
+													};
+													onMove(followup.messageId, "up");
+												}}
 											/>
 										}
 										aria-label={`Move ${itemLabel} up`}
@@ -362,7 +397,13 @@ export function QueuedFollowups({
 												size="icon-xs"
 												className="size-7"
 												disabled={index === followups.length - 1}
-												onClick={() => onMove(followup.messageId, "down")}
+												onClick={(event) => {
+													pendingFocus.current = {
+														control: event.currentTarget,
+														messageId: followup.messageId,
+													};
+													onMove(followup.messageId, "down");
+												}}
 											/>
 										}
 										aria-label={`Move ${itemLabel} down`}
@@ -378,7 +419,15 @@ export function QueuedFollowups({
 												variant="ghost"
 												size="icon-xs"
 												className="size-7"
-												onClick={() => onRemove(followup.messageId)}
+												onClick={(event) => {
+													pendingFocus.current = {
+														control: event.currentTarget,
+														messageId: (
+															followups[index + 1] ?? followups[index - 1]
+														)?.messageId,
+													};
+													onRemove(followup.messageId);
+												}}
 											/>
 										}
 										aria-label={`Remove ${itemLabel}`}

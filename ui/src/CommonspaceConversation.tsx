@@ -2747,6 +2747,7 @@ export function CommonspaceConversation({
 						/>
 						<QueuedFollowups
 							followups={directMessageFollowups}
+							onFocusComposer={() => composer.current?.focus()}
 							className="mx-auto mb-2 w-[min(920px,calc(100%-48px))]"
 							onMove={(messageId, direction) => {
 								void store
@@ -3313,6 +3314,7 @@ export function CommonspaceConversation({
 							/>
 							<QueuedFollowups
 								followups={activeThreadFollowups}
+								onFocusComposer={() => threadComposer.current?.focus()}
 								thread
 								className="mx-3 mb-2"
 								onMove={(messageId, direction) => {

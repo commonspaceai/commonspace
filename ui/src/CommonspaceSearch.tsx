@@ -57,6 +57,7 @@ export interface CommonspaceSearchDialogProps {
 }
 
 const searchTypes = {
+	project: { label: "Projects", icon: FolderIcon },
 	channel: { label: "Channels", icon: HashIcon },
 	message: { label: "Messages", icon: MessageSquareTextIcon },
 	dm: { label: "Direct messages", icon: MessagesSquareIcon },
@@ -330,7 +331,9 @@ function resultGlyph(kind: CommonspaceSearchKind): string {
 function resultReceiptLabel(result: CommonspaceSearchResult): string {
 	const receiptLocation = result.receipt.split(" · ")[0]?.trim();
 	const location =
-		receiptLocation !== undefined && receiptLocation !== result.detail.trim()
+		receiptLocation !== undefined &&
+		receiptLocation !== result.detail.trim() &&
+		receiptLocation !== kindLabel(result.kind)
 			? receiptLocation
 			: undefined;
 	const occurredAt = result.occurredAt;
@@ -355,6 +358,13 @@ export function CommonspaceSearchDialog({
 	fetcher = globalThis.fetch,
 }: CommonspaceSearchDialogProps) {
 	const resultsId = useId();
+	const [returnFocus] = useState(() =>
+		document.activeElement instanceof HTMLElement
+			? document.activeElement
+			: null,
+	);
+	const selectingResult = useRef(false);
+	const inputRef = useRef<HTMLInputElement>(null);
 	const resultsViewport = useRef<HTMLDivElement>(null);
 	const [query, setQuery] = useState("");
 	const [selectedKinds, setSelectedKinds] = useState<CommonspaceSearchKind[]>(
@@ -363,6 +373,7 @@ export function CommonspaceSearchDialog({
 	const [projectId, setProjectId] = useState("");
 	const [activeIndex, setActiveIndex] = useState(0);
 	const [outcome, setOutcome] = useState<SearchOutcome | null>(null);
+	const [retry, setRetry] = useState(0);
 	const deferredQuery = useDeferredValue(query);
 	const requestUrl = searchUrl(deferredQuery, selectedKinds, projectId);
 	const currentUrl = searchUrl(query, selectedKinds, projectId);
@@ -376,8 +387,15 @@ export function CommonspaceSearchDialog({
 	const boundedActiveIndex =
 		results.length === 0 ? 0 : Math.min(activeIndex, results.length - 1);
 	const activeResult = results[boundedActiveIndex];
+	const selectResult = (result: CommonspaceSearchResult) => {
+		selectingResult.current = true;
+		onSelect(result);
+	};
 
 	useEffect(() => {
+		void retry;
+		setOutcome(null);
+		if (resultsViewport.current !== null) resultsViewport.current.scrollTop = 0;
 		const controller = new AbortController();
 		void fetcher(requestUrl, {
 			headers: { accept: "application/json" },
@@ -403,7 +421,7 @@ export function CommonspaceSearchDialog({
 		return () => {
 			controller.abort();
 		};
-	}, [fetcher, requestUrl]);
+	}, [fetcher, requestUrl, retry]);
 
 	const moveSelection = (offset: number) => {
 		if (results.length === 0) return;
@@ -435,6 +453,7 @@ export function CommonspaceSearchDialog({
 		>
 			<DialogContent
 				showCloseButton
+				finalFocus={() => (selectingResult.current ? false : returnFocus)}
 				aria-describedby={undefined}
 				className="top-[10dvh] h-[min(600px,80dvh)] max-h-[80dvh] grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] -translate-y-0 overflow-hidden sm:max-w-[720px]"
 			>
@@ -444,6 +463,7 @@ export function CommonspaceSearchDialog({
 				<div className="grid min-h-[68px] grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2.5 border-b px-3.5 py-2">
 					<SearchIcon aria-hidden="true" />
 					<input
+						ref={inputRef}
 						autoFocus
 						type="search"
 						aria-label="Search Commonspace"
@@ -453,7 +473,7 @@ export function CommonspaceSearchDialog({
 								? undefined
 								: `${resultsId}-${String(boundedActiveIndex)}`
 						}
-						placeholder="Search messages, channels, agents, files, or runs…"
+						placeholder="Search messages, projects, channels, agents, files, or runs…"
 						value={query}
 						className="h-11 min-w-0 border-0 bg-transparent text-[17px] tracking-[-0.01em] outline-none placeholder:text-muted-foreground"
 						onChange={(event) => {
@@ -469,7 +489,7 @@ export function CommonspaceSearchDialog({
 								moveSelection(-1);
 							} else if (event.key === "Enter" && activeResult !== undefined) {
 								event.preventDefault();
-								onSelect(activeResult);
+								selectResult(activeResult);
 							}
 						}}
 					/>
@@ -493,12 +513,13 @@ export function CommonspaceSearchDialog({
 				/>
 				<div className="flex items-center justify-between px-4 pt-1 pb-1.5 text-xs font-semibold tracking-[0.05em] text-muted-foreground uppercase">
 					<span>{query.trim() === "" ? "Browse" : "Results"}</span>
-					<span>
+					<span role="status" aria-live="polite" aria-atomic="true">
 						{pending
 							? "Searching…"
 							: response?.truncated === true
 								? `${String(results.length)}+`
 								: results.length}
+						{!pending && <span className="sr-only"> results</span>}
 					</span>
 				</div>
 				<div
@@ -521,6 +542,17 @@ export function CommonspaceSearchDialog({
 								<EmptyTitle>Search unavailable</EmptyTitle>
 								<EmptyDescription>{error}</EmptyDescription>
 							</EmptyHeader>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => {
+									setOutcome(null);
+									setRetry((attempt) => attempt + 1);
+									inputRef.current?.focus();
+								}}
+							>
+								Try again
+							</Button>
 						</Empty>
 					)}
 					{error === null && !pending && results.length === 0 && (
@@ -564,14 +596,18 @@ export function CommonspaceSearchDialog({
 										setActiveIndex(index);
 									}}
 									onClick={() => {
-										onSelect(result);
+										selectResult(result);
 									}}
 								>
 									<span
 										className="grid size-8 place-items-center rounded-sm border bg-background font-semibold text-muted-foreground"
 										aria-hidden="true"
 									>
-										{resultGlyph(result.kind)}
+										{result.kind === "project" ? (
+											<FolderIcon className="size-4" aria-hidden="true" />
+										) : (
+											resultGlyph(result.kind)
+										)}
 									</span>
 									<span className="min-w-0">
 										<strong className="block truncate text-[13px]">

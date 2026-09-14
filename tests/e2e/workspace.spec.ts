@@ -21,11 +21,220 @@ const bootstrapSchema = z.object({
 	}),
 });
 
+test("keeps Workspace settings keyboard focus above the covered conversation", async ({
+	page,
+}) => {
+	await openVerificationChannel(page);
+	const trigger = page.getByRole("button", { name: "Commonspace settings" });
+	await trigger.focus();
+	await page.keyboard.press("Enter");
+	const settings = page.getByRole("form", { name: "Workspace settings" });
+	await expect(
+		settings.getByRole("button", { name: "Close settings" }).first(),
+	).toBeFocused();
+	await expect(
+		page.getByRole("textbox", { name: "Post in verification" }),
+	).toHaveCount(0);
+	await page.keyboard.press("Tab");
+	await expect(settings.getByRole("radio", { name: /^Light/ })).toBeFocused();
+	await page.keyboard.press("Control+k");
+	await expect(
+		page.getByRole("searchbox", { name: "Search Commonspace" }),
+	).toBeFocused();
+	await page.keyboard.press("Escape");
+	await expect(settings).toBeVisible();
+	await expect(settings.getByRole("radio", { name: /^Light/ })).toBeFocused();
+	await page.keyboard.press("Escape");
+	await expect(settings).toHaveCount(0);
+	await expect(trigger).toBeFocused();
+	await expect(
+		page.getByRole("textbox", { name: "Post in verification" }),
+	).toBeVisible();
+});
+
+test("persists appearance and follows live System changes including native controls", async ({
+	page,
+}) => {
+	await page.goto("/");
+	await page.getByRole("button", { name: "Commonspace settings" }).click();
+	await page.getByRole("radio", { name: /^Dark/ }).focus();
+	await page.keyboard.press("Space");
+	await expect(page.locator("html")).toHaveCSS("color-scheme", "dark");
+	await page.reload();
+	await expect(page.locator("html")).toHaveClass(/dark/);
+	await expect(page.locator("html")).toHaveCSS("color-scheme", "dark");
+	await page.getByRole("button", { name: "Commonspace settings" }).click();
+	await page.getByRole("radio", { name: /^System/ }).focus();
+	await page.keyboard.press("Space");
+	await page.emulateMedia({ colorScheme: "dark" });
+	await expect(page.locator("html")).toHaveCSS("color-scheme", "dark");
+	await page.emulateMedia({ colorScheme: "light" });
+	await expect(page.locator("html")).toHaveCSS("color-scheme", "light");
+	await page.reload();
+	await expect(page.locator("html")).toHaveClass(/system/);
+	await page.emulateMedia({ colorScheme: "dark" });
+	await expect(page.locator("html")).toHaveCSS("color-scheme", "dark");
+	await page.getByRole("button", { name: "Commonspace settings" }).click();
+	await page.getByRole("radio", { name: /^Light/ }).focus();
+	await page.keyboard.press("Space");
+	await expect(page.locator("html")).toHaveCSS("color-scheme", "light");
+});
+
+test("keeps failed inference settings editable and allows retry without page errors", async ({
+	page,
+}) => {
+	const pageErrors: string[] = [];
+	page.on("pageerror", (error) => pageErrors.push(error.message));
+	await page.goto("/");
+	await page.getByRole("button", { name: "Commonspace settings" }).click();
+	await page.getByRole("spinbutton", { name: "Default max agents" }).fill("3");
+	await page.route(
+		"**/api/settings",
+		(route) =>
+			route.fulfill({
+				status: 503,
+				json: { error: "Settings temporarily unavailable" },
+			}),
+		{ times: 1 },
+	);
+	await page.getByRole("button", { name: "Save inference settings" }).click();
+	const settings = page.getByRole("form", { name: "Workspace settings" });
+	await expect(settings.getByRole("alert")).toHaveText(
+		"Settings temporarily unavailable",
+	);
+	await expect(
+		settings.getByRole("spinbutton", { name: "Default max agents" }),
+	).toHaveValue("3");
+	await settings
+		.getByRole("button", { name: "Save inference settings" })
+		.click();
+	await expect(settings).toHaveCount(0);
+	await page.getByRole("button", { name: "Commonspace settings" }).click();
+	await page.route(
+		"**/api/mutate",
+		(route) =>
+			route.fulfill({
+				status: 503,
+				json: { error: "Notification settings temporarily unavailable" },
+			}),
+		{ times: 1 },
+	);
+	await settings
+		.getByRole("button", { name: "Save notification settings" })
+		.click();
+	await expect(settings.getByRole("alert")).toHaveText(
+		"Notification settings temporarily unavailable",
+	);
+	await settings
+		.getByRole("button", { name: "Save notification settings" })
+		.click();
+	await expect(
+		settings.getByText("Notification settings saved."),
+	).toBeVisible();
+	expect(pageErrors).toEqual([]);
+});
+
 async function readCapturedNotification(capturePath: string) {
 	return desktopNotificationSchema.parse(
 		JSON.parse(await readFile(capturePath, "utf8")),
 	);
 }
+
+test("finds and opens a Project by name from global search", async ({
+	page,
+}) => {
+	await page.goto("/");
+	await page
+		.getByRole("button", { name: "Search messages, channels, and agents" })
+		.click();
+	const input = page.getByRole("searchbox", { name: "Search Commonspace" });
+	await input.fill("Verification Project");
+	await page
+		.getByRole("button", { name: "Filter result types: All types" })
+		.click();
+	await page
+		.getByRole("menuitemcheckbox", { name: "Projects", exact: true })
+		.click();
+	await page.keyboard.press("Escape");
+	await expect(
+		page.getByRole("option", { name: "Open Project: Verification Project" }),
+	).toBeVisible();
+	await input.focus();
+	await page.keyboard.press("Enter");
+	await expect(
+		page.getByRole("main", { name: "Project Verification Project" }),
+	).toBeVisible();
+	await expect(page).toHaveURL(/\/projects\/[^/?#]+$/u);
+});
+
+test("returns to Inbox when the selected Channel is removed during a live refresh", async ({
+	page,
+}) => {
+	await page.goto("/");
+	await expect(page.getByRole("main", { name: "Inbox" })).toBeVisible();
+	const headers = { origin: new URL(page.url()).origin };
+	const created = await page.request.post("/api/mutate", {
+		headers,
+		data: {
+			action: "create-channel",
+			name: "navigation-removal",
+			agentIds: [],
+		},
+	});
+	await expect(created).toBeOK();
+	const bootstrap = bootstrapSchema.parse(await created.json());
+	const channel = bootstrap.state.channels.find(
+		(candidate) => candidate.name === "navigation-removal",
+	);
+	if (channel === undefined) throw new Error("Missing temporary Channel");
+	await page
+		.getByRole("button", { name: "Open channel navigation-removal" })
+		.click();
+	await expect(page).toHaveURL(new RegExp(`/channels/${channel.id}$`));
+	const removed = await page.request.post("/api/mutate", {
+		headers,
+		data: { action: "remove-channel", channelId: channel.id },
+	});
+	await expect(removed).toBeOK();
+	await expect(page.getByRole("main", { name: "Inbox" })).toBeVisible();
+	await expect(page).toHaveURL(`${new URL(page.url()).origin}/`);
+});
+
+test("opens the exact matching agent reply from search", async ({ page }) => {
+	await openVerificationChannel(page);
+	await openRootVerificationThread(page);
+	const replyText = "Review Bot completed the seeded workspace checkpoint.";
+	const replies = page
+		.getByLabel("Thread replies")
+		.locator("article")
+		.filter({ hasText: replyText });
+	await expect(replies.first()).toBeVisible();
+	const replyIds = await replies.evaluateAll((elements) =>
+		elements.map((element) => element.id),
+	);
+	await page.getByRole("button", { name: /Open Inbox/iu }).click();
+	await page.keyboard.press("Control+k");
+	await page
+		.getByRole("searchbox", { name: "Search Commonspace" })
+		.fill(replyText);
+	await page
+		.getByRole("button", { name: "Filter by project: All projects" })
+		.click();
+	await page
+		.getByRole("menuitemradio", { name: "Verification Project", exact: true })
+		.click();
+	const result = page
+		.getByRole("option", { name: "Open Message: Review Bot", exact: true })
+		.filter({ hasText: replyText });
+	await result.first().click();
+	const target = page
+		.getByLabel("Thread replies")
+		.locator('article[aria-current="true"]');
+	await expect(target).toBeVisible();
+	expect(replyIds).toContain(await target.getAttribute("id"));
+	await expect(target).toContainText(replyText);
+	await expect(page).toHaveURL(/\/threads\/[^/?#]+\?message=/u);
+});
 
 function verificationPosts(page: Page) {
 	return page.getByRole("region", { name: "verification posts" });

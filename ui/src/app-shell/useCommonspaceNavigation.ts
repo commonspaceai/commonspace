@@ -1,5 +1,6 @@
 import type {
 	CommonspaceSearchResult,
+	CommonspaceState,
 	ConversationRef,
 } from "@commonspace/shared";
 import { useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
@@ -74,6 +75,47 @@ function projectRoute(
 	return route;
 }
 
+function routeAvailable(
+	state: CommonspaceState,
+	route: CommonspaceRoute,
+): boolean {
+	if (route.kind === "project") {
+		const project = state.projects.find((item) => item.id === route.projectId);
+		return (
+			project !== undefined &&
+			(route.file === undefined ||
+				project.paths[route.file.rootIndex] !== undefined)
+		);
+	}
+	if (route.kind !== "conversation") return true;
+	const { conversation } = route;
+	const exists =
+		conversation.kind === "channel"
+			? state.channels.some((item) => item.id === conversation.id)
+			: state.agents.some((item) => item.id === conversation.id);
+	if (!exists) return false;
+	const thread =
+		route.threadId === undefined
+			? undefined
+			: state.threads.find(
+					(item) =>
+						item.id === route.threadId &&
+						conversation.kind === "channel" &&
+						item.channelId === conversation.id,
+				);
+	if (route.threadId !== undefined && thread === undefined) return false;
+	if (route.messageId === undefined) return true;
+	const message = state.messages[
+		`${conversation.kind}:${conversation.id}`
+	]?.find((item) => item.id === route.messageId);
+	return (
+		message !== undefined &&
+		(thread === undefined ||
+			message.threadId === thread.id ||
+			message.id === thread.rootMessageId)
+	);
+}
+
 export function useCommonspaceNavigation(
 	store: CommonspaceStore,
 	snapshot: CommonspaceClientSnapshot,
@@ -134,6 +176,7 @@ export function useCommonspaceNavigation(
 			const bootstrap = snapshot.bootstrap;
 			if (bootstrap === null) return false;
 			const state = bootstrap.state;
+			if (!routeAvailable(state, route)) return false;
 			setSettingsRequest(null);
 			setComposerInsertRequest(null);
 			setSearchOpen(false);
@@ -141,15 +184,6 @@ export function useCommonspaceNavigation(
 			setNavigationToken((token) => token + 1);
 			setTargetMessageId(null);
 			if (route.kind === "project") {
-				const project = state.projects.find(
-					(candidate) => candidate.id === route.projectId,
-				);
-				if (
-					project === undefined ||
-					(route.file !== undefined &&
-						project.paths[route.file.rootIndex] === undefined)
-				)
-					return false;
 				store.selectProject(route.projectId);
 				setActiveProjectViewId(route.projectId);
 				setTargetProjectFile(route.file ?? null);
@@ -160,40 +194,13 @@ export function useCommonspaceNavigation(
 			setTargetProjectFile(null);
 			if (route.kind === "conversation") {
 				const { conversation } = route;
-				const conversationExists =
-					conversation.kind === "channel"
-						? state.channels.some((channel) => channel.id === conversation.id)
-						: state.agents.some((agent) => agent.id === conversation.id);
-				if (!conversationExists) return false;
-				const thread =
-					route.threadId === undefined
-						? undefined
-						: state.threads.find(
-								(candidate) =>
-									candidate.id === route.threadId &&
-									conversation.kind === "channel" &&
-									candidate.channelId === conversation.id,
-							);
-				if (route.threadId !== undefined && thread === undefined) return false;
-				if (route.messageId !== undefined) {
-					const message = state.messages[
-						`${conversation.kind}:${conversation.id}`
-					]?.find((candidate) => candidate.id === route.messageId);
-					if (
-						message === undefined ||
-						(thread !== undefined &&
-							message.threadId !== thread.id &&
-							message.id !== thread.rootMessageId)
-					)
-						return false;
-				}
 				const currentConversation = store.getSnapshot().activeConversation;
 				if (
 					currentConversation?.kind !== conversation.kind ||
 					currentConversation.id !== conversation.id
 				)
 					store.selectConversation(conversation);
-				const threadId = thread?.id ?? null;
+				const threadId = route.threadId ?? null;
 				if (store.getSnapshot().activeThreadId !== threadId)
 					store.selectThread(threadId);
 				setTargetMessageId(route.messageId ?? null);
@@ -315,11 +322,7 @@ export function useCommonspaceNavigation(
 	);
 
 	useEffect(() => {
-		if (
-			snapshot.bootstrap === null ||
-			appliedRouteMatch.current === routeMatchKey
-		)
-			return;
+		if (snapshot.bootstrap === null) return;
 		const route =
 			legacyMessageTarget === null
 				? matchedRoute
@@ -328,6 +331,12 @@ export function useCommonspaceNavigation(
 						legacyMessageTarget.threadId,
 						legacyMessageTarget.messageId,
 					);
+		if (
+			appliedRouteMatch.current === routeMatchKey &&
+			route !== null &&
+			routeAvailable(snapshot.bootstrap.state, route)
+		)
+			return;
 		if (route === null || !applyRoute(route)) {
 			appliedRouteMatch.current = routeMatchKey;
 			navigate({ kind: "inbox", view: "attention" }, true);
@@ -396,6 +405,10 @@ export function useCommonspaceNavigation(
 
 	const openSearchResult = (result: CommonspaceSearchResult) => {
 		setSearchOpen(false);
+		if (result.target.kind === "project") {
+			navigate(projectRoute(result.target.projectId));
+			return;
+		}
 		if (result.target.kind === "conversation") {
 			navigate(
 				conversationRoute(

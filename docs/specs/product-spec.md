@@ -245,6 +245,7 @@ Each row gives a stable requirement ID, its release target, the required behavio
 | WRK-04 | v0.0.1 | Restore durable state after service or machine restart. | Conversations, context, read state, and resumable native-session mappings survive restart. |
 | WRK-05 | v0.0.1 | Support a one-command local installation/update path. | A clean supported machine can install, start, stop, and update Commonspace without repository knowledge. |
 | WRK-06 | Later | Offer a desktop application over the same service contract. | The desktop distribution does not fork the domain or persistence model. |
+| WRK-07 | v0.0.1 | Support desktop keyboard operation and persistent Light/Dark/System appearance. | Workspace settings receive focus, covered conversation controls are inert, and closing restores a usable focus target. Appearance applies immediately, survives browser reload, and System follows live OS changes, including native controls. |
 
 ### 6.2 Agents and harnesses
 
@@ -283,7 +284,7 @@ Each row gives a stable requirement ID, its release target, the required behavio
 | CON-07 | v0.0.1 | Deliver one structured or visible Agent handoff to a current Channel peer in the same Thread. | The target receives only sender identity and the concrete request; the Thread retains a visible `@agent` handoff without a coordinator or private Agent DM. |
 | CON-08 | v0.0.1 | Run different native sessions concurrently and serialize only the same session. | A slow Agent does not block unrelated Agents or Threads. |
 | CON-09 | v0.0.1 | Bound pathological Agent-to-Agent cycles. | One handoff is accepted per active turn; self/non-member targets are rejected; the visible workspace Agent limit and repeated directed-edge checks stop cycles with a visible outcome. |
-| CON-10 | v0.0.1 | Preserve queued follow-ups while a native session is busy. | The user can inspect, reorder, remove, steer where supported, or stop-and-send queued input. A bounded tray shows delivery status and expandable message previews; compact icon actions have accessible names and tooltips in both DMs and Threads. |
+| CON-10 | v0.0.1 | Preserve queued follow-ups while a native session is busy. | The user can inspect, reorder, remove, steer where supported, or stop-and-send queued input. A bounded tray shows delivery status and expandable message previews; compact icon actions have accessible names and tooltips in both DMs and Threads. Queue changes preserve keyboard focus, returning to the composer after the final removal. Unsupported delivery controls are absent. |
 | CON-11 | v0.0.1 | Apply one workspace model and reasoning configuration to every conversation. | Channels do not expose, persist, or apply per-Channel model or reasoning overrides. |
 
 ### 6.5 Commonspace inference, routing, and correction
@@ -348,7 +349,7 @@ Each row gives a stable requirement ID, its release target, the required behavio
 | --- | --- | --- | --- |
 | DSC-01 | v0.0.1 | Track durable unread state for Agent replies and relevant system outcomes. | Read state survives restart and opens the exact conversation location. |
 | DSC-02 | v0.0.1 | Provide an attention-focused Inbox. | Replies, mentions, permission requests, needs-input outcomes, and failures can be filtered and navigated exactly. |
-| DSC-03 | v0.0.1 | Search messages, Threads, Channels, Agents, Projects, and attachments. | Project filters match any referenced Project, not only the primary compatibility reference. Users can combine content types, inspect/remove active filters, and reset filters without clearing the query. Query controls remain fixed while results scroll; pending requests cannot activate stale results. |
+| DSC-03 | v0.0.1 | Search messages, Threads, Channels, Agents, Projects, and attachments. | Projects are searchable destinations by name; matching replies target the exact message. Project filters match any referenced Project, not only the primary compatibility reference. Users can combine content types, inspect/remove active filters, and reset filters without clearing the query. Query controls remain fixed while results scroll; pending requests cannot activate stale results. Search errors offer retry with query and filters preserved, and progress/result counts are announced. |
 | DSC-04 | v0.0.1 | Support desktop notifications for replies, mentions, permissions, and failures. | Each notification identifies the event type and opens the exact message/activity. |
 | DSC-05 | v0.0.1 | Make notifications configurable without muting durable Inbox state. | Disabling OS notifications does not hide attention items inside Commonspace. |
 
@@ -423,7 +424,7 @@ The routing response uses a bounded output budget sized for the visible maximum 
 - The new Agent receives the corrected sub-request plus scoped shared context.
 - The correction event becomes routing feedback.
 - Feedback compaction may generalize patterns but cannot edit historical routing records.
-- Resolved correction receipts and inline reroute controls remain deferred from the conversation UI.
+- Stored correction history is inspectable in expanded routing receipts; inline reroute editing remains deferred from the conversation UI.
 
 ### Inference failure semantics
 

@@ -1,6 +1,7 @@
 import type { ConversationRef } from "./contracts.js";
 
 export const COMMONSPACE_SEARCH_KINDS = [
+	"project",
 	"channel",
 	"message",
 	"dm",
@@ -28,6 +29,7 @@ export type CommonspaceSearchTarget =
 			messageId?: string;
 	  }
 	| { kind: "project-file"; projectId: string; rootIndex: number; path: string }
+	| { kind: "project"; projectId: string }
 	| { kind: "agent"; agentId: string };
 
 export interface CommonspaceSearchResult {
