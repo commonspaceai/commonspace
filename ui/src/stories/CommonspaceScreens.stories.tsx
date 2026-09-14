@@ -586,11 +586,13 @@ export const AddAgentDiscoveredResults: Story = {
 		const page = within(canvasElement.ownerDocument.body);
 		await userEvent.click(page.getByRole("button", { name: "Add agent" }));
 		await userEvent.click(page.getByRole("button", { name: /Hermes/iu }));
-		await expect(
-			page.getByRole("button", {
-				name: "Add discovered agent Hermes Reviewer",
-			}),
-		).toBeVisible();
+		await waitFor(() =>
+			expect(
+				page.getByRole("button", {
+					name: "Add discovered agent Hermes Reviewer",
+				}),
+			).toBeVisible(),
+		);
 	},
 };
 
@@ -603,9 +605,11 @@ function discoveredHarnessStory(label: string): Story {
 			await userEvent.click(
 				page.getByRole("button", { name: `Choose ${label} harness` }),
 			);
-			await expect(
-				page.getByRole("button", { name: `Add discovered agent ${label}` }),
-			).toBeVisible();
+			await waitFor(() =>
+				expect(
+					page.getByRole("button", { name: `Add discovered agent ${label}` }),
+				).toBeVisible(),
+			);
 			await expect(
 				page.queryByRole("button", {
 					name: "Add discovered agent Hermes Reviewer",
