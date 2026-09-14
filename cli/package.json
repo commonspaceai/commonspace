@@ -50,7 +50,7 @@
 	"scripts": {
 		"build": "node esbuild.config.mjs",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
-		"clean": "rm -rf dist ui-dist"
+		"clean": "node ../scripts/clean.mjs dist ui-dist"
 	},
 	"devDependencies": {
 		"esbuild": "0.28.2",

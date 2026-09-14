@@ -33,7 +33,7 @@ pnpm verify:npm-package
 
 `build:npm` builds all workspaces, bundles Commonspace-owned server and shared code into `cli/dist/index.js`, copies the built UI, and writes `artifacts/npm/commonspace-<version>.tgz` through `npm pack`.
 
-`verify:npm-package` installs that tarball into a clean temporary prefix using npm. It checks the version command, starts the installed package outside the source checkout, requests the API and browser assets, and verifies clean shutdown. It does not connect a real agent.
+`verify:npm-package` installs that tarball into a clean temporary prefix using npm. It checks npm command launchers, starts the installed package outside the source checkout in paths containing spaces, requests the API and browser assets, and verifies shutdown and saved-state restart. Windows uses private IPC disconnect for graceful shutdown; a real terminal is required to verify Ctrl+C. It does not connect a real agent.
 
 The npm tarball contains only:
 
@@ -72,13 +72,13 @@ The workflow:
 
 1. Resolves the tag, requires its commit to belong to `main`, and checks all workspace versions.
 2. Runs the complete local checks and integrated live verifier.
-3. Builds one npm tarball and installs it into a clean prefix for runtime smoke testing.
+3. Builds one npm tarball and installs it into a clean Linux prefix, then downloads that same artifact into the Windows job for runtime smoke testing. Publication requires both jobs to pass.
 4. Previews `npm publish` during a dry run.
 5. After an approved non-dry run, rechecks the remote tag commit and publishes with npm provenance.
 6. For a published GitHub Release, leaves the existing release in place; for manual dispatch, creates the GitHub Release after publishing.
 
 The first `commonspace` package version needs a one-time maintainer-authenticated bootstrap because npm trusted-publisher configuration requires the package to exist. Publish the verified `0.0.1` tarball once with npm 2FA, then configure the GitHub Actions trusted publisher. If the published GitHub Release event sees that exact version already present, the workflow skips a duplicate npm publish and completes the GitHub-side release automation. Future versions use the published-release trigger end to end.
 
-The workflow does not run package creation on every pull request. Normal CI still builds the CLI, server, shared package, and UI through `pnpm build`; npm installation smoke belongs to the release boundary.
+Normal CI builds the CLI, server, shared package, and UI through `pnpm build`; its Windows job also builds and installs a candidate tarball on every pull request. The release workflow additionally proves that the exact Linux-built artifact destined for npm runs on Windows. Record the [Windows automated and manual checks](../guides/windows-validation.md) separately; a passing smoke does not establish native agent, folder-dialog, notification, or console-interrupt behavior.
 
 If npm publication succeeds but GitHub Release creation fails, create the GitHub Release for the existing tag manually. Never republish or move the tag to repair release notes.

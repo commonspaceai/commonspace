@@ -96,9 +96,9 @@ The server continues accepting work while waiting, so continuous activity can de
 
 ## CI and service verification
 
-CI runs static/build checks, unit/integration tests, Storybook browser checks, integrated Playwright E2E, and reviewed macOS visual baselines. The aggregate `check` job succeeds only when all four jobs pass. npm clean-install smoke runs only at the release boundary. GitHub enforces `check` as a merge requirement only after a maintainer configures branch protection; see [Maintaining](maintaining.md).
+CI runs static/build checks, unit/integration tests, Storybook browser checks, integrated Playwright E2E, reviewed macOS visual baselines, and a Windows platform job. The aggregate `check` job succeeds only when all five jobs pass. The Windows job runs the focused `pnpm test:platform` suite, Storybook smoke, production browser flows, and npm build/install smoke; the complete unit/runtime suite remains on Linux. See [Windows validation](windows-validation.md) for PowerShell commands and evidence limits. GitHub enforces `check` as a merge requirement only after a maintainer configures branch protection; see [Maintaining](maintaining.md).
 
-CI browser jobs use the runner's installed Chrome. Local checks use Playwright's managed Chromium unless `COMMONSPACE_USE_SYSTEM_CHROME=1` is set.
+CI and local browser checks install/use Playwright's managed Chromium unless `COMMONSPACE_USE_SYSTEM_CHROME=1` is set.
 
 Workspace-scale measurements are opt-in and never part of the normal test gate:
 

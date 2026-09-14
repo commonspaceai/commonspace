@@ -8,12 +8,12 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
-		"clean": "rm -rf dist",
+		"clean": "node ../scripts/clean.mjs dist",
 		"storybook": "storybook dev --host 127.0.0.1 --port 6006 --exact-port --no-open --disable-telemetry",
 		"build-storybook": "storybook build --disable-telemetry",
 		"test-storybook": "node ../scripts/run-storybook-tests.mjs run",
 		"test-storybook:watch": "node --watch-preserve-output --watch-path=src --watch-path=.storybook ../scripts/run-storybook-tests.mjs run",
-		"test-storybook:smoke": "COMMONSPACE_STORYBOOK_TAG=smoke node ../scripts/run-storybook-tests.mjs run"
+		"test-storybook:smoke": "node ../scripts/run-storybook-tests.mjs smoke"
 	},
 	"dependencies": {
 		"@base-ui/react": "1.7.0",

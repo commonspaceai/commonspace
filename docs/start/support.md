@@ -10,9 +10,9 @@ The `commonspace` npm package requires Node.js 22 or newer. npm installs externa
 | --- | --- | --- |
 | Apple Silicon or Intel Mac | Supported npm installation | Foreground package; source checkout can install a per-user service |
 | Linux | Supported npm installation | Foreground package |
-| Windows | Not currently validated | Not currently validated |
+| Windows x64 | Candidate automated validation; see [Windows evidence and limits](../guides/windows-validation.md) | Foreground only; no Windows service installer |
 
-The release workflow installs one npm tarball in a clean Linux prefix and exercises its API, UI, and shutdown. macOS service behavior remains a separate source-based check. See workflow results and release notes for evidence about a particular version.
+The release workflow installs one npm tarball in a clean Linux prefix, then validates that exact tarball on Windows before publication. It exercises the npm command, API, UI assets, saved-state restart, and graceful shutdown. Windows uses private IPC disconnect for automated shutdown; terminal Ctrl+C needs separate acceptance. macOS service behavior remains a separate source-based check. See workflow results and release notes for evidence about a particular version.
 
 Commonspace does not currently ship a desktop app wrapper. Follow [Installation](install.md) to run it in your browser.
 
@@ -23,7 +23,7 @@ Commonspace does not currently ship a desktop app wrapper. Follow [Installation]
 | Node.js | Version 22 is the CI baseline. Newer versions satisfy the `>=22` requirement but are not separately tested by the CI matrix. |
 | pnpm | Use version 10.34.5 and `pnpm install --frozen-lockfile`. |
 | macOS and Linux | Supported source-development environments. Linux runs the main CI checks; macOS also has service checks. |
-| Windows | Source development is not currently validated. |
+| Windows x64 | CI targets Node 22 on `windows-2025`: types/builds, the focused platform suite, Storybook smoke, E2E, live browser verification, and npm packaging. See [actual evidence and manual checks](../guides/windows-validation.md); this is not the full native-runtime suite. |
 | Git and Corepack | Needed for repository development and the source-based macOS installation. Published-package users need npm or `npx`. |
 | Vite | Serves the development UI at `127.0.0.1:5173` and forwards API requests to the local server. |
 | Express | Serves the local API at `127.0.0.1:3100`. |
@@ -50,8 +50,9 @@ Codex, Hermes, Claude Code, Gemini CLI, and OpenCode are built-in harnesses. Pi 
 | Storybook browser tests | No. | Isolated component and screen behavior. |
 | Playwright E2E | No. | Integrated production UI/API journeys, including navigation, messages, settings, notifications, and restart-visible state. |
 | Reviewed visual baselines | No. | Selected Storybook states compared on macOS; changed baselines fail until inspected and explicitly approved. |
-| `pnpm verify:live` | No. | The built UI and server working together in a desktop browser. Uses managed Chromium locally or system Chrome in CI. |
-| `pnpm verify:npm-package` | No. | A clean npm install starts, serves its API and UI, and shuts down outside the source checkout. |
+| `pnpm verify:live` | No. | The built UI and server working together in a desktop browser. Uses managed Chromium by default, with an optional system Chrome override. |
+| `pnpm verify:npm-package` | No. | Clean npm command execution, API/UI assets, shutdown, and saved-state restart outside the checkout, using paths with spaces and an isolated home. Windows shutdown uses IPC. |
+| `pnpm test:platform` | No. | Portable tool launchers, package staging, source watcher restart, directory resolution, standalone API/UI, and saved-state contracts. |
 | `pnpm verify:service` | No agent credentials. | The macOS source-based service lifecycle in a temporary home, with launchctl and health responses substituted. |
 | `pnpm verify:adapters` | No. | Real Claude Code, Gemini CLI, and OpenCode runtimes, native restart/resume and reset, scoped MCP and progress, using local model API fixtures. |
 | `pnpm verify:routing-quality` | Configured provider/model; key when required. | Opt-in representative decomposition evaluation for Agent responsibilities, preserved constraints, and per-assignment Project scopes. Parser tests do not provide this evidence. |

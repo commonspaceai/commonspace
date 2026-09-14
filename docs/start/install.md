@@ -10,7 +10,7 @@ Check Node.js:
 node --version
 ```
 
-The command must report version 22 or newer. macOS and Linux are supported. Windows is not currently validated. See the [support matrix](support.md) for current runtime coverage.
+The command must report version 22 or newer. macOS and Linux are supported. Windows validation is tracked separately; see the [Windows validation guide](../guides/windows-validation.md) before using it. See the [support matrix](support.md) for current runtime coverage.
 
 ## Start Commonspace
 
@@ -36,6 +36,25 @@ npx --yes commonspace@latest --help
 ```
 
 Workspace data is stored in `~/.commonspace` by default. Set `COMMONSPACE_HOME` to choose another data directory or `COMMONSPACE_PORT` to choose another loopback port. npm's package cache is not used for workspace data, credentials, or native agent sessions.
+
+## Windows foreground setup
+
+Use PowerShell with Node.js 22+ and npm on `PATH`:
+
+```powershell
+node --version
+npx.cmd --yes commonspace@latest
+```
+
+The `.cmd` suffix selects npm's Windows launcher if PowerShell blocks the accompanying `.ps1` script. Workspace data defaults to `$HOME\.commonspace`. To keep a trial workspace separate:
+
+```powershell
+$env:COMMONSPACE_HOME = Join-Path $HOME "Commonspace trial"
+$env:COMMONSPACE_PORT = "3100"
+npx.cmd --yes commonspace@latest
+```
+
+Open `http://127.0.0.1:3100` and keep the terminal open. Commonspace does not install a Windows service. Read the [validation guide](../guides/windows-validation.md) for candidate tarball/source commands, console shutdown checks, and the remaining native integration checks. Windows application smoke coverage does not establish support for each agent runtime.
 
 ## Add an agent
 

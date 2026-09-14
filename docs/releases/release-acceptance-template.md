@@ -30,7 +30,9 @@ Allowed results: `Pass`, `Fail`, or `Not run — <exact reason>`. Link local or 
 | Reviewed visual baselines | `pnpm test:visual` | | Record inspected states; do not regenerate silently |
 | Production separate/installed serving smoke | `pnpm verify:live` | | |
 | npm tarball creation | `pnpm build:npm` | | Record package name, version, and size |
-| Clean npm install and startup/API/UI/shutdown | `pnpm verify:npm-package` | | |
+| Clean npm command/startup/API/UI/shutdown/restart | `pnpm verify:npm-package` | | Record platform and shutdown method; Windows IPC does not prove console Ctrl+C |
+| Windows source/platform/browser and candidate package | [Windows validation](../guides/windows-validation.md) | | Record Windows runner/build, architecture, exact commit, and Actions run URL |
+| Exact release tarball on Windows | Release `windows-package` job | | Same artifact as Linux verification and npm publication |
 | Mocked macOS service lifecycle | `pnpm verify:service` | | `launchctl` and health responses are substituted |
 | Account-free pinned adapter fixtures | `pnpm verify:adapters` | | Focused rerun of tests included by `pnpm check`; real CLIs against local model fixtures |
 | Provider routing quality | `pnpm verify:routing-quality` | | Record endpoint locality, provider/model/version, cases, and cost boundary |
@@ -51,6 +53,7 @@ Allowed results: `Pass`, `Fail`, or `Not run — <exact reason>`. Link local or 
 | Git preview and browser embedding protections | | Configured textconv/fsmonitor/filter commands remain unexecuted; installed HTML sends framing-denial headers |
 | Candidate npm package startup on a clean machine | | Not established by repository-local smoke alone |
 | Actual macOS service status, update, failed-update recovery, rollback | | |
+| Windows terminal Ctrl+C, folder picker, native notifications and authenticated runtimes | | Record each result separately using the Windows guide; do not infer these from headless CI |
 
 ## Decision
 

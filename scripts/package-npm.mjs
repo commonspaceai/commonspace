@@ -13,6 +13,7 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { parseArgs, promisify } from "node:util";
 import { parseReleaseVersion } from "./release-version.mjs";
+import { npmCommand } from "./tool-command.mjs";
 
 const run = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -167,11 +168,17 @@ async function main() {
 	try {
 		const staging = join(temporary, "package");
 		await stageNpmPackage(repoRoot, staging, manifest);
-		const { stdout } = await run(
-			"npm",
-			["pack", staging, "--pack-destination", output, "--json"],
-			{ cwd: repoRoot, maxBuffer: 8 * 1024 * 1024 },
-		);
+		const npm = npmCommand([
+			"pack",
+			staging,
+			"--pack-destination",
+			output,
+			"--json",
+		]);
+		const { stdout } = await run(npm.command, npm.args, {
+			cwd: repoRoot,
+			maxBuffer: 8 * 1024 * 1024,
+		});
 		const [packed] = JSON.parse(stdout);
 		if (typeof packed?.filename !== "string")
 			throw new Error("npm pack did not report an output file");

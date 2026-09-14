@@ -42,8 +42,7 @@ export default defineConfig({
 		},
 	],
 	webServer: {
-		command:
-			"exec node ../../server/node_modules/tsx/dist/cli.mjs ../../scripts/e2e-server.mjs",
+		command: `${process.platform === "win32" ? "" : "exec "}node ../../server/node_modules/tsx/dist/cli.mjs ../../scripts/e2e-server.mjs`,
 		url: `${BASE_URL}/api/health`,
 		reuseExistingServer: false,
 		timeout: 120_000,
