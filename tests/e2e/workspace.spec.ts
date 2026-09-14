@@ -723,14 +723,14 @@ test("opens the message action menu and closes it", async ({ page }) => {
 });
 
 test("copies a message link from action menu", async ({ page }) => {
-	await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
-		origin: "http://127.0.0.1:3199",
-	});
-
 	const toCopy = `E2E copy link message: ${Math.floor(
 		Math.random() * 1_000_000,
 	)}.`;
 	const messageRow = await postVerificationMessage(page, toCopy);
+	const origin = new URL(page.url()).origin;
+	await page
+		.context()
+		.grantPermissions(["clipboard-read", "clipboard-write"], { origin });
 
 	await messageRow.hover();
 	const actionMenu = messageRow.getByRole("button", {
@@ -742,7 +742,7 @@ test("copies a message link from action menu", async ({ page }) => {
 	const copiedText = await page.evaluate(() => navigator.clipboard.readText());
 	expect(typeof copiedText).toBe("string");
 	const copiedUrl = new URL(copiedText);
-	expect(copiedUrl.origin).toBe("http://127.0.0.1:3199");
+	expect(copiedUrl.origin).toBe(origin);
 	expect(copiedUrl.pathname).toMatch(
 		/^\/channels\/[^/?#]+\/threads\/[^/?#]+$/u,
 	);

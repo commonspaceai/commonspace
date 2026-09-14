@@ -71,6 +71,15 @@ async function verifySavedChannel(request, channelId) {
 	return persistedChannelId;
 }
 
+export function waitForRuntimeExit(child) {
+	return new Promise((resolveExit) => {
+		// An explicit IPC disconnect can leave the child close event unreported.
+		// The process exit event still reports the actual exit code.
+		child.once("exit", resolveExit);
+		child.once("error", () => resolveExit(null));
+	});
+}
+
 async function verifyRuntime({
 	entry,
 	root,
@@ -95,7 +104,7 @@ async function verifyRuntime({
 		stdio: ["ignore", "pipe", "pipe", "ipc"],
 	});
 	let output = "";
-	let closed = false;
+	let exited = false;
 	let spawnError;
 	child.on("error", (error) => {
 		spawnError = error;
@@ -106,11 +115,9 @@ async function verifyRuntime({
 	child.stderr.on("data", (chunk) => {
 		output = `${output}${String(chunk)}`.slice(-100_000);
 	});
-	const stopped = new Promise((resolveStop) => {
-		child.once("close", (code) => {
-			closed = true;
-			resolveStop(code);
-		});
+	const stopped = waitForRuntimeExit(child).then((code) => {
+		exited = true;
+		return code;
 	});
 	try {
 		let url;
@@ -119,7 +126,7 @@ async function verifyRuntime({
 			url = output.match(
 				/Commonspace is running at (http:\/\/127\.0\.0\.1:\d+)/u,
 			)?.[1];
-			if (url !== undefined || closed) break;
+			if (url !== undefined || exited) break;
 			await new Promise((resolveWait) => setTimeout(resolveWait, 250));
 		}
 		assert(
@@ -168,7 +175,7 @@ async function verifyRuntime({
 		}
 		return persistedChannelId;
 	} finally {
-		if (!closed) {
+		if (!exited) {
 			child.kill("SIGTERM");
 			const deadline = setTimeout(() => child.kill("SIGKILL"), 5_000);
 			await stopped;
@@ -262,7 +269,7 @@ if (
 	process.argv[1] !== undefined &&
 	resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 )
-	void main().catch((error) => {
+	await main().catch((error) => {
 		process.stderr.write(
 			`${error instanceof Error ? error.message : String(error)}\n`,
 		);

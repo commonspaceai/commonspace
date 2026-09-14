@@ -1,4 +1,5 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +11,10 @@ import {
 	npmCommand,
 	runTool,
 } from "../scripts/tool-command.mjs";
-import { isolatedRuntimeEnv } from "../scripts/verify-npm-package.mjs";
+import {
+	isolatedRuntimeEnv,
+	waitForRuntimeExit,
+} from "../scripts/verify-npm-package.mjs";
 
 const run = promisify(execFile);
 const roots = [];
@@ -22,6 +26,37 @@ afterEach(async () => {
 });
 
 describe("portable validation commands", () => {
+	it("observes graceful process exit after the parent disconnects IPC", async () => {
+		const child = spawn(
+			process.execPath,
+			[
+				"-e",
+				'process.on("message", () => {}); process.on("disconnect", () => {}); process.stdout.write("ready");',
+			],
+			{ stdio: ["ignore", "pipe", "pipe", "ipc"] },
+		);
+		const stopped = waitForRuntimeExit(child);
+		let deadline;
+		try {
+			await once(child.stdout, "data");
+			child.disconnect();
+			await expect(
+				Promise.race([
+					stopped,
+					new Promise((resolve) => {
+						deadline = setTimeout(
+							() => resolve("exit was not observed"),
+							2_000,
+						);
+					}),
+				]),
+			).resolves.toBe(0);
+		} finally {
+			clearTimeout(deadline);
+			if (child.exitCode === null) child.kill("SIGKILL");
+		}
+	});
+
 	it("propagates a tool failure to the caller", async () => {
 		await expect(
 			runTool({ command: process.execPath, args: ["-e", "process.exit(17)"] }),
@@ -57,7 +92,9 @@ describe("portable validation commands", () => {
 		const result = await run(command.command, command.args, { cwd: root });
 		expect(JSON.parse(result.stdout)).toEqual(args);
 	});
+});
 
+describe("npm command and runtime isolation", () => {
 	it("resolves npm's JavaScript entry on Windows without executing a cmd shim", () => {
 		const cli = "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js";
 		const command = npmCommand(["pack", "C:\\package & spaces"], {
