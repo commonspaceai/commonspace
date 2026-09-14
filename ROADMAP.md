@@ -11,8 +11,8 @@ This page lists current priorities and deferred work. It is not the product cont
 
 ## Next
 
-- Revalidate newer Gemini CLI versions against native session resume and scoped MCP before expanding support.
-- Add Pi coding agent after its transport passes the same native-session and scoped-MCP checks.
+- Resolve Gemini CLI's late native-history replay before certifying full resume compatibility or expanding support. [Current evidence](docs/adapters/agent-adapters.md#gemini-revalidation-evidence) records the 0.43.0 replay defect and rejects 0.59.0 after a restart/resume failure.
+- Add Pi coding agent after its transport passes the same native-session and scoped-MCP checks. The published bridge currently [does not wire scoped MCP](docs/adapters/agent-adapters.md#pi-integration-status).
 - Measure larger synthetic workspaces before changing the current JSON persistence model.
 
 ## Later

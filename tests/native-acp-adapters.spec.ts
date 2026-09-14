@@ -178,6 +178,7 @@ it.each([
 );
 
 it("does not launch a replaced Gemini identity after an asynchronous version check", async () => {
+	vi.stubEnv("FAKE_ACP_VERSION", "0.43.0");
 	const root = await mkdtemp(join(tmpdir(), "commonspace-gemini-authority-"));
 	roots.push(root);
 	const cliPath = join(root, "gemini-version.mjs");
@@ -240,6 +241,7 @@ describe.each([
 	{ adapter: "opencode", label: "OpenCode" },
 ] as const)("$label native ACP adapter", ({ adapter, label }) => {
 	it("discovers explicitly, dispatches to its own runtime, and retains identity after restart", async () => {
+		if (adapter === "gemini") vi.stubEnv("FAKE_ACP_VERSION", "0.43.0");
 		const root = await mkdtemp(join(tmpdir(), "commonspace-native-acp-"));
 		roots.push(root);
 		const config = {
@@ -309,6 +311,74 @@ describe.each([
 	});
 });
 
+it.each(["0.59.0", "0.43.0-preview.1", ""])(
+	"retains accepted requests and exact sessions when the launched Gemini runtime reports %j",
+	async (version) => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-gemini-version-"));
+		roots.push(root);
+		const cliPath = join(root, "gemini-version.mjs");
+		await writeFile(
+			cliPath,
+			`#!${process.execPath}\nconsole.log("0.43.0");\n`,
+			{ mode: 0o700 },
+		);
+		const framesPath = join(root, "frames.jsonl");
+		vi.stubEnv("FAKE_ACP_LOG", framesPath);
+		vi.stubEnv("FAKE_ACP_VERSION", "0.43.0");
+		const config = {
+			root,
+			geminiPath: cliPath,
+			geminiAcpCommand: process.execPath,
+			geminiAcpArgs: [fixture],
+		};
+		const first = new CommonspaceHostService({}, config);
+		services.push(first);
+		await first.initialize();
+		await first.discoverAgents("gemini");
+		await first.mutate({
+			action: "add-discovered-agent",
+			adapter: "gemini",
+			agentId: "gemini",
+		});
+		await first.send({
+			conversation: { kind: "dm", id: "gemini" },
+			text: "First accepted request.",
+		});
+		await first.whenIdle();
+		const original = JSON.parse(
+			await readFile(join(root, "state.json"), "utf8"),
+		);
+		expect(original.agentSessions.gemini["Bot Chat"]).toEqual(
+			expect.any(String),
+		);
+		await first.close();
+		await writeFile(framesPath, "");
+		vi.stubEnv("FAKE_ACP_VERSION", version);
+		const resumed = new CommonspaceHostService({}, config);
+		services.push(resumed);
+		await resumed.initialize();
+		await resumed.send({
+			conversation: { kind: "dm", id: "gemini" },
+			text: "Keep this accepted request.",
+		});
+		await resumed.whenIdle();
+		const saved = JSON.parse(await readFile(join(root, "state.json"), "utf8"));
+		expect(saved.agentSessions).toEqual(original.agentSessions);
+		expect(saved.messages["dm:gemini"]).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					text: "Keep this accepted request.",
+					replyStatus: "failed",
+					replyError: expect.stringContaining("supported ACP version range"),
+				}),
+			]),
+		);
+		expect(await readFile(framesPath, "utf8")).not.toMatch(
+			/session\/(new|load|prompt)/u,
+		);
+	},
+);
+
 it("blocks Gemini versions with unverified or regressed ACP history before launch", () => {
 	for (const version of ["0.39.1", "0.41.2", "0.43.0"])
 		expect(() => assertGeminiAcpVersion(version)).not.toThrow();
@@ -317,10 +387,13 @@ it("blocks Gemini versions with unverified or regressed ACP history before launc
 		"0.44.1",
 		"0.47.0",
 		"0.58.0",
+		"0.59.0",
+		"0.39.00",
+		"0.43.01",
 		"0.59.0-preview.0",
 		"unknown",
 	])
 		expect(() => assertGeminiAcpVersion(version)).toThrow(
-			"verified ACP session continuity",
+			"supported ACP version range",
 		);
 });

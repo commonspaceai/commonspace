@@ -5,11 +5,11 @@ import { join } from "node:path";
 import {
 	inspectCommandCapabilities,
 	parseNamedJsonInventory,
-	parseTerminalInventory,
 	unavailableGroup,
 } from "./capability-inventory.js";
 import {
 	inspectMcpMetadata,
+	inspectResourceDirectories,
 	inspectUserSkills,
 } from "./capability-metadata.js";
 import { readHarnessCommand } from "./discovery.js";
@@ -57,6 +57,16 @@ export function createClaudeCodeAdapter(
 				],
 				"Claude Code user skill directory metadata",
 			);
+			const agents = await inspectResourceDirectories(
+				[join(configRoot, "agents")],
+				{
+					id: "agents",
+					extension: ".md",
+					source: "Claude Code user agent definition filenames",
+					notice:
+						"User .md agent definition filenames only; prompts, contents, and session inventory remain private. Project, plugin, and built-in agents are excluded; runtime loading is not verified.",
+				},
+			);
 			return inspectCommandCapabilities(
 				cliPath,
 				[
@@ -67,14 +77,6 @@ export function createClaudeCodeAdapter(
 						notice: "Installed plugin names and native state from Claude Code.",
 						parse: parseNamedJsonInventory,
 					},
-					{
-						id: "agents",
-						args: ["agents", "--setting-sources", "user"],
-						source: "claude agents --setting-sources user",
-						notice:
-							"Configured user agent names; prompts and configuration remain private.",
-						parse: parseTerminalInventory,
-					},
 				],
 				[
 					unavailableGroup(
@@ -84,6 +86,7 @@ export function createClaudeCodeAdapter(
 					),
 					mcp,
 					skills,
+					agents,
 					unavailableGroup(
 						"memory",
 						source,

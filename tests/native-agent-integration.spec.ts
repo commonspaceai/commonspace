@@ -107,6 +107,9 @@ async function startHost(
 				general: { enableAutoUpdate: false },
 			}),
 		);
+		if (process.env.COMMONSPACE_TEST_GEMINI_PATH !== undefined)
+			env.COMMONSPACE_TEST_GEMINI_PATH =
+				process.env.COMMONSPACE_TEST_GEMINI_PATH;
 		Object.assign(env, {
 			GEMINI_CLI_HOME: geminiHome,
 			GEMINI_CLI_NO_RELAUNCH: "true",
@@ -296,6 +299,144 @@ describe.each([
 	({ adapter, label }) => {
 		const startModelServer =
 			adapter === "gemini" ? startGeminiModelServer : startAnthropicModelServer;
+		if (adapter === "gemini") {
+			it.runIf(process.env.COMMONSPACE_GEMINI_RESUME_STRESS === "1")(
+				"keeps longer native history replay out of the resumed Gemini reply",
+				async () => {
+					const root = await mkdtemp(
+						join(tmpdir(), "commonspace-gemini-replay-"),
+					);
+					roots.push(root);
+					const model = await startModelServer((request) => ({
+						type: "text",
+						text: JSON.stringify(request.messages).includes(
+							"Continue after restart.",
+						)
+							? "Native resumed."
+							: "Native initial.",
+					}));
+					modelServers.push(model);
+					const first = await startHost(root, model.url, adapter);
+					await addHarness(first.url, adapter);
+					const conversation: ConversationRef = { kind: "dm", id: adapter };
+					for (let index = 0; index < 6; index += 1) {
+						await post(first.url, "/api/send", {
+							conversation,
+							text: `Remember NATIVE_HISTORY_SENTINEL ${index}.`,
+						});
+						await waitForReplyCount(first.url, `dm:${adapter}`, index + 1);
+					}
+					await expect
+						.poll(() => readSession(root, adapter))
+						.toEqual(expect.any(String));
+					const session = await readSession(root, adapter);
+					await stopHost(first.child);
+					const resumed = await startHost(root, model.url, adapter);
+					await post(resumed.url, "/api/send", {
+						conversation,
+						text: "Continue after restart.",
+					});
+					await waitForReplyCount(resumed.url, `dm:${adapter}`, 7);
+					expect(await readSession(root, adapter)).toBe(session);
+					const replies = (await bootstrap(resumed.url)).state.messages[
+						`dm:${adapter}`
+					]?.filter((message) => message.authorType === "agent");
+					expect(model.errors).toEqual([]);
+					expect(replies?.at(-1)?.text).toBe("Native resumed.");
+				},
+				90_000,
+			);
+		}
+		it("inspects real native capability sources without a model turn or configuration changes", async () => {
+			const root = await mkdtemp(
+				join(tmpdir(), `commonspace-${adapter}-inventory-`),
+			);
+			roots.push(root);
+			const model = await startModelServer(() => {
+				throw new Error("Inventory must not call a model");
+			});
+			modelServers.push(model);
+			const host = await startHost(root, model.url, adapter);
+			await addHarness(host.url, adapter);
+			const nativeRoot =
+				adapter === "claude-code"
+					? join(root, "claude")
+					: adapter === "gemini"
+						? join(root, "gemini", ".gemini")
+						: join(root, "config", "opencode");
+			await mkdir(join(nativeRoot, "skills", "fixture-review"), {
+				recursive: true,
+			});
+			const skillPath = join(
+				nativeRoot,
+				"skills",
+				"fixture-review",
+				"SKILL.md",
+			);
+			await writeFile(skillPath, "PRIVATE_NATIVE_PROMPT_BODY");
+			let agentPath: string | undefined;
+			if (adapter === "claude-code") {
+				await mkdir(join(nativeRoot, "agents"), { recursive: true });
+				agentPath = join(nativeRoot, "agents", "fixture-reviewer.md");
+				await writeFile(agentPath, "PRIVATE_NATIVE_AGENT_PROMPT_BODY");
+			}
+			const statePath = join(root, "workspace", "state.json");
+			const stateBefore = await readFile(statePath, "utf8");
+			const response = await fetch(
+				`${host.url}/api/agents/${adapter}/capabilities`,
+				{ headers: { origin: host.url } },
+			);
+			expect(response.status).toBe(200);
+			const inventory = z
+				.looseObject({
+					groups: z.array(
+						z.looseObject({
+							id: z.string(),
+							status: z.string(),
+							items: z.array(
+								z.looseObject({ name: z.string(), status: z.string() }),
+							),
+						}),
+					),
+				})
+				.parse(await response.json());
+			expect(inventory.groups).toHaveLength(6);
+			expect(
+				inventory.groups.filter((group) => group.status === "error"),
+			).toEqual([]);
+			expect(
+				inventory.groups.find((group) => group.id === "skills"),
+			).toMatchObject({
+				status: "available",
+				items: expect.arrayContaining([
+					{ name: "fixture-review", status: "configured" },
+				]),
+			});
+			expect(JSON.stringify(inventory)).not.toContain(root);
+			expect(JSON.stringify(inventory)).not.toContain(
+				"PRIVATE_NATIVE_AGENT_PROMPT_BODY",
+			);
+			if (agentPath !== undefined) {
+				expect(
+					inventory.groups.find((group) => group.id === "agents"),
+				).toMatchObject({
+					status: "available",
+					items: [{ name: "fixture-reviewer", status: "configured" }],
+				});
+				expect(await readFile(agentPath, "utf8")).toBe(
+					"PRIVATE_NATIVE_AGENT_PROMPT_BODY",
+				);
+			}
+			expect(JSON.stringify(inventory)).not.toContain(
+				"PRIVATE_NATIVE_PROMPT_BODY",
+			);
+			expect(await readFile(skillPath, "utf8")).toBe(
+				"PRIVATE_NATIVE_PROMPT_BODY",
+			);
+			expect(await readFile(statePath, "utf8")).toBe(stateBefore);
+			expect(model.requests).toEqual([]);
+			expect(model.errors).toEqual([]);
+		}, 45_000);
 		it("uses the real CLI and ACP transport to resume native context after restart and clear it on reset", async () => {
 			const root = await mkdtemp(
 				join(tmpdir(), `commonspace-${adapter}-integration-`),

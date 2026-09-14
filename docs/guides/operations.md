@@ -37,8 +37,8 @@ The server reads these variables at startup. They apply to the foreground proces
 | `COMMONSPACE_CODEX_ACP_PATH` | Overrides the Codex ACP bridge executable; the bundled bridge is used by default. |
 | `COMMONSPACE_CLAUDE_CODE_PATH` | Claude Code executable for discovery and the ACP bridge; defaults to `claude`. |
 | `COMMONSPACE_CLAUDE_CODE_ACP_PATH` | Overrides the Claude ACP bridge executable; the bundled bridge is used by default. |
-| `COMMONSPACE_GEMINI_PATH` | Gemini CLI executable; defaults to `gemini`. Requires stable `>=0.39.1` and `<0.44.0`; use tested `0.43.0`. |
-| `COMMONSPACE_GEMINI_ACP_PATH` | Overrides the executable used with `--acp`; defaults to the Gemini CLI executable. |
+| `COMMONSPACE_GEMINI_PATH` | Gemini CLI executable; defaults to `gemini`. Baseline accepts stable `>=0.39.1` and `<0.44.0` and tests `0.43.0`; [longer-history replay remains blocked](../adapters/agent-adapters.md#gemini-revalidation-evidence). |
+| `COMMONSPACE_GEMINI_ACP_PATH` | Overrides the executable used with `--acp`; defaults to the Gemini CLI executable. Its ACP-reported version must also pass the supported-version check. |
 | `COMMONSPACE_OPENCODE_PATH` | OpenCode executable; defaults to `opencode`. Native fixture verifies `1.18.29`. |
 | `COMMONSPACE_OPENCODE_ACP_PATH` | Overrides the executable used with `acp`; defaults to the OpenCode executable. |
 | `COMMONSPACE_HERMES_YOLO=1` | Explicitly enables Hermes unsafe mode. |

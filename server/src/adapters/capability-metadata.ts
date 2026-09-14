@@ -1,4 +1,4 @@
-import { constants, type Dir } from "node:fs";
+import { constants, type Dir, type Dirent } from "node:fs";
 import { type FileHandle, open, opendir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { HarnessCapabilityGroup } from "@commonspace/shared";
@@ -81,6 +81,43 @@ export async function inspectUserSkills(
 	roots: readonly string[],
 	source: string,
 ): Promise<HarnessCapabilityGroup> {
+	return inspectResourceDirectories(roots, {
+		id: "skills",
+		marker: "SKILL.md",
+		source,
+		notice:
+			"User skill folders containing SKILL.md. Project and plugin skills are not included; runtime loading and enabled state are not verified. Skill contents remain private.",
+	});
+}
+
+/** Bounded native resource labels; only stat markers, never read or execute them. */
+type ResourceMetadata = {
+	id: "skills" | "plugins" | "agents";
+	source: string;
+	notice: string;
+} & ({ marker: string } | { extension: ".md" });
+
+function resourceEntry(
+	entry: Dirent,
+	root: string,
+	metadata: ResourceMetadata,
+) {
+	if ("marker" in metadata) {
+		if (!entry.isDirectory() && !entry.isSymbolicLink()) return undefined;
+		return { name: entry.name, path: join(root, entry.name, metadata.marker) };
+	}
+	if (!entry.name.endsWith(metadata.extension)) return undefined;
+	if (!entry.isFile() && !entry.isSymbolicLink()) return undefined;
+	return {
+		name: entry.name.slice(0, -metadata.extension.length),
+		path: join(root, entry.name),
+	};
+}
+
+export async function inspectResourceDirectories(
+	roots: readonly string[],
+	metadata: ResourceMetadata,
+): Promise<HarnessCapabilityGroup> {
 	const names = new Set<string>();
 	let inspected = 0;
 	try {
@@ -94,13 +131,14 @@ export async function inspectUserSkills(
 			}
 			for await (const entry of directory) {
 				inspected += 1;
-				if (inspected > 2_000) throw new Error("Skill inventory exceeds limit");
-				if (!/^[\p{L}\p{N}][\p{L}\p{N} ._@()+-]{0,119}$/u.test(entry.name))
+				if (inspected > 2_000)
+					throw new Error("Resource inventory exceeds limit");
+				const resource = resourceEntry(entry, root, metadata);
+				if (resource === undefined) continue;
+				if (!/^[\p{L}\p{N}][\p{L}\p{N} ._@()+-]{0,119}$/u.test(resource.name))
 					continue;
-				if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
 				try {
-					if ((await stat(join(root, entry.name, "SKILL.md"))).isFile())
-						names.add(entry.name);
+					if ((await stat(resource.path)).isFile()) names.add(resource.name);
 				} catch (error) {
 					if (!(error instanceof Error && isMissingMetadata(error)))
 						throw error;
@@ -108,28 +146,23 @@ export async function inspectUserSkills(
 			}
 		}
 		return {
-			id: "skills",
+			id: metadata.id,
 			status: "available",
-			source,
-			notice:
-				"User skill folders containing SKILL.md. Project and plugin skills are not included; runtime loading and enabled state are not verified. Skill contents remain private.",
+			source: metadata.source,
+			notice: metadata.notice,
 			items: [...names].sort().map((name) => ({ name, status: "configured" })),
 		};
 	} catch {
 		return {
-			id: "skills",
+			id: metadata.id,
 			status: "error",
-			source,
-			notice: "User skill metadata could not be fully inspected.",
+			source: metadata.source,
+			notice: "User resource metadata could not be fully inspected.",
 			items: [],
 		};
 	}
 }
 
 function isMissingMetadata(error: Error): boolean {
-	return (
-		error instanceof Error &&
-		"code" in error &&
-		(error.code === "ENOENT" || error.code === "ENOTDIR")
-	);
+	return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

@@ -1,23 +1,68 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	chmod,
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import {
-	parseNamedJsonInventory,
-	parseTerminalInventory,
-} from "../server/src/adapters/capability-inventory.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { parseNamedJsonInventory } from "../server/src/adapters/capability-inventory.ts";
+import { createClaudeCodeAdapter } from "../server/src/adapters/claude-code.ts";
 import { createCodexAdapter } from "../server/src/adapters/codex.ts";
 import { createHermesAdapter } from "../server/src/adapters/hermes.ts";
 
 const roots: string[] = [];
 
 afterEach(async () => {
+	vi.unstubAllEnvs();
 	await Promise.all(
 		roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
 	);
 });
 
 describe("native capability inventory", () => {
+	it("reads Claude agent definition filenames without executing its native session listing", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-claude-metadata-"));
+		roots.push(root);
+		vi.stubEnv("CLAUDE_CONFIG_DIR", root);
+		await mkdir(join(root, "agents"));
+		await writeFile(
+			join(root, "agents", "reviewer.md"),
+			"PRIVATE_AGENT_PROMPT",
+		);
+		await writeFile(join(root, "agents", "unrelated.json"), "PRIVATE_CONFIG");
+		await mkdir(join(root, "agents", "directory.md"));
+		const executable = join(root, "claude.mjs");
+		const logPath = join(root, "commands.jsonl");
+		await writeFile(
+			executable,
+			`#!${process.execPath}\nimport { appendFileSync } from 'node:fs';\nappendFileSync(${JSON.stringify(logPath)}, JSON.stringify(process.argv.slice(2)) + '\\n');\nconsole.log('[]');\n`,
+			{ mode: 0o700 },
+		);
+		const groups = await createClaudeCodeAdapter({
+			claudeCodePath: executable,
+		}).inspectCapabilities({
+			id: "claude-code",
+			adapter: "claude-code",
+			displayName: "Claude Code",
+			model: null,
+			createdAt: "2026-09-14T00:00:00.000Z",
+		});
+		expect(groups.find((group) => group.id === "agents")).toMatchObject({
+			status: "available",
+			items: [{ name: "reviewer", status: "configured" }],
+		});
+		expect(await readFile(logPath, "utf8")).toBe(
+			'["plugin","list","--json"]\n',
+		);
+		expect(JSON.stringify(groups)).not.toMatch(
+			/PRIVATE_|unrelated|directory\.md/u,
+		);
+		expect(JSON.stringify(groups)).not.toContain(root);
+	});
 	it("keeps only browser-safe names and native state from JSON", () => {
 		const output = JSON.stringify({
 			installed: [
@@ -34,18 +79,6 @@ describe("native capability inventory", () => {
 		expect(parseNamedJsonInventory(output)).toEqual([
 			{ name: "browser", status: "enabled" },
 			{ name: "disabled@example", status: "disabled" },
-		]);
-	});
-
-	it("normalizes native terminal formats without retaining descriptions", () => {
-		expect(
-			parseTerminalInventory(
-				"●  ✓ context7 connected\nExplore · haiku\n✓ enabled  web  private detail",
-			),
-		).toEqual([
-			{ name: "context7", status: "enabled" },
-			{ name: "Explore", status: "configured" },
-			{ name: "web", status: "enabled" },
 		]);
 	});
 

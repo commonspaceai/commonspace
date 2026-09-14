@@ -1,18 +1,21 @@
-import { access, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { HarnessCapabilityGroup } from "@commonspace/shared";
 import { unavailableGroup } from "./capability-inventory.js";
-import { inspectMcpMetadata } from "./capability-metadata.js";
+import {
+	inspectMcpMetadata,
+	inspectResourceDirectories,
+	inspectUserSkills,
+} from "./capability-metadata.js";
 import { readHarnessCommand } from "./discovery.js";
 import type { AgentAdapterConfig, NativeAgentAdapter } from "./types.js";
 
-/** Later releases regress ACP history reload; expand only after native fixture verification. */
+/** Compatibility baseline only; native late-history replay remains an upstream limitation. */
 export function assertGeminiAcpVersion(output: string): void {
 	const version = output.trim().replace(/^v/u, "");
-	if (/^0\.(39|4[0-3])\.\d+$/u.test(version) && version !== "0.39.0") return;
+	if (/^0\.(39|4[0-3])\.(0|[1-9]\d*)$/u.test(version) && version !== "0.39.0")
+		return;
 	throw new Error(
-		"Gemini CLI requires >=0.39.1 and <0.44.0 for verified ACP session continuity. Use 0.43.0; newer versions need revalidation after observed resume regressions.",
+		"Gemini CLI is outside the supported ACP version range: stable >=0.39.1 and <0.44.0. The tested baseline is 0.43.0; native history replay remains an upstream limitation. Newer versions require revalidation.",
 	);
 }
 
@@ -47,8 +50,17 @@ export function createGeminiAdapter(
 					"mcpServers",
 					"Gemini CLI user settings metadata",
 				),
-				inspectGeminiDirectory("skills", join(root, "skills")),
-				inspectGeminiDirectory("plugins", join(root, "extensions")),
+				inspectUserSkills(
+					[join(root, "skills")],
+					"Gemini CLI user skills metadata",
+				),
+				inspectResourceDirectories([join(root, "extensions")], {
+					id: "plugins",
+					marker: "gemini-extension.json",
+					source: "Gemini CLI user extension directory metadata",
+					notice:
+						"User extension folders containing gemini-extension.json. Linked folders are included; runtime loading and enabled state are not verified. Contents and host paths remain private.",
+				}),
 				unavailableGroup(
 					"memory",
 					source,
@@ -79,7 +91,15 @@ export function createGeminiAdapter(
 			assertGeminiAcpVersion(
 				await readHarnessCommand(cliPath, ["--version"], signal),
 			);
-			return { command, args, env: { ...process.env, NO_BROWSER: "1" } };
+			return {
+				command,
+				args,
+				env: { ...process.env, NO_BROWSER: "1" },
+				// The ACP executable can differ from discovery or change after preflight.
+				validateInitialization(response) {
+					assertGeminiAcpVersion(response.agentInfo?.version ?? "");
+				},
+			};
 		},
 		sessionSettings({ fullAccess, model }) {
 			const settings: ReturnType<NativeAgentAdapter["sessionSettings"]> = {
@@ -89,61 +109,4 @@ export function createGeminiAdapter(
 			return settings;
 		},
 	};
-}
-
-async function inspectGeminiDirectory(
-	id: "skills" | "plugins",
-	path: string,
-): Promise<HarnessCapabilityGroup> {
-	try {
-		const entries = await readdir(path, { withFileTypes: true });
-		const marker = id === "skills" ? "SKILL.md" : "gemini-extension.json";
-		const names = await Promise.all(
-			entries
-				.filter(
-					(entry) => entry.isDirectory() && isSafeMetadataName(entry.name),
-				)
-				.map(async (entry) => {
-					try {
-						await access(join(path, entry.name, marker));
-						return entry.name;
-					} catch {
-						return undefined;
-					}
-				}),
-		);
-		return {
-			id,
-			status: "available",
-			source: `Gemini CLI user ${id} metadata`,
-			notice: `Configured user ${id} names only; contents and host paths remain private.`,
-			items: names
-				.filter((name): name is string => name !== undefined)
-				.map((name) => ({ name, status: "configured" })),
-		};
-	} catch (error) {
-		if (error instanceof Error && isMissing(error))
-			return {
-				id,
-				status: "available",
-				source: `Gemini CLI user ${id} metadata`,
-				notice: `No user ${id} directory is present.`,
-				items: [],
-			};
-		return {
-			id,
-			status: "error",
-			source: `Gemini CLI user ${id} metadata`,
-			notice: `Native ${id} metadata could not be inspected.`,
-			items: [],
-		};
-	}
-}
-
-function isSafeMetadataName(name: string): boolean {
-	return /^[\p{L}\p{N}][\p{L}\p{N} ._:@()+-]{0,119}$/u.test(name);
-}
-
-function isMissing(error: Error): boolean {
-	return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

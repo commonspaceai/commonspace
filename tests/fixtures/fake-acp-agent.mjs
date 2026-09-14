@@ -178,13 +178,19 @@ for await (const line of lines) {
 						: JSON.parse(process.env.CODEX_CONFIG),
 			});
 		}
+		const agentCapabilities = { loadSession: true };
+		if (process.env.FAKE_ACP_NO_MCP !== "1")
+			agentCapabilities.mcpCapabilities = { http: true, sse: true };
 		await writeFrame({
 			jsonrpc: "2.0",
 			id: frame.id,
 			result: {
 				protocolVersion: 1,
-				agentCapabilities: { loadSession: true },
-				agentInfo: { name: "fake-acp-agent", version: "1.0.0" },
+				agentCapabilities,
+				agentInfo: {
+					name: "fake-acp-agent",
+					version: process.env.FAKE_ACP_VERSION ?? "1.0.0",
+				},
 			},
 		});
 		continue;

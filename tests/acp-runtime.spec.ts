@@ -4,7 +4,10 @@ import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AcpAgentProcess } from "../server/src/acp-runtime.ts";
+import {
+	AcpAgentProcess,
+	type AcpRunInput,
+} from "../server/src/acp-runtime.ts";
 
 const roots: string[] = [];
 const fixturePath = join(
@@ -20,6 +23,46 @@ afterEach(async () => {
 });
 
 describe("ACP agent process", () => {
+	it.each([undefined, "saved-native-session"])(
+		"rejects unadvertised HTTP MCP before sending session data (%s)",
+		async (sessionId) => {
+			const root = await mkdtemp(
+				join(tmpdir(), "commonspace-acp-mcp-support-"),
+			);
+			roots.push(root);
+			const logPath = join(root, "frames.ndjson");
+			const client = new AcpAgentProcess({
+				command: process.execPath,
+				args: [fixturePath],
+				cwd: root,
+				env: { ...process.env, FAKE_ACP_LOG: logPath, FAKE_ACP_NO_MCP: "1" },
+			});
+			try {
+				const input: AcpRunInput = {
+					cwd: root,
+					message: "Never delivered.",
+					mcpServers: [
+						{
+							type: "http",
+							name: "commonspace",
+							url: "http://127.0.0.1:3100/api/mcp",
+							headers: [{ name: "Authorization", value: "PRIVATE_CAPABILITY" }],
+						},
+					],
+				};
+				if (sessionId !== undefined) input.sessionId = sessionId;
+				await expect(client.run(input)).rejects.toThrow(
+					"does not support ACP HTTP MCP servers",
+				);
+				const frames = await readFile(logPath, "utf8");
+				expect(frames).not.toMatch(
+					/session\/(new|load|prompt)|PRIVATE_CAPABILITY|saved-native-session/u,
+				);
+			} finally {
+				await client.close();
+			}
+		},
+	);
 	it.skipIf(process.platform === "win32")(
 		"reaps a native child even when its bridge exits before cleanup",
 		async () => {

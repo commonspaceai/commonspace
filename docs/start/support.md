@@ -36,11 +36,11 @@ Start with [Contributing](../../CONTRIBUTING.md) for a fresh checkout and [Devel
 | --- | --- |
 | Codex | Installed CLI through bundled `@agentclientprotocol/codex-acp`. |
 | Claude Code | Installed CLI through bundled `@agentclientprotocol/claude-agent-acp` 0.75.0; account-free fixture verifies bundled CLI 2.1.257. |
-| Gemini CLI | Native `gemini --acp`; requires stable `>=0.39.1` and `<0.44.0`. Use tested version **0.43.0**. Later tested releases regress exact session resume and are rejected during discovery and launch. |
+| Gemini CLI | Native `gemini --acp`; the compatibility baseline accepts stable `>=0.39.1` and `<0.44.0` and tests **0.43.0**. CLI preflight and actual ACP initialization versions are checked. Longer-history replay in **0.43.0** can append old replies to a continuation, so full resume compatibility is blocked. **0.59.0** also failed session reload and remains rejected. |
 | OpenCode | Native `opencode acp`; account-free fixture verifies **1.18.29**. |
 | Hermes | Installed `hermes acp`, using existing native profiles. Verify with `hermes acp --check`; Commonspace discovers profiles with `hermes profile list`. |
 
-Codex, Hermes, Claude Code, Gemini CLI, and OpenCode are built-in harnesses. Pi coding agent remains planned until its integration passes the same native-session and scoped MCP requirements. See the [adapter guide](../adapters/agent-adapters.md#hermes-setup) for Hermes setup, compatibility evidence, and the format for adding another runtime.
+Codex, Hermes, Claude Code, Gemini CLI, and OpenCode are built-in harnesses. Pi coding agent remains blocked: the published `pi-acp` **0.0.33** bridge does not wire session-scoped MCP into Pi. See the [adapter guide](../adapters/agent-adapters.md#pi-integration-status) for Pi's requirements and [Gemini revalidation evidence](../adapters/agent-adapters.md#gemini-revalidation-evidence). Hermes setup and the format for adding another runtime are also in that guide.
 
 ## What the checks cover
 

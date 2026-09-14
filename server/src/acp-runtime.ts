@@ -51,6 +51,8 @@ export interface AcpAgentProcessOptions {
 	maxResponseChars?: number;
 	maxProtocolFrameBytes?: number;
 	clientName?: string;
+	/** Adapter compatibility check before sending any native-session or MCP data. */
+	validateInitialization?(response: InitializeResponse): void;
 }
 
 export interface AcpRunInput {
@@ -693,6 +695,7 @@ export class AcpAgentProcess {
 					`ACP protocol version ${String(initializeResponse.protocolVersion)} is not supported`,
 				);
 			}
+			this.#options.validateInitialization?.(initializeResponse);
 			this.#initializeResponse = initializeResponse;
 		} catch (error) {
 			this.#connection?.close(error);
@@ -707,6 +710,19 @@ export class AcpAgentProcess {
 	): Promise<SessionSetup> {
 		const additionalDirectories = [...(input.additionalCwds ?? [])];
 		const mcpServers = [...(input.mcpServers ?? [])];
+		for (const server of mcpServers) {
+			if (
+				"type" in server &&
+				(server.type === "http" || server.type === "sse") &&
+				this.#initializeResponse?.agentCapabilities?.mcpCapabilities?.[
+					server.type
+				] !== true
+			) {
+				throw new Error(
+					`The native runtime does not support ACP ${server.type.toUpperCase()} MCP servers required for shared context.`,
+				);
+			}
+		}
 		const binding = JSON.stringify({
 			cwd: input.cwd,
 			additionalDirectories,

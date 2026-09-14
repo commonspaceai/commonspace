@@ -28,10 +28,12 @@ switch (adapter) {
 		break;
 	}
 	case "gemini": {
-		options.geminiPath = join(
-			dirname(require.resolve("@google/gemini-cli/package.json")),
-			"bundle/gemini.js",
-		);
+		options.geminiPath =
+			process.env.COMMONSPACE_TEST_GEMINI_PATH ??
+			join(
+				dirname(require.resolve("@google/gemini-cli/package.json")),
+				"bundle/gemini.js",
+			);
 		break;
 	}
 	case "opencode": {
