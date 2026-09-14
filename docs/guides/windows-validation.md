@@ -6,7 +6,11 @@ This guide owns Windows installation and source-validation evidence. Commonspace
 
 The Windows CI job targets **Windows Server 2025 x64, Node.js 22, and pnpm 10.34.5**, with PowerShell and managed Chromium. A passing run establishes only the checks listed below for that exact commit. It does not establish Windows ARM64, all Windows desktop versions, every agent runtime, native dialogs/notifications, or console Ctrl+C.
 
-The implementation was developed on macOS. Windows Actions execution is pending until a successful run is linked in the candidate acceptance record. Do not translate local tests of Windows argument construction into a Windows execution claim.
+Run these checks in native Windows PowerShell. WSL executes the Linux path and does not establish native Windows coverage.
+
+Baseline verified on **2026-09-14** at commit `26dafa4d31bb2f5fa750082ae9e24dd4bacb4980`: [CI run 34850693783](https://github.com/ralphbibera/commonspace/actions/runs/34850693783) passed on Windows Server 2025 x64 with Node.js **22.23.2**. It passed 25 platform tests, 5 Storybook smoke tests, 17 E2E flows, live browser verification, and both npm tarball smokes. Both package runs reported saved-state restart and IPC shutdown completion. The implementation and full local gate were also checked on macOS. The run built candidate tarballs from that checkout; record registry or release artifact identity separately when checking a published release. Record a fresh run for each release candidate.
+
+Interactive Windows desktop acceptance and authenticated Windows agent checks are **Not run — no interactive Windows desktop or configured Windows agent accounts were available for this validation**. Use the manual checks below to close those gaps.
 
 | Automated check | Evidence |
 | --- | --- |

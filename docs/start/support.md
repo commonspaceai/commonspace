@@ -10,7 +10,7 @@ The `commonspace` npm package requires Node.js 22 or newer. npm installs externa
 | --- | --- | --- |
 | Apple Silicon or Intel Mac | Supported npm installation | Foreground package; source checkout can install a per-user service |
 | Linux | Supported npm installation | Foreground package |
-| Windows x64 | Candidate automated validation; see [Windows evidence and limits](../guides/windows-validation.md) | Foreground only; no Windows service installer |
+| Windows x64 | Candidate tarball verified on Windows Server 2025 x64; see [Windows evidence and limits](../guides/windows-validation.md) | Foreground only; no Windows service installer |
 
 The release workflow installs one npm tarball in a clean Linux prefix, then validates that exact tarball on Windows before publication. It exercises the npm command, API, UI assets, saved-state restart, and graceful shutdown. Windows uses private IPC disconnect for automated shutdown; terminal Ctrl+C needs separate acceptance. macOS service behavior remains a separate source-based check. See workflow results and release notes for evidence about a particular version.
 
@@ -24,7 +24,7 @@ Commonspace does not currently ship a desktop app wrapper. Follow [Installation]
 | pnpm | Use version 10.34.5 and `pnpm install --frozen-lockfile`. |
 | macOS and Linux | Supported source-development environments. Linux runs the main CI checks; macOS also has service checks. |
 | Windows x64 | CI targets Node 22 on `windows-2025`: types/builds, the focused platform suite, Storybook smoke, E2E, live browser verification, and npm packaging. See [actual evidence and manual checks](../guides/windows-validation.md); this is not the full native-runtime suite. |
-| Git and Corepack | Needed for repository development and the source-based macOS installation. Published-package users need npm or `npx`. |
+| Git and Corepack | Git is needed for source workflows. Corepack can provide pnpm and is required by the macOS service installer. Published-package users need npm or `npx`. |
 | Vite | Serves the development UI at `127.0.0.1:5173` and forwards API requests to the local server. |
 | Express | Serves the local API at `127.0.0.1:3100`. |
 
