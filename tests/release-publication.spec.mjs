@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { releaseCreationRequired } from "../scripts/ensure-github-release.mjs";
-import { verifyPublishedPackage } from "../scripts/verify-npm-publication.mjs";
+import {
+	publicationRetryDelay,
+	verifyPublishedPackage,
+} from "../scripts/verify-npm-publication.mjs";
 
 describe("release recovery", () => {
 	it("preserves a published release when a manual publication is retried", () => {
@@ -27,6 +30,17 @@ describe("release recovery", () => {
 });
 
 describe("npm publication verification", () => {
+	it("waits only for a missing version within the publication visibility deadline", () => {
+		expect(publicationRetryDelay(404, 300_000)).toBe(10_000);
+		expect(publicationRetryDelay(404, 250)).toBe(250);
+		expect(publicationRetryDelay(200, 0)).toBe(null);
+		for (const status of [401, 403, 429, 500])
+			expect(() => publicationRetryDelay(status, 300_000)).toThrow();
+		for (const remaining of [0, -1])
+			expect(() => publicationRetryDelay(404, remaining)).toThrow(
+				"five minutes",
+			);
+	});
 	const expected = {
 		name: "commonspace",
 		version: "0.0.4",

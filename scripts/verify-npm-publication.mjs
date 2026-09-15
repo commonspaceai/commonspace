@@ -1,10 +1,18 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { setTimeout } from "node:timers/promises";
 import { fileURLToPath, URL } from "node:url";
-import { promisify } from "node:util";
-import { npmCommand } from "./tool-command.mjs";
+
+export function publicationRetryDelay(status, remainingMs) {
+	if (status === 200) return null;
+	if (status === 404 && remainingMs > 0) return Math.min(10_000, remainingMs);
+	if (status === 404)
+		throw new Error(
+			"npm publication did not become visible within five minutes",
+		);
+	throw new Error(`npm registry returned HTTP ${status}`);
+}
 
 export function verifyPublishedPackage(metadata, expected) {
 	if (metadata?.name !== expected.name || metadata.version !== expected.version)
@@ -26,16 +34,35 @@ async function main() {
 	const integrity = `sha512-${createHash("sha512")
 		.update(await readFile(archive))
 		.digest("base64")}`;
-	const npm = npmCommand([
-		"view",
-		`${name}@${version}`,
-		"--json",
-		"--registry=https://registry.npmjs.org",
-	]);
-	const { stdout } = await promisify(execFile)(npm.command, npm.args, {
-		maxBuffer: 1024 * 1024,
-	});
-	verifyPublishedPackage(JSON.parse(stdout), { name, version, integrity });
+	const deadline = Date.now() + 300_000;
+	for (;;) {
+		const remainingMs = deadline - Date.now();
+		if (remainingMs <= 0)
+			throw new Error(
+				"npm publication did not become visible within five minutes",
+			);
+		const response = await fetch(
+			`https://registry.npmjs.org/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
+			{
+				cache: "no-store",
+				signal: globalThis.AbortSignal.timeout(Math.min(30_000, remainingMs)),
+			},
+		);
+		const delay = publicationRetryDelay(response.status, deadline - Date.now());
+		if (delay === null) {
+			verifyPublishedPackage(await response.json(), {
+				name,
+				version,
+				integrity,
+			});
+			break;
+		}
+		await response.body?.cancel();
+		process.stdout.write(
+			`Waiting for npm to make ${name}@${version} available.\n`,
+		);
+		await setTimeout(delay);
+	}
 	process.stdout.write(
 		`Verified npm ${name}@${version} matches the tested tarball (${integrity}).\n`,
 	);

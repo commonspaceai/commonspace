@@ -19,6 +19,8 @@ Use a prerelease suffix for candidates, such as `0.0.2-rc.1`. Git tags add only 
 
 Update the version and release notes through the normal contribution workflow. Release only a reviewed commit. Never move an existing release tag.
 
+Keep public release notes short: use **Improvements** and **Fixes** as needed, a few concise bullets, and a **Full changelog** link. Omit empty sections, a repeated version heading, and standard installation or support boilerplate. Include a compatibility limitation only when it explains a change in that release. Keep detailed validation in the acceptance record.
+
 ## Build and check locally
 
 Use a clean checkout with Git, Corepack, Node.js 22, and the pinned pnpm version:
@@ -68,7 +70,7 @@ After the package exists, configure npm trusted publishing for `commonspaceai/co
 
 Wait for CI to pass on the reviewed `main` commit. Before tagging, run `node scripts/package-npm.mjs --check-tag v<version>` to check the intended tag against all five workspace versions. Create the exact version tag on that commit and push it. Never tag a new version before its manifest changes are merged.
 
-The workflow supports manual dispatch from `main`: run it with the existing tag and `dry_run=true` first, then `dry_run=false` to publish npm and create the GitHub Release from `docs/releases/v<version>.md`. Publishing a GitHub Release for the tag also starts the workflow through the `published` event. Manual dispatch can recover an existing release without replacing its notes.
+Publish a GitHub Release for the tag using `docs/releases/v<version>.md` as its notes. The `published` event runs the Release workflow, which verifies and publishes npm automatically. Do not publish npm from a local terminal. Manual dispatch from `main` is only for a dry run or recovery of an existing tag; recovery preserves an existing release's notes.
 
 The workflow:
 
@@ -76,7 +78,7 @@ The workflow:
 2. Runs the complete local checks and integrated live verifier.
 3. Builds one npm tarball and installs it into a clean Linux prefix, then downloads that same artifact into the Windows job for runtime smoke testing. Publication requires both jobs to pass.
 4. Previews `npm publish` during a dry run.
-5. After an approved non-dry run, rechecks the remote tag commit and publishes with npm provenance. An already-published version skips the duplicate publication. Both paths verify npm's package identity and SHA-512 integrity against the tested tarball; an integrity mismatch fails the run.
+5. After an approved non-dry run, rechecks the remote tag commit and publishes with npm provenance. An already-published version skips the duplicate publication. Both paths verify npm's package identity and SHA-512 integrity against the tested tarball. npm can accept a publication before making it visible, so verification polls a missing version for up to five minutes. Other registry failures and identity or integrity mismatches fail immediately.
 6. For a published GitHub Release, leaves the existing release in place; for manual dispatch, preserves an existing published release or creates one using the reviewed notes. API failures and existing drafts stop recovery with an error.
 
 The first `commonspace` package version needs a one-time maintainer-authenticated bootstrap because npm trusted-publisher configuration requires the package to exist. Publish the verified `0.0.1` tarball once with npm 2FA, then configure the GitHub Actions trusted publisher. If the published GitHub Release event sees that exact version already present, the workflow skips a duplicate npm publish and completes the GitHub-side release automation. Future versions use the published-release trigger end to end.
