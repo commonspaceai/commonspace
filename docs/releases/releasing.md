@@ -19,7 +19,7 @@ Use a prerelease suffix for candidates, such as `0.0.2-rc.1`. Git tags add only 
 
 Update the version and release notes through the normal contribution workflow. Release only a reviewed commit. Never move an existing release tag.
 
-Keep public release notes short: use **Improvements** and **Fixes** as needed, a few concise bullets, and a **Full changelog** link. Omit empty sections, a repeated version heading, and standard installation or support boilerplate. Include a compatibility limitation only when it explains a change in that release. Keep detailed validation in the acceptance record.
+Use the exact tag as the release title, such as **v0.0.4**, without a product-name prefix. Keep public release notes short: use **Improvements** and **Fixes** as needed, a few concise bullets, and a **Full changelog** link. Omit empty sections, a repeated version heading, and standard installation or support boilerplate. Include a compatibility limitation only when it explains a change in that release. Keep detailed validation in the acceptance record.
 
 ## Build and check locally
 

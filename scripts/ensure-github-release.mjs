@@ -64,7 +64,7 @@ async function main() {
 		"--verify-tag",
 		`--prerelease=${String(prerelease)}`,
 		"--title",
-		`Commonspace ${RELEASE_TAG}`,
+		RELEASE_TAG,
 		"--notes-file",
 		`docs/releases/${RELEASE_TAG}.md`,
 	]);
