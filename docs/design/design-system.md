@@ -73,6 +73,6 @@ Respect `prefers-reduced-motion`. Use text, icons, and semantic state alongside 
 2. Update the smallest owner and preserve existing behavior.
 3. Add or update the Storybook states that demonstrate the change, including affected empty, loading, error, and selected states.
 4. Inspect the rendered result in Light and Dark modes.
-5. Run the appropriate [development checks](../guides/development.md#development-workflow) and complete the [visual review](visual-verification.md).
+5. Run the appropriate [development checks](../guides/development.md#verification-commands) and complete the [visual review](visual-verification.md).
 
 Keep [DESIGN.md](../../DESIGN.md) current when changing a visual requirement. Product documentation should explain what users can do; token names and implementation details belong here.

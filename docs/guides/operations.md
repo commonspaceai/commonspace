@@ -132,7 +132,7 @@ curl http://127.0.0.1:3100/api/health
 
 A healthy response is `{"status":"ok"}`. Adjust the port if configured differently. This checks server availability; it does not establish that an agent is authenticated or that a browser interaction works.
 
-See [Development](development.md) for application checks and [Releasing](../releases/releasing.md) for package, service, and harness checks. ACP checks are opt-in and use locally authenticated harnesses and model access.
+See [Development](development.md) for application checks and [Releasing](releasing.md) for package, service, and harness checks. ACP checks are opt-in and use locally authenticated harnesses and model access.
 
 ## OS notifications
 

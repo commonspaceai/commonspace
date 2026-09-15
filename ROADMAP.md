@@ -1,6 +1,6 @@
 # Roadmap
 
-This page lists current priorities and deferred work. It is not the product contract or release checklist; use the [Product specification](docs/specs/product-spec.md) and [Releasing](docs/releases/releasing.md) for those.
+This page lists current priorities and deferred work. It is not the product contract or release checklist; use the [Product specification](docs/specs/product-spec.md) and [Releasing](docs/guides/releasing.md) for those.
 
 ## Now
 

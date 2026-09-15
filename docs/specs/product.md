@@ -29,7 +29,7 @@ An **agent runtime**, or **harness**, is the software that runs an agent. It own
 
 ### Project
 
-A Project names resources that agents can use in a conversation. v0.0.1 supports one or more local folders. The first folder is the primary working directory; additional folders provide further context.
+A Project names resources that agents can use in a conversation. Resources currently support one or more local folders. The first folder is the primary working directory; additional folders provide further context.
 
 For example, an API repository and a documentation repository can be separate Projects referenced by the same thread. A Project does not own tasks or require its own Channel or agent copy.
 
@@ -83,8 +83,6 @@ Routing should feel immediate. The service stores each delivery mode, decision, 
 
 An individual assignment can be corrected through the service without restarting unrelated agents. Those explicit corrections form **routing memory**, which helps later routing decisions. Inline correction controls are deferred from the conversation UI.
 
-## Product decision rule
+## Product decisions
 
-A feature belongs when it improves conversation, routing, context visibility, session continuity, navigation, trust, or collaboration between one person and their agents.
-
-Features should extend the objects above. Goals, objectives, tickets, org charts, agent employees, budgets, and separate task or workflow domains remain outside the product scope. Use the [Product specification](product-spec.md) to check a proposed change against the required behavior.
+Use the [Product direction](product-direction.md#decision-filter) to assess scope and the [Product specification](product-spec.md) for required behavior.

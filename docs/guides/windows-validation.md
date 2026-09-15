@@ -8,9 +8,7 @@ The Windows CI job targets **Windows Server 2025 x64, Node.js 22, and pnpm 10.34
 
 Run these checks in native Windows PowerShell. WSL executes the Linux path and does not establish native Windows coverage.
 
-Baseline verified on **2026-09-14** at commit `26dafa4d31bb2f5fa750082ae9e24dd4bacb4980`: [CI run 34850693783](https://github.com/commonspaceai/commonspace/actions/runs/34850693783) passed on Windows Server 2025 x64 with Node.js **22.23.2**. It passed 25 platform tests, 5 Storybook smoke tests, 17 E2E flows, live browser verification, and both npm tarball smokes. Both package runs reported saved-state restart and IPC shutdown completion. The implementation and full local gate were also checked on macOS. The run built candidate tarballs from that checkout; record registry or release artifact identity separately when checking a published release. Record a fresh run for each release candidate.
-
-Interactive Windows desktop acceptance and authenticated Windows agent checks are **Not run — no interactive Windows desktop or configured Windows agent accounts were available for this validation**. Use the manual checks below to close those gaps.
+Use the candidate’s [CI run](https://github.com/commonspaceai/commonspace/actions/workflows/ci.yml) as automated evidence. Record interactive desktop and authenticated agent results separately using the checks below.
 
 | Automated check | Evidence |
 | --- | --- |
@@ -78,6 +76,6 @@ Windows process-directed `SIGINT`/`SIGTERM` forcibly terminate a Node child; ter
 
 ## Record failures and remaining work
 
-Use the [candidate acceptance template](../releases/release-acceptance-template.md). Record the exact commit/version, Windows edition/build and architecture, Node/npm/pnpm/browser versions, command, exit code, observed result, and a sanitized log or CI link. CI uploads browser failure artifacts for seven days. A rerun of a different commit does not validate the candidate.
+In the release task or PR, record the exact commit/version, Windows edition/build and architecture, Node/npm/pnpm/browser versions, command, exit code, observed result, and a sanitized log or CI link. CI uploads browser failure artifacts for seven days. A rerun of a different commit does not validate the candidate.
 
 Use `Not run — <reason>` for unavailable Windows hardware/runner, interactive desktop session, installed runtime, provider credentials/model access, or npm ownership/publishing credentials. Publication is separate from validating a local tarball. Keep unverified rows open; do not label unavailable evidence as passing or silently defer it. A missing Windows service installer is current product scope, not a foreground-validation failure.

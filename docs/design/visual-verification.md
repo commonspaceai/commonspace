@@ -129,6 +129,6 @@ The live verifier covers only part of this matrix. Record missing coverage expli
 
 ## Iteration loop
 
-For each finding, keep its evidence, fix the smallest owning component, rerun the focused journey, and inspect the changed state with adjacent states again. Before accepting a server or visible end-to-end change, run `pnpm check` and `pnpm verify:live` as described in [Development](../guides/development.md#development-workflow).
+For each finding, keep its evidence, fix the smallest owning component, rerun the focused journey, and inspect the changed state with adjacent states again. Before accepting a server or visible end-to-end change, run `pnpm check` and `pnpm verify:live` as described in [Development](../guides/development.md#verification-commands).
 
 A baseline is useful only after review. Do not approve a changed image simply because it matches the current implementation.

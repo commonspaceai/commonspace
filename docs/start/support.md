@@ -20,7 +20,7 @@ Commonspace does not currently ship a desktop app wrapper. Follow [Installation]
 
 | Requirement or tool | Current coverage |
 | --- | --- |
-| Node.js | Version 22 is the CI baseline. Newer versions satisfy the `>=22` requirement but are not separately tested by the CI matrix. |
+| Node.js | Node 22 is the CI baseline. Source requires Node 22.13+ within 22.x, or 24+; see [package.json](../../package.json) and [Development setup](../guides/development.md#setup). |
 | pnpm | Use version 10.34.5 and `pnpm install --frozen-lockfile`. |
 | macOS and Linux | Supported source-development environments. Linux runs the main CI checks; macOS also has service checks. |
 | Windows x64 | CI targets Node 22 on `windows-2025`: types/builds, the focused platform suite, Storybook smoke, E2E, live browser verification, and npm packaging. See [actual evidence and manual checks](../guides/windows-validation.md); this is not the full native-runtime suite. |
@@ -35,12 +35,12 @@ Start with [Contributing](../../CONTRIBUTING.md) for a fresh checkout and [Devel
 | Runtime | Connection and current compatibility |
 | --- | --- |
 | Codex | Installed CLI through bundled `@agentclientprotocol/codex-acp`. |
-| Claude Code | Installed CLI through bundled `@agentclientprotocol/claude-agent-acp` 0.76.0; account-free fixture verifies bundled CLI 2.1.257. |
-| Gemini CLI | Native `gemini --acp`; the compatibility baseline accepts stable `>=0.39.1` and `<0.44.0` and tests **0.43.0**. CLI preflight and actual ACP initialization versions are checked. Native reload in **0.43.0** can append old replies even after one turn. Commonspace therefore rejects Gemini session reloads before sending the saved session or a new prompt. The accepted message fails visibly and the saved session is preserved; use Gemini CLI to continue it, or `/new` for separate context. New and already-loaded sessions remain usable. **0.59.0** also failed session reload and remains rejected. |
-| OpenCode | Native `opencode acp`; account-free fixture verifies **1.18.30**. |
+| Claude Code | Installed CLI through bundled `@agentclientprotocol/claude-agent-acp`. |
+| Gemini CLI | Native `gemini --acp`. New and already-loaded sessions work; reload after restart is blocked to preserve saved work. Continue in Gemini CLI or use `/new` for fresh context. See [version limits and revalidation](../adapters/agent-adapters.md#gemini-revalidation-evidence). |
+| OpenCode | Native `opencode acp`. |
 | Hermes | Installed `hermes acp`, using existing native profiles. Verify with `hermes acp --check`; Commonspace discovers profiles with `hermes profile list`. |
 
-Codex, Hermes, Claude Code, Gemini CLI, and OpenCode are built-in harnesses. Pi coding agent remains blocked: the published `pi-acp` **0.0.33** bridge does not wire session-scoped MCP into Pi. See the [adapter guide](../adapters/agent-adapters.md#pi-integration-status) for Pi's requirements and [Gemini revalidation evidence](../adapters/agent-adapters.md#gemini-revalidation-evidence). Hermes setup and the format for adding another runtime are also in that guide.
+Codex, Hermes, Claude Code, Gemini CLI, and OpenCode are built-in harnesses. Pi coding agent remains blocked: its bridge does not wire session-scoped MCP into Pi. See the [adapter guide](../adapters/agent-adapters.md#pi-integration-status) for Pi's requirements and [Gemini revalidation evidence](../adapters/agent-adapters.md#gemini-revalidation-evidence). That guide owns tested runtime versions, setup, and integration requirements.
 
 ## What the checks cover
 
@@ -59,4 +59,4 @@ Codex, Hermes, Claude Code, Gemini CLI, and OpenCode are built-in harnesses. Pi 
 | Real Hermes, Codex, and Claude Code checks | Yes. | Agent session start, exact session resumption, and permitted context/progress tools. |
 | Real macOS service check | A local macOS user session. | Installation, startup, update, and rollback with the actual LaunchAgent. |
 
-Normal contribution checks do not need provider credentials or agent session stores. Keep those outside the repository. See [Releasing](../releases/releasing.md) for the required integration checks.
+Normal contribution checks do not need provider credentials or agent session stores. Keep those outside the repository. See [Releasing](../guides/releasing.md) for the required integration checks.

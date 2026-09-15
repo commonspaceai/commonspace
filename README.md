@@ -38,7 +38,7 @@ For code work, create a Project and reference it with `@@project`. See [Installa
 
 ## Learn more
 
-See [Product model](https://github.com/commonspaceai/commonspace/blob/main/docs/specs/product.md), [Development](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/development.md), [Operations](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/operations.md), and [Releasing](https://github.com/commonspaceai/commonspace/blob/main/docs/releases/releasing.md).
+See [Product model](https://github.com/commonspaceai/commonspace/blob/main/docs/specs/product.md), [Development](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/development.md), [Operations](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/operations.md), and [Releasing](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/releasing.md).
 
 ## Contributing
 

@@ -1,33 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { releaseCreationRequired } from "../scripts/ensure-github-release.mjs";
 import {
 	publicationRetryDelay,
 	verifyPublishedPackage,
 } from "../scripts/verify-npm-publication.mjs";
-
-describe("release recovery", () => {
-	it("preserves a published release when a manual publication is retried", () => {
-		expect(
-			releaseCreationRequired(
-				200,
-				{ tagName: "v0.0.4", isDraft: false },
-				"v0.0.4",
-			),
-		).toBe(false);
-		expect(releaseCreationRequired(200, null, "v0.0.4")).toBe(true);
-	});
-
-	it("does not treat API failures or unpublished releases as completed recovery", () => {
-		for (const status of [401, 403, 404, 429, 500])
-			expect(() => releaseCreationRequired(status, null, "v0.0.4")).toThrow();
-		for (const release of [
-			{ tagName: "v0.0.4", isDraft: true },
-			{ tagName: "v0.0.3", isDraft: false },
-			undefined,
-		])
-			expect(() => releaseCreationRequired(200, release, "v0.0.4")).toThrow();
-	});
-});
 
 describe("npm publication verification", () => {
 	it("waits only for a missing version within the publication visibility deadline", () => {

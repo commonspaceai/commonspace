@@ -6,13 +6,14 @@ Read the [Product model](../specs/product.md) for the domain and [Development](d
 
 ## Shape
 
-The pnpm workspace has three packages:
+The pnpm workspace has four packages:
 
 | Package | Responsibility |
 | --- | --- |
 | `packages/shared` | Domain contracts and pure helpers used by both server and UI |
 | `server` | Express API, persistence, routing, context, and local agent execution |
 | `ui` | Vite/React browser application |
+| `cli` | npm command, packaged server startup, and bundled UI location |
 
 The product consists of Projects, Channels, Direct Messages, Agents, messages, Threads, and their shared context. Keep feature logic near its owner and use `packages/shared` as the single source for cross-process types.
 
@@ -48,7 +49,7 @@ A typical Channel send follows this sequence:
 
 A routing or execution failure after acceptance leaves the source message in history. The browser displays the resulting attention state instead of losing the user's request.
 
-In development and preview, Vite forwards `/api` to `127.0.0.1:3100`. Production browser assets are built into `ui/dist`. The archive launcher and installed macOS service give this directory to Express so that the UI and API share one loopback origin.
+In development and preview, Vite forwards `/api` to `127.0.0.1:3100`. Production browser assets are built into `ui/dist`. The npm CLI serves its packaged `ui-dist`; the source-based macOS service serves `ui/dist`. Both use Express so the UI and API share one loopback origin.
 
 ### Browser routes
 

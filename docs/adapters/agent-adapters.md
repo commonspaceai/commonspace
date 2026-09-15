@@ -14,7 +14,7 @@ An adapter connects an installed agent to the workspace. It discovers existing i
 | `gemini` | `gemini --version`, supported-version check | Installed `gemini --acp` | Installed Gemini CLI harness |
 | `opencode` | `opencode --version` | Installed `opencode acp` | Installed OpenCode harness |
 
-The built-in general-purpose harnesses are Codex, Hermes, Claude Code, Gemini CLI, and OpenCode. Pi coding agent is a follow-up: its adapter must pass the same scoped MCP and native-session checks before registration. See the [support matrix](../start/support.md#agent-runtimes) for version limits.
+The built-in general-purpose harnesses are Codex, Hermes, Claude Code, Gemini CLI, and OpenCode. Pi coding agent is a follow-up: its adapter must pass the same scoped MCP and native-session checks before registration. Setup and verification below define tested versions; the [support matrix](../start/support.md) covers platform support.
 
 Discovery checks installation, not authentication or model access. Diagnostics report those separately as run readiness. Discovery is explicit: startup and bootstrap never launch a discovery command. The Add Agent flow sends both adapter and native ID, so matching IDs across harnesses cannot select a different runtime. Legacy ID-only requests are rejected when ambiguous. Existing roster IDs remain unique. The flow probes only the chosen harness; diagnostics and explicit addition without a cached candidate can probe the registered set.
 
@@ -142,11 +142,15 @@ pnpm verify:adapter:opencode
 Provider-backed harness checks are opt-in and may consume model usage. Run them only with the relevant installed, authenticated runtime. They use a temporary Commonspace workspace:
 
 ```bash
+pnpm verify:acp:hermes
+pnpm verify:acp:codex
 pnpm verify:acp:claude-code
-pnpm verify:acp:mcp:claude-code
+pnpm verify:acp:mcp
 ```
 
-The first check starts Claude, restarts the service, and verifies native recall using the saved session. The second verifies scoped Channel context and visible progress through MCP. Record the exact CLI/bridge versions and results; a passing synthetic ACP test does not establish real bridge compatibility.
+The runtime checks verify native session startup and resumption; Claude Code also checks recall after service restart. The MCP check verifies scoped context and visible progress; use `verify:acp:mcp:claude-code` to focus on Claude. Record the exact CLI/bridge versions and results; a passing synthetic ACP test does not establish real bridge compatibility.
+
+Codex checks honor `COMMONSPACE_CODEX_PATH`. Use a complete CLI installation, including its Code Mode companion when enabled, and a version that supports the configured native model.
 
 ### Account-free runtime verification
 

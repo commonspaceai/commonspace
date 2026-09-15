@@ -25,18 +25,7 @@ pnpm exec playwright install chromium
 
 Read [Architecture](architecture.md) for package ownership before a change that crosses boundaries.
 
-## Development workflow
-
-1. Describe the user-visible problem, the product rule involved, and the owning boundary.
-2. For behavior changes, add a focused failing test that demonstrates the missing behavior. For visual-only changes, identify the Storybook states and desktop interactions that need review.
-3. Implement the smallest change and rerun the focused verification.
-4. Update the affected user and developer documentation.
-5. Run the complete local check. Run the live verifier for server or visible end-to-end changes.
-
-```bash
-pnpm check
-pnpm verify:live
-```
+## Verification commands
 
 Choose checks by the evidence you need:
 
@@ -51,15 +40,7 @@ Choose checks by the evidence you need:
 
 The live verifier uses temporary workspace data and test runtimes. It proves production wiring without proving that an authenticated external agent works. Provider-backed harness checks are a separate opt-in step described below.
 
-For the desktop flows documented in [Using the desktop workspace](desktop-usage.md), use these focused checks during iteration:
-
-```bash
-pnpm exec vitest run tests/desktop-usability.spec.tsx
-pnpm test:storybook -- CommonspaceSearch RunDelivery CommonspaceApp
-pnpm test:e2e
-```
-
-The unit regressions protect native-control appearance and queue focus recovery. Storybook covers search error retry with preserved filters, keyboard queue mutations, unavailable delivery controls, and isolated screen states. Assembled browser tests cover routing/deep links, settings focus and save recovery, and Light/Dark/System changes across reloads. Run the complete `pnpm check` and `pnpm verify:live` after focused checks pass; inspect their rendered evidence before claiming visual acceptance.
+Use [Desktop usage](desktop-usage.md) for assembled flows and [Visual verification](../design/visual-verification.md) for rendered evidence.
 
 ## Fast UI loop
 
@@ -84,7 +65,7 @@ pnpm test:storybook:smoke
 pnpm check:ui
 ```
 
-Storybook's Vitest suite checks rendering, interactions, and accessibility in a real browser. The watch command reruns the explicit one-shot browser suite when story source or Storybook configuration changes, and its runner removes package-manager separators so forwarded file and test-name filters stay attached to Vitest. Pixel comparisons use the separate `pnpm test:visual` command, which builds Storybook and serves that exact static output on an isolated loopback server before checking that every baseline points to the expected story metadata. The optional Chromatic integration also needs a configured project; it is not required for the local workflow.
+Storybook's Vitest suite checks rendering, interactions, and accessibility in a real browser. Pixel comparisons use `pnpm test:visual`.
 
 Use the Light / Dark toolbar to inspect the actual rendering, including overlays. Follow [Visual verification](../design/visual-verification.md) for Storybook states, screenshot review, and baseline changes. Keep component permutations in Storybook and use `verify:live` for behavior that depends on the assembled application.
 
@@ -121,7 +102,7 @@ pnpm build:npm
 pnpm verify:npm-package
 ```
 
-`build:npm` bundles Commonspace-owned runtime code, copies the built UI, and writes one ignored tarball under `artifacts/npm/`. External packages remain ordinary npm dependencies. The verifier installs the tarball in a clean temporary prefix and runs it outside the source checkout without agent credentials. See [Installation](../start/install.md) and [Releasing](../releases/releasing.md).
+`build:npm` bundles Commonspace-owned runtime code, copies the built UI, and writes one ignored tarball under `artifacts/npm/`. External packages remain ordinary npm dependencies. The verifier installs the tarball in a clean temporary prefix and runs it outside the source checkout without agent credentials. See [Installation](../start/install.md) and [Releasing](releasing.md).
 
 ## Contract changes
 
@@ -142,16 +123,7 @@ The server owns Agent Client Protocol (ACP) integration. ACP connects Commonspac
 
 Keep activity provider-neutral, bounded, and based only on emitted ACP updates. Runtime-specific credentials, configuration, and native transcripts remain owned by each native harness.
 
-`pnpm verify:adapters` checks real Claude Code, Gemini CLI, and OpenCode runtimes against local model API fixtures without an account, including native restart/resume for Claude Code and OpenCode, safe Gemini reload rejection with preserved work, fresh context, scoped MCP, and progress. These checks also run in the standard test suite. Individual commands are `verify:adapter:claude-code`, `verify:adapter:gemini`, and `verify:adapter:opencode`. See the [adapter guide](../adapters/agent-adapters.md#account-free-runtime-verification).
-
-Provider-backed harness checks use local credentials and model access, so run only those relevant to the integration being changed:
-
-```bash
-pnpm verify:acp:hermes
-pnpm verify:acp:codex
-pnpm verify:acp:claude-code
-pnpm verify:acp:mcp
-```
+Use the [adapter guide](../adapters/agent-adapters.md#verification-commands) for account-free fixtures and authenticated native-session checks. Run the checks relevant to the changed runtime; fixture results do not establish provider-backed compatibility.
 
 Parser and service tests establish routing contracts; they do not measure model decomposition quality. To evaluate a configured OpenAI-compatible provider against representative cross-responsibility cases with exact constraint tokens and Project scopes, set `COMMONSPACE_ROUTING_BASE_URL`, `COMMONSPACE_ROUTING_MODEL`, and optional `COMMONSPACE_ROUTING_API_KEY`, then run:
 
@@ -161,10 +133,6 @@ pnpm verify:routing-quality
 
 This opt-in evaluation may call a remote model and incur provider cost. Record provider/model/version and results; do not turn a mocked JSON parser test into a routing-quality claim.
 
-The first three check native session startup and resumption. The MCP check also requires real harnesses to read scoped context and post visible progress. These checks complement deterministic tests; they do not replace them.
-
-The Codex live checks honor `COMMONSPACE_CODEX_PATH` when testing a particular installed CLI. Use a complete runtime installation, including its Code Mode companion when that feature is enabled. The selected CLI must support the model configured in its native settings; an authenticated but outdated CLI can still fail model requests.
-
 On macOS, `pnpm verify:notifications` checks whether the native notifier accepts a safe test alert. Use **Send test notification** in Workspace settings to check visible delivery and follow any operating-system guidance.
 
-Follow the [agent adapter guide](../adapters/agent-adapters.md) and [proposal template](../adapters/agent-adapter-template.md) when adding a harness. Claude Code checks honor `COMMONSPACE_CLAUDE_CODE_PATH`; `pnpm verify:acp:claude-code` checks native recall after service restart, and `pnpm verify:acp:mcp:claude-code` checks scoped context and progress.
+Use the [adapter proposal template](../adapters/agent-adapter-template.md) when adding a harness.

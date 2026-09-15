@@ -10,17 +10,7 @@ Read the relevant [Product specification](docs/specs/product-spec.md), [Architec
 
 ## Set up
 
-Requirements: Node.js 22.13+ or 24+, pnpm 10.34.5, and Git.
-
-```bash
-git clone git@github.com:YOUR_USERNAME/commonspace.git
-cd commonspace
-git remote add upstream git@github.com:commonspaceai/commonspace.git
-pnpm install --frozen-lockfile
-pnpm dev
-```
-
-Open `http://127.0.0.1:5173`. See [Installation](docs/start/install.md) for package/source setup and [Development](docs/guides/development.md) for the working loop.
+Clone your fork, add `commonspaceai/commonspace` as the upstream remote, and follow [Development setup](docs/guides/development.md#setup).
 
 ## Make the change
 
@@ -38,7 +28,6 @@ Use the smallest check that proves the change. Replace the example test with the
 
 ```bash
 pnpm test -- tests/channel-context.spec.ts
-pnpm check:fast
 pnpm check
 git diff --check
 ```
@@ -47,10 +36,10 @@ git diff --check
 | --- | --- |
 | Shared types, server, saved data, or security | Focused regression test, `pnpm check`, and `pnpm verify:live` |
 | UI component or screen | Storybook states, behavior checks, `pnpm check`, and desktop inspection |
-| Packaging, installation, dependencies, or release | Focused checks, `pnpm check`, `pnpm build:npm`, and `pnpm verify:npm-package` |
+| Packaging, installation, dependencies, or release | Focused checks, `pnpm check`, `pnpm package:npm`, and `pnpm verify:npm-package` |
 | Documentation or templates only | Links, commands, Markdown syntax, and `git diff --check` |
 
-Use [Visual verification](docs/design/visual-verification.md) for rendered UI review and [Releasing](docs/releases/releasing.md) for candidate checks. Real-agent and real-service checks are additional; record what ran and what did not.
+Use [Visual verification](docs/design/visual-verification.md) for rendered UI review and [Releasing](docs/guides/releasing.md) for candidate checks. Real-agent and real-service checks are additional; record what ran and what did not.
 
 ## Pull requests
 

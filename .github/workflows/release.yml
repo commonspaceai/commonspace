@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to publish (for example, v0.0.1).
+        description: Existing version tag to verify or retry (for example, v0.0.4).
         required: true
         type: string
       dry_run:
@@ -75,6 +75,16 @@ jobs:
             --jq '.workflow_runs[0] | [.status, .conclusion] | join(":")')"
           if [[ "$result" != "completed:success" ]]; then
             echo "::error::The tagged commit must pass CI on main before release. Current result: $result"
+            exit 1
+          fi
+      - name: Require a published GitHub Release before npm publication
+        if: ${{ github.event_name == 'release' || ! inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          is_draft="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+          if [[ "$is_draft" != "false" ]]; then
+            echo "::error::Publish the GitHub Release before retrying npm publication."
             exit 1
           fi
       - name: Require publication to be explicitly enabled
@@ -146,7 +156,7 @@ jobs:
     timeout-minutes: 10
     environment: npm-release
     permissions:
-      contents: write
+      contents: read
       id-token: write
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
@@ -207,9 +217,3 @@ jobs:
           npm publish artifacts/npm/*.tgz --access public --provenance --tag "$dist_tag"
       - name: Verify npm serves the tested tarball
         run: node scripts/verify-npm-publication.mjs
-      - name: Ensure GitHub release for manual dispatch
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ needs.resolve.outputs.sha }}
-        run: node scripts/ensure-github-release.mjs
