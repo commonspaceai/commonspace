@@ -64,7 +64,7 @@ Keep credentials and transcripts local. Copy the [candidate acceptance template]
 
 The `commonspace` npm name has prior unpublished registry history, so do not assume this repository controls it. Before enabling publication, confirm the intended npm owner can reclaim and publish that name; otherwise choose a new package name in `cli/package.json` and update user-facing commands. For a new package, bootstrap once from the locally verified tarball with maintainer npm authentication and two-factor approval. Do not store that credential in the repository.
 
-After the package exists, configure npm trusted publishing for this repository, `release.yml`, and the `npm-release` GitHub environment; then disable token-based package publication. Create the repository variable `NPM_RELEASE_ENABLED=true` only after those controls are live. Non-dry runs fail closed while the variable is absent.
+After the package exists, configure npm trusted publishing for `commonspaceai/commonspace`, `release.yml`, and the `npm-release` GitHub environment; then disable token-based package publication. If repository ownership changes, update the npm trusted publisher to match the new owner before publishing again. Create the repository variable `NPM_RELEASE_ENABLED=true` only after those controls are live. Non-dry runs fail closed while the variable is absent.
 
 Create the exact version tag on a reviewed `main` commit and push it, then create and publish a GitHub Release for that tag. The `published` release event starts the Release workflow automatically. The workflow also supports manual dispatch for dry-run and recovery; leave `dry_run` enabled first for that path.
 

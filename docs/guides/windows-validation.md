@@ -8,7 +8,7 @@ The Windows CI job targets **Windows Server 2025 x64, Node.js 22, and pnpm 10.34
 
 Run these checks in native Windows PowerShell. WSL executes the Linux path and does not establish native Windows coverage.
 
-Baseline verified on **2026-09-14** at commit `26dafa4d31bb2f5fa750082ae9e24dd4bacb4980`: [CI run 34850693783](https://github.com/ralphbibera/commonspace/actions/runs/34850693783) passed on Windows Server 2025 x64 with Node.js **22.23.2**. It passed 25 platform tests, 5 Storybook smoke tests, 17 E2E flows, live browser verification, and both npm tarball smokes. Both package runs reported saved-state restart and IPC shutdown completion. The implementation and full local gate were also checked on macOS. The run built candidate tarballs from that checkout; record registry or release artifact identity separately when checking a published release. Record a fresh run for each release candidate.
+Baseline verified on **2026-09-14** at commit `26dafa4d31bb2f5fa750082ae9e24dd4bacb4980`: [CI run 34850693783](https://github.com/commonspaceai/commonspace/actions/runs/34850693783) passed on Windows Server 2025 x64 with Node.js **22.23.2**. It passed 25 platform tests, 5 Storybook smoke tests, 17 E2E flows, live browser verification, and both npm tarball smokes. Both package runs reported saved-state restart and IPC shutdown completion. The implementation and full local gate were also checked on macOS. The run built candidate tarballs from that checkout; record registry or release artifact identity separately when checking a published release. Record a fresh run for each release candidate.
 
 Interactive Windows desktop acceptance and authenticated Windows agent checks are **Not run — no interactive Windows desktop or configured Windows agent accounts were available for this validation**. Use the manual checks below to close those gaps.
 
@@ -28,7 +28,7 @@ The full `pnpm test` suite includes native runtime fixtures and platform-specifi
 Install Git and Node.js 22 with npm. In PowerShell, select a clean candidate checkout; include a space in the checkout path when validating path handling. Use the exact commit being assessed:
 
 ```powershell
-git clone https://github.com/ralphbibera/commonspace.git "Commonspace validation"
+git clone https://github.com/commonspaceai/commonspace.git "Commonspace validation"
 Set-Location "Commonspace validation"
 git checkout <candidate-commit>
 node --version

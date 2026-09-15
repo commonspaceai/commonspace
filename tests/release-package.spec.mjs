@@ -46,11 +46,11 @@ function cliManifest(version = "0.0.1") {
 		keywords: npmKeywords,
 		repository: {
 			type: "git",
-			url: "git+ssh://git@github.com/ralphbibera/commonspace.git",
+			url: "git+ssh://git@github.com/commonspaceai/commonspace.git",
 			directory: "cli",
 		},
-		homepage: "https://github.com/ralphbibera/commonspace#readme",
-		bugs: { url: "https://github.com/ralphbibera/commonspace/issues" },
+		homepage: "https://github.com/commonspaceai/commonspace#readme",
+		bugs: { url: "https://github.com/commonspaceai/commonspace/issues" },
 		engines: { node: ">=22" },
 		dependencies: {
 			"@agentclientprotocol/codex-acp": "1.6.2",
@@ -110,11 +110,11 @@ describe("npm release package", () => {
 			keywords: npmKeywords,
 			repository: {
 				type: "git",
-				url: "git+ssh://git@github.com/ralphbibera/commonspace.git",
+				url: "git+ssh://git@github.com/commonspaceai/commonspace.git",
 				directory: "cli",
 			},
-			homepage: "https://github.com/ralphbibera/commonspace#readme",
-			bugs: { url: "https://github.com/ralphbibera/commonspace/issues" },
+			homepage: "https://github.com/commonspaceai/commonspace#readme",
+			bugs: { url: "https://github.com/commonspaceai/commonspace/issues" },
 			engines: { node: ">=22" },
 			dependencies: {
 				"@agentclientprotocol/codex-acp": "1.6.2",

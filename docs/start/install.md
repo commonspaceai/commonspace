@@ -69,7 +69,7 @@ You can open the workspace without an agent. To send your first message:
 Contributors and maintainers can run the repository directly:
 
 ```bash
-git clone git@github.com:ralphbibera/commonspace.git
+git clone git@github.com:commonspaceai/commonspace.git
 cd commonspace
 corepack enable
 pnpm install --frozen-lockfile

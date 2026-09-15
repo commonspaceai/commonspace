@@ -125,7 +125,7 @@ jobs:
         run: node scripts/verify-npm-package.mjs
 
   publish:
-    if: ${{ github.repository == 'ralphbibera/commonspace' && (github.event_name == 'release' || ! inputs.dry_run) }}
+    if: ${{ github.repository == 'commonspaceai/commonspace' && (github.event_name == 'release' || ! inputs.dry_run) }}
     needs: [resolve, verify, windows-package]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
