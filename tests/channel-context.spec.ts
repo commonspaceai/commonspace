@@ -224,16 +224,15 @@ describe("editable shared Channel context", () => {
 			summary: "Last valid Thread context.",
 		});
 		const completion = deferred<Response>();
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async () => completion.promise),
-		);
+		const request = vi.fn(() => completion.promise);
+		vi.stubGlobal("fetch", request);
 
 		const compacting = service.compactThreadContext(thread.id);
 		await vi.waitFor(() => {
 			expect(service.snapshot().threads[0]?.context.memory.status).toBe(
 				"compacting",
 			);
+			expect(request).toHaveBeenCalledOnce();
 		});
 		const compactingFailure = expect(compacting).rejects.toThrow(
 			"thread compactor unavailable",
