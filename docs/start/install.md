@@ -66,7 +66,7 @@ You can open the workspace without an agent. To send your first message:
 
 ## Run from source
 
-Contributors and maintainers can run the repository directly:
+Contributors and maintainers can run the repository directly with Node.js 22.13+ or 24+:
 
 ```bash
 git clone git@github.com:commonspaceai/commonspace.git

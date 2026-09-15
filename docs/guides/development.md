@@ -4,7 +4,7 @@ Use this guide to run Commonspace from source, choose the right verification loo
 
 ## Setup
 
-Use Node.js 22 or newer, Git, and the pnpm version pinned by `packageManager` in [`package.json`](../../package.json). Corepack can provide that pnpm version.
+Use Node.js 22.13+ or 24+, Git, and the pnpm version pinned by `packageManager` in [`package.json`](../../package.json). Corepack can provide that pnpm version.
 
 From the repository root:
 

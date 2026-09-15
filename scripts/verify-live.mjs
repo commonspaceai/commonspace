@@ -164,7 +164,9 @@ async function requireExperienceVisible(locator, label) {
 		return target;
 	} catch (error) {
 		const detail = error instanceof Error ? `: ${error.message}` : "";
-		throw new Error(`experience audit could not find ${label}${detail}`);
+		throw new Error(`experience audit could not find ${label}${detail}`, {
+			cause: error,
+		});
 	}
 }
 
@@ -186,7 +188,6 @@ async function runExperienceAudit(page) {
 	const failedRequests = [];
 	const states = [];
 	let stateIndex = 0;
-	let tracingStarted = false;
 	let failure = null;
 
 	const onPageError = (error) => pageErrors.push(error.message);
@@ -210,7 +211,6 @@ async function runExperienceAudit(page) {
 		snapshots: true,
 		sources: true,
 	});
-	tracingStarted = true;
 
 	const capture = async (id, action, note) => {
 		const state = await captureExperienceState(
@@ -490,7 +490,7 @@ async function runExperienceAudit(page) {
 		}
 		throw error;
 	} finally {
-		if (tracingStarted) await context.tracing.stop({ path: trace });
+		await context.tracing.stop({ path: trace });
 		await writeFile(
 			join(experienceArtifactDir, "audit.json"),
 			`${JSON.stringify(

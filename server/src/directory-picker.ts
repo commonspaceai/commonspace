@@ -44,7 +44,9 @@ async function selectDirectoryOnLinux(): Promise<string> {
 			error instanceof Error && "code" in error ? error.code : undefined;
 		if (code === 1) return "";
 		if (code === "ENOENT")
-			throw new Error("folder selection requires zenity or kdialog on Linux");
+			throw new Error("folder selection requires zenity or kdialog on Linux", {
+				cause: error,
+			});
 		throw error;
 	}
 }
