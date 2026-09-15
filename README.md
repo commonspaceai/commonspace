@@ -1,12 +1,14 @@
+<img src="https://raw.githubusercontent.com/commonspaceai/commonspace/main/ui/src/assets/commonspace-logo.png" alt="Commonspace logo" width="96" height="96" />
+
 # Commonspace
 
 **The workspace for the agents you already use.**
 
 Commonspace brings local coding agents into shared conversations, Projects, and Threads. The conversation stays the work record; each runtime keeps control of its own tools, credentials, models, and sessions.
 
-[Install](docs/start/install.md) · [How it works](docs/specs/product.md) · [Support](docs/start/support.md) · [Contribute](CONTRIBUTING.md)
+[Install](https://github.com/commonspaceai/commonspace/blob/main/docs/start/install.md) · [How it works](https://github.com/commonspaceai/commonspace/blob/main/docs/specs/product.md) · [Support](https://github.com/commonspaceai/commonspace/blob/main/docs/start/support.md) · [Contribute](https://github.com/commonspaceai/commonspace/blob/main/CONTRIBUTING.md)
 
-![Commonspace workspace](docs/assets/commonspace-panel.png)
+![Commonspace workspace](https://raw.githubusercontent.com/commonspaceai/commonspace/main/docs/assets/commonspace-panel.png)
 
 ## What it does
 
@@ -30,13 +32,13 @@ Requirements: macOS or Linux and Node.js 22 or newer.
 npx --yes commonspace@latest
 ```
 
-Open `http://127.0.0.1:3100` in a desktop browser. The workspace can be explored without agent credentials. To send a message, install and configure a [supported runtime](docs/start/support.md#agent-runtimes), choose **Add Agent**, then open its Direct Message.
+Open `http://127.0.0.1:3100` in a desktop browser. The workspace can be explored without agent credentials. To send a message, install and configure a [supported runtime](https://github.com/commonspaceai/commonspace/blob/main/docs/start/support.md#agent-runtimes), choose **Add Agent**, then open its Direct Message.
 
-For code work, create a Project and reference it with `@@project`. See [Installation](docs/start/install.md) for source setup and macOS background operation.
+For code work, create a Project and reference it with `@@project`. See [Installation](https://github.com/commonspaceai/commonspace/blob/main/docs/start/install.md) for source setup and macOS background operation.
 
 ## Learn more
 
-See [Product model](docs/specs/product.md), [Development](docs/guides/development.md), [Operations](docs/guides/operations.md), and [Releasing](docs/releases/releasing.md).
+See [Product model](https://github.com/commonspaceai/commonspace/blob/main/docs/specs/product.md), [Development](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/development.md), [Operations](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/operations.md), and [Releasing](https://github.com/commonspaceai/commonspace/blob/main/docs/releases/releasing.md).
 
 ## Contributing
 
@@ -47,12 +49,17 @@ pnpm check:fast
 pnpm check
 ```
 
-Read [Contributing](CONTRIBUTING.md) before opening a pull request. AI-assisted contributions remain subject to the same review, privacy, and verification requirements.
+Read [Contributing](https://github.com/commonspaceai/commonspace/blob/main/CONTRIBUTING.md) before opening a pull request. AI-assisted contributions remain subject to the same review, privacy, and verification requirements.
 
 ## License
 
-Commonspace is [MIT licensed](LICENSE). © Ralph Bibera.
+Commonspace is [MIT licensed](https://github.com/commonspaceai/commonspace/blob/main/LICENSE). © Ralph Bibera.
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=commonspaceai/commonspace&type=Date)](https://www.star-history.com/#commonspaceai/commonspace&Date)
+<a href="https://www.star-history.com/?repos=commonspaceai%2Fcommonspace&amp;type=date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=commonspaceai/commonspace&amp;type=Date&amp;theme=dark" />
+    <img alt="Commonspace star history" src="https://api.star-history.com/svg?repos=commonspaceai/commonspace&amp;type=Date" />
+  </picture>
+</a>

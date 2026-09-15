@@ -183,14 +183,14 @@ export async function runCommonspaceCli(): Promise<void> {
 				if (finalized) return;
 				finalized = true;
 				process.exitCode = 0;
-				if (process.connected) process.disconnect();
+				if (process.connected) process.disconnect?.();
 			})
 			.catch((error: Error) => {
 				if (finalized) return;
 				finalized = true;
 				process.stderr.write(`${String(error)}\n`);
 				process.exitCode = 1;
-				if (process.connected) process.disconnect();
+				if (process.connected) process.disconnect?.();
 			});
 	};
 	const stop = () => {

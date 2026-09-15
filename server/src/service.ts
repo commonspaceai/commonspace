@@ -2495,6 +2495,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					throw new AggregateError(
 						[error, recoveryError],
 						"Commonspace state and rollback backup are both invalid",
+						{ cause: recoveryError },
 					);
 				}
 				let corruptStateExists = true;
@@ -2507,6 +2508,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				if (corruptStateExists)
 					throw new Error(
 						"Commonspace saved state is corrupt and no rollback backup is available",
+						{ cause: recoveryError },
 					);
 				this.state = createInitialState();
 			}
@@ -3777,6 +3779,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					throw new AggregateError(
 						[error, rollbackError],
 						"workspace settings failed and routing rollback also failed",
+						{ cause: rollbackError },
 					);
 				}
 				throw error;
@@ -6632,7 +6635,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 								),
 							),
 						};
-			let agentFiles: PreparedFileAttachment[] = [];
+			let agentFiles: PreparedFileAttachment[];
 			try {
 				agentFiles = await prepareAgentFileAttachments(
 					agentResponse.files,

@@ -10,7 +10,7 @@ Read the relevant [Product specification](docs/specs/product-spec.md), [Architec
 
 ## Set up
 
-Requirements: Node.js 22+, pnpm 10.34.5, and Git.
+Requirements: Node.js 22.13+ or 24+, pnpm 10.34.5, and Git.
 
 ```bash
 git clone git@github.com:YOUR_USERNAME/commonspace.git
