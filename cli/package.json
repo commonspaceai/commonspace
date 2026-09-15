@@ -26,12 +26,12 @@
 	],
 	"repository": {
 		"type": "git",
-		"url": "git+ssh://git@github.com/ralphbibera/commonspace.git",
+		"url": "git+ssh://git@github.com/commonspaceai/commonspace.git",
 		"directory": "cli"
 	},
-	"homepage": "https://github.com/ralphbibera/commonspace#readme",
+	"homepage": "https://github.com/commonspaceai/commonspace#readme",
 	"bugs": {
-		"url": "https://github.com/ralphbibera/commonspace/issues"
+		"url": "https://github.com/commonspaceai/commonspace/issues"
 	},
 	"engines": {
 		"node": ">=22"

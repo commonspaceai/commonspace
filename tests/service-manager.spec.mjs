@@ -13,7 +13,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-	DEFAULT_COMMONSPACE_SOURCE,
 	installOrUpdate,
 	rollbackRelease,
 	serviceHealth,
@@ -171,7 +170,10 @@ describe("installed Commonspace service manager", () => {
 
 		expect(calls[0]).toMatchObject({
 			command: "git",
-			args: expect.arrayContaining(["clone", DEFAULT_COMMONSPACE_SOURCE]),
+			args: expect.arrayContaining([
+				"clone",
+				"git@github.com:commonspaceai/commonspace.git",
+			]),
 		});
 		expect(await readFile(join(layout.current, "release-marker"), "utf8")).toBe(
 			"1",

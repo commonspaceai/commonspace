@@ -15,7 +15,7 @@ Requirements: Node.js 22+, pnpm 10.34.5, and Git.
 ```bash
 git clone git@github.com:YOUR_USERNAME/commonspace.git
 cd commonspace
-git remote add upstream git@github.com:ralphbibera/commonspace.git
+git remote add upstream git@github.com:commonspaceai/commonspace.git
 pnpm install --frozen-lockfile
 pnpm dev
 ```

@@ -55,4 +55,4 @@ Commonspace is [MIT licensed](LICENSE). © Ralph Bibera.
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=ralphbibera/commonspace&type=Date)](https://www.star-history.com/#ralphbibera/commonspace&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=commonspaceai/commonspace&type=Date)](https://www.star-history.com/#commonspaceai/commonspace&Date)

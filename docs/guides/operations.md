@@ -85,7 +85,7 @@ An update clones and builds the configured source while the old process continue
 
 `rollback` swaps the current and previous application releases. It does not reverse state migrations; read [Backup and rollback](#backup-and-rollback) before downgrading.
 
-This path requires Corepack, Git, the pinned pnpm version, and SSH repository access. It installs committed `main`, not uncommitted checkout edits. `~/.local/bin/commonspace update` clones `git@github.com:ralphbibera/commonspace.git` over SSH and builds `main` again.
+This path requires Corepack, Git, the pinned pnpm version, and SSH repository access. It installs committed `main`, not uncommitted checkout edits. `~/.local/bin/commonspace update` clones `git@github.com:commonspaceai/commonspace.git` over SSH and builds `main` again.
 
 The npm package runs in the foreground on Linux. A managed Linux background service is not included.
 
