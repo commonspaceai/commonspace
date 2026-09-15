@@ -9,7 +9,7 @@ import {
 import { readHarnessCommand } from "./discovery.js";
 import type { AgentAdapterConfig, NativeAgentAdapter } from "./types.js";
 
-/** Compatibility baseline only; native late-history replay remains an upstream limitation. */
+/** Baseline for new and already-loaded sessions; unsafe native reloads are rejected. */
 export function assertGeminiAcpVersion(output: string): void {
 	const version = output.trim().replace(/^v/u, "");
 	if (/^0\.(39|4[0-3])\.(0|[1-9]\d*)$/u.test(version) && version !== "0.39.0")
@@ -82,7 +82,8 @@ export function createGeminiAdapter(
 					adapter: "gemini",
 					model: null,
 					status: "stopped",
-					description: "Installed Gemini CLI harness.",
+					description:
+						"Installed Gemini CLI harness. Session reload after restart is unavailable.",
 				},
 			];
 		},
@@ -98,6 +99,11 @@ export function createGeminiAdapter(
 				// The ACP executable can differ from discovery or change after preflight.
 				validateInitialization(response) {
 					assertGeminiAcpVersion(response.agentInfo?.version ?? "");
+				},
+				validateSessionLoad() {
+					throw new Error(
+						"Gemini CLI session reload is disabled because this runtime can append old replies to a new response. Your saved session is preserved. Continue in Gemini CLI, or use /new to start a separate conversation.",
+					);
 				},
 			};
 		},

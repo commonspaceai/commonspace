@@ -142,7 +142,7 @@ The server owns Agent Client Protocol (ACP) integration. ACP connects Commonspac
 
 Keep activity provider-neutral, bounded, and based only on emitted ACP updates. Runtime-specific credentials, configuration, and native transcripts remain owned by each native harness.
 
-`pnpm verify:adapters` checks real Claude Code, Gemini CLI, and OpenCode runtimes against local model API fixtures without an account, including native restart/resume, fresh context, scoped MCP, and progress. These checks also run in the standard test suite. Individual commands are `verify:adapter:claude-code`, `verify:adapter:gemini`, and `verify:adapter:opencode`. See the [adapter guide](../adapters/agent-adapters.md#account-free-runtime-verification).
+`pnpm verify:adapters` checks real Claude Code, Gemini CLI, and OpenCode runtimes against local model API fixtures without an account, including native restart/resume for Claude Code and OpenCode, safe Gemini reload rejection with preserved work, fresh context, scoped MCP, and progress. These checks also run in the standard test suite. Individual commands are `verify:adapter:claude-code`, `verify:adapter:gemini`, and `verify:adapter:opencode`. See the [adapter guide](../adapters/agent-adapters.md#account-free-runtime-verification).
 
 Provider-backed harness checks use local credentials and model access, so run only those relevant to the integration being changed:
 

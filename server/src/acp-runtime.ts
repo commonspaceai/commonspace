@@ -53,6 +53,8 @@ export interface AcpAgentProcessOptions {
 	clientName?: string;
 	/** Adapter compatibility check before sending any native-session or MCP data. */
 	validateInitialization?(response: InitializeResponse): void;
+	/** Reject unsafe native reloads before sending session data or a new prompt. */
+	validateSessionLoad?(): void;
 }
 
 export interface AcpRunInput {
@@ -744,6 +746,7 @@ export class AcpAgentProcess {
 					);
 				}
 				try {
+					this.#options.validateSessionLoad?.();
 					const response = await this.#request<LoadSessionResponse>(
 						"session/load",
 						(signal) =>

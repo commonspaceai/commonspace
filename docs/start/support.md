@@ -36,7 +36,7 @@ Start with [Contributing](../../CONTRIBUTING.md) for a fresh checkout and [Devel
 | --- | --- |
 | Codex | Installed CLI through bundled `@agentclientprotocol/codex-acp`. |
 | Claude Code | Installed CLI through bundled `@agentclientprotocol/claude-agent-acp` 0.76.0; account-free fixture verifies bundled CLI 2.1.257. |
-| Gemini CLI | Native `gemini --acp`; the compatibility baseline accepts stable `>=0.39.1` and `<0.44.0` and tests **0.43.0**. CLI preflight and actual ACP initialization versions are checked. Longer-history replay in **0.43.0** can append old replies to a continuation, so full resume compatibility is blocked. **0.59.0** also failed session reload and remains rejected. |
+| Gemini CLI | Native `gemini --acp`; the compatibility baseline accepts stable `>=0.39.1` and `<0.44.0` and tests **0.43.0**. CLI preflight and actual ACP initialization versions are checked. Native reload in **0.43.0** can append old replies even after one turn. Commonspace therefore rejects Gemini session reloads before sending the saved session or a new prompt. The accepted message fails visibly and the saved session is preserved; use Gemini CLI to continue it, or `/new` for separate context. New and already-loaded sessions remain usable. **0.59.0** also failed session reload and remains rejected. |
 | OpenCode | Native `opencode acp`; account-free fixture verifies **1.18.30**. |
 | Hermes | Installed `hermes acp`, using existing native profiles. Verify with `hermes acp --check`; Commonspace discovers profiles with `hermes profile list`. |
 
@@ -54,7 +54,7 @@ Codex, Hermes, Claude Code, Gemini CLI, and OpenCode are built-in harnesses. Pi 
 | `pnpm verify:npm-package` | No. | Clean npm command execution, API/UI assets, shutdown, and saved-state restart outside the checkout, using paths with spaces and an isolated home. Windows shutdown uses IPC. |
 | `pnpm test:platform` | No. | Portable tool launchers, package staging, source watcher restart, directory resolution, standalone API/UI, and saved-state contracts. |
 | `pnpm verify:service` | No agent credentials. | The macOS source-based service lifecycle in a temporary home, with launchctl and health responses substituted. |
-| `pnpm verify:adapters` | No. | Real Claude Code, Gemini CLI, and OpenCode runtimes, native restart/resume and reset, scoped MCP and progress, using local model API fixtures. |
+| `pnpm verify:adapters` | No. | Real Claude Code and OpenCode restart/resume; Gemini reload rejection with preserved work; fresh context, scoped MCP and progress through local model API fixtures. |
 | `pnpm verify:routing-quality` | Configured provider/model; key when required. | Opt-in representative decomposition evaluation for Agent responsibilities, preserved constraints, and per-assignment Project scopes. Parser tests do not provide this evidence. |
 | Real Hermes, Codex, and Claude Code checks | Yes. | Agent session start, exact session resumption, and permitted context/progress tools. |
 | Real macOS service check | A local macOS user session. | Installation, startup, update, and rollback with the actual LaunchAgent. |
