@@ -311,9 +311,14 @@ describe.each([
 	});
 });
 
-it.each(["0.59.0", "0.43.0-preview.1", ""])(
-	"retains accepted requests and exact sessions when the launched Gemini runtime reports %j",
-	async (version) => {
+it.each([
+	{ version: "0.59.0", error: "supported ACP version range" },
+	{ version: "0.43.0-preview.1", error: "supported ACP version range" },
+	{ version: "", error: "supported ACP version range" },
+	{ version: "0.43.0", error: "Gemini CLI session reload is disabled" },
+])(
+	"retains accepted requests and exact sessions when Gemini $version cannot reload safely",
+	async ({ version, error }) => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-gemini-version-"));
 		roots.push(root);
 		const cliPath = join(root, "gemini-version.mjs");
@@ -369,7 +374,7 @@ it.each(["0.59.0", "0.43.0-preview.1", ""])(
 				expect.objectContaining({
 					text: "Keep this accepted request.",
 					replyStatus: "failed",
-					replyError: expect.stringContaining("supported ACP version range"),
+					replyError: expect.stringContaining(error),
 				}),
 			]),
 		);

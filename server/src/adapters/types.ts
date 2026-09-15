@@ -33,7 +33,7 @@ export interface AgentSessionSettings {
 
 export type NativeAgentLaunch = Pick<
 	AcpAgentProcessOptions,
-	"command" | "args" | "env" | "validateInitialization"
+	"command" | "args" | "env" | "validateInitialization" | "validateSessionLoad"
 >;
 
 /** Adapter policy only; AcpAgentProcess and the host own execution and sessions. */

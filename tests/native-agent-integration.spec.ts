@@ -299,54 +299,6 @@ describe.each([
 	({ adapter, label }) => {
 		const startModelServer =
 			adapter === "gemini" ? startGeminiModelServer : startAnthropicModelServer;
-		if (adapter === "gemini") {
-			it.runIf(process.env.COMMONSPACE_GEMINI_RESUME_STRESS === "1")(
-				"keeps longer native history replay out of the resumed Gemini reply",
-				async () => {
-					const root = await mkdtemp(
-						join(tmpdir(), "commonspace-gemini-replay-"),
-					);
-					roots.push(root);
-					const model = await startModelServer((request) => ({
-						type: "text",
-						text: JSON.stringify(request.messages).includes(
-							"Continue after restart.",
-						)
-							? "Native resumed."
-							: "Native initial.",
-					}));
-					modelServers.push(model);
-					const first = await startHost(root, model.url, adapter);
-					await addHarness(first.url, adapter);
-					const conversation: ConversationRef = { kind: "dm", id: adapter };
-					for (let index = 0; index < 6; index += 1) {
-						await post(first.url, "/api/send", {
-							conversation,
-							text: `Remember NATIVE_HISTORY_SENTINEL ${index}.`,
-						});
-						await waitForReplyCount(first.url, `dm:${adapter}`, index + 1);
-					}
-					await expect
-						.poll(() => readSession(root, adapter))
-						.toEqual(expect.any(String));
-					const session = await readSession(root, adapter);
-					await stopHost(first.child);
-					const resumed = await startHost(root, model.url, adapter);
-					await post(resumed.url, "/api/send", {
-						conversation,
-						text: "Continue after restart.",
-					});
-					await waitForReplyCount(resumed.url, `dm:${adapter}`, 7);
-					expect(await readSession(root, adapter)).toBe(session);
-					const replies = (await bootstrap(resumed.url)).state.messages[
-						`dm:${adapter}`
-					]?.filter((message) => message.authorType === "agent");
-					expect(model.errors).toEqual([]);
-					expect(replies?.at(-1)?.text).toBe("Native resumed.");
-				},
-				90_000,
-			);
-		}
 		it("inspects real native capability sources without a model turn or configuration changes", async () => {
 			const root = await mkdtemp(
 				join(tmpdir(), `commonspace-${adapter}-inventory-`),
@@ -437,7 +389,9 @@ describe.each([
 			expect(model.requests).toEqual([]);
 			expect(model.errors).toEqual([]);
 		}, 45_000);
-		it("uses the real CLI and ACP transport to resume native context after restart and clear it on reset", async () => {
+		it(adapter === "gemini"
+			? "preserves native history and accepted work when Gemini reload is blocked, and resets fresh context"
+			: "uses the real CLI and ACP transport to resume native context after restart and clear it on reset", async () => {
 			const root = await mkdtemp(
 				join(tmpdir(), `commonspace-${adapter}-integration-`),
 			);
@@ -455,10 +409,14 @@ describe.each([
 			const first = await startHost(root, model.url, adapter);
 			await addHarness(first.url, adapter);
 			const conversation: ConversationRef = { kind: "dm", id: adapter };
-			await post(first.url, "/api/send", {
-				conversation,
-				text: "Remember NATIVE_HISTORY_SENTINEL.",
-			});
+			const historyCount = adapter === "gemini" ? 6 : 1;
+			for (let index = 0; index < historyCount; index += 1) {
+				await post(first.url, "/api/send", {
+					conversation,
+					text: `Remember NATIVE_HISTORY_SENTINEL ${index}.`,
+				});
+				await waitForReplyCount(first.url, `dm:${adapter}`, index + 1);
+			}
 			await waitForReply(first.url, `dm:${adapter}`, "Native initial.");
 			// The reply can become visible before the atomic state write completes.
 			await expect
@@ -467,22 +425,46 @@ describe.each([
 			const session = await readSession(root, adapter);
 			await stopHost(first.child);
 			const resumed = await startHost(root, model.url, adapter);
+			const requestsBeforeResume = model.requests.length;
 			await post(resumed.url, "/api/send", {
 				conversation,
 				text: "Continue after restart.",
 			});
-			await waitForReply(resumed.url, `dm:${adapter}`, "Native resumed.");
-			const resumedRequest = model.requests.find(
-				(request) =>
-					JSON.stringify(request.messages).includes(
-						"Continue after restart.",
-					) &&
-					JSON.stringify(request.messages).includes("NATIVE_HISTORY_SENTINEL"),
-			);
-			expect(JSON.stringify(resumedRequest?.messages)).toContain(
-				"NATIVE_HISTORY_SENTINEL",
-			);
-			await waitForReplyCount(resumed.url, `dm:${adapter}`, 2);
+			if (adapter === "gemini") {
+				await expect
+					.poll(
+						async () => {
+							const snapshot = await bootstrap(resumed.url);
+							return snapshot.state.messages[`dm:${adapter}`]?.find(
+								(message) => message.text === "Continue after restart.",
+							);
+						},
+						{ timeout: 15_000 },
+					)
+					.toMatchObject({
+						replyStatus: "failed",
+						replyError: expect.stringContaining(
+							"Gemini CLI session reload is disabled",
+						),
+					});
+				await waitForReplyCount(resumed.url, `dm:${adapter}`, historyCount);
+				expect(model.requests).toHaveLength(requestsBeforeResume);
+			} else {
+				await waitForReply(resumed.url, `dm:${adapter}`, "Native resumed.");
+				const resumedRequest = model.requests.find(
+					(request) =>
+						JSON.stringify(request.messages).includes(
+							"Continue after restart.",
+						) &&
+						JSON.stringify(request.messages).includes(
+							"NATIVE_HISTORY_SENTINEL",
+						),
+				);
+				expect(JSON.stringify(resumedRequest?.messages)).toContain(
+					"NATIVE_HISTORY_SENTINEL",
+				);
+				await waitForReplyCount(resumed.url, `dm:${adapter}`, 2);
+			}
 			expect(await readSession(root, adapter)).toBe(session);
 			await post(resumed.url, "/api/mutate", {
 				action: "reset-dm",
@@ -502,7 +484,11 @@ describe.each([
 			expect(JSON.stringify(freshRequests)).not.toContain(
 				"NATIVE_HISTORY_SENTINEL",
 			);
-			await waitForReplyCount(resumed.url, `dm:${adapter}`, 3);
+			await waitForReplyCount(
+				resumed.url,
+				`dm:${adapter}`,
+				adapter === "gemini" ? historyCount + 1 : 3,
+			);
 			expect(model.errors).toEqual([]);
 		}, 90_000);
 
