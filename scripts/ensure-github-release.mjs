@@ -5,10 +5,10 @@ import { promisify } from "node:util";
 import { parseReleaseVersion } from "./release-version.mjs";
 
 export function releaseCreationRequired(status, release, tag) {
-	if (status === 404) return true;
 	if (status !== 200)
 		throw new Error(`Cannot inspect GitHub release ${tag}: HTTP ${status}`);
-	if (release?.tag_name !== tag || release.draft !== false)
+	if (release === null) return true;
+	if (release?.tagName !== tag || release.isDraft !== false)
 		throw new Error(
 			`GitHub release ${tag} is not a published release for this tag`,
 		);
@@ -24,17 +24,29 @@ async function main() {
 	if (!RELEASE_TAG.startsWith("v"))
 		throw new Error("Release tag must start with v");
 	const { prerelease } = parseReleaseVersion(RELEASE_TAG.slice(1));
-	const response = await fetch(
-		`https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${encodeURIComponent(RELEASE_TAG)}`,
-		{
-			headers: {
-				Authorization: `Bearer ${GH_TOKEN}`,
-				Accept: "application/vnd.github+json",
-			},
-			signal: globalThis.AbortSignal.timeout(30_000),
+	const [owner, name] = GITHUB_REPOSITORY.split("/");
+	const response = await fetch("https://api.github.com/graphql", {
+		method: "POST",
+		headers: {
+			Authorization: `Bearer ${GH_TOKEN}`,
+			Accept: "application/vnd.github+json",
+			"Content-Type": "application/json",
 		},
-	);
-	const release = response.status === 200 ? await response.json() : null;
+		body: JSON.stringify({
+			query:
+				"query($owner: String!, $name: String!, $tag: String!) { repository(owner: $owner, name: $name) { release(tagName: $tag) { tagName isDraft } } }",
+			variables: { owner, name, tag: RELEASE_TAG },
+		}),
+		signal: globalThis.AbortSignal.timeout(30_000),
+	});
+	if (response.status !== 200)
+		throw new Error(
+			`Cannot inspect GitHub release ${RELEASE_TAG}: HTTP ${response.status}`,
+		);
+	const result = await response.json();
+	if (result.errors || !result.data?.repository)
+		throw new Error(`Cannot inspect GitHub releases for ${GITHUB_REPOSITORY}`);
+	const release = result.data.repository.release;
 	if (!releaseCreationRequired(response.status, release, RELEASE_TAG)) {
 		process.stdout.write(
 			`GitHub release ${RELEASE_TAG} is already published; preserving it.\n`,

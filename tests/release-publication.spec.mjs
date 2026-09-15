@@ -7,20 +7,20 @@ describe("release recovery", () => {
 		expect(
 			releaseCreationRequired(
 				200,
-				{ tag_name: "v0.0.4", draft: false },
+				{ tagName: "v0.0.4", isDraft: false },
 				"v0.0.4",
 			),
 		).toBe(false);
-		expect(releaseCreationRequired(404, null, "v0.0.4")).toBe(true);
+		expect(releaseCreationRequired(200, null, "v0.0.4")).toBe(true);
 	});
 
 	it("does not treat API failures or unpublished releases as completed recovery", () => {
-		for (const status of [401, 403, 429, 500])
+		for (const status of [401, 403, 404, 429, 500])
 			expect(() => releaseCreationRequired(status, null, "v0.0.4")).toThrow();
 		for (const release of [
-			{ tag_name: "v0.0.4", draft: true },
-			{ tag_name: "v0.0.3", draft: false },
-			null,
+			{ tagName: "v0.0.4", isDraft: true },
+			{ tagName: "v0.0.3", isDraft: false },
+			undefined,
 		])
 			expect(() => releaseCreationRequired(200, release, "v0.0.4")).toThrow();
 	});
