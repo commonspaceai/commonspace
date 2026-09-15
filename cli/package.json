@@ -1,6 +1,6 @@
 {
 	"name": "commonspace",
-	"version": "0.0.3",
+	"version": "0.0.4",
 	"description": "A local-first workspace for projects, channels, direct messages, and coding agents.",
 	"private": true,
 	"license": "MIT",

@@ -34,14 +34,16 @@ afterEach(async () => {
 });
 
 describe("development server supervisor", () => {
-	it("coalesces edits while the old server generation drains before starting the next one", async () => {
+	it("coalesces restart requests while the old server generation drains before starting the next one", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-dev-supervisor-"));
 		roots.push(root);
 		const sourceRoot = join(root, "src");
 		const watchedPath = join(sourceRoot, "watched.ts");
 		const logPath = join(root, "server.log");
+		const drainGate = join(root, "drain-gate");
 		await mkdir(sourceRoot);
 		await writeFile(watchedPath, "initial");
+		await writeFile(drainGate, "blocked");
 
 		const supervisor = startDevelopmentSupervisor({
 			command: process.execPath,
@@ -50,7 +52,7 @@ describe("development server supervisor", () => {
 			env: {
 				...process.env,
 				FAKE_DEVELOPMENT_SERVER_LOG: logPath,
-				FAKE_DEVELOPMENT_SERVER_DRAIN_MS: "150",
+				FAKE_DEVELOPMENT_SERVER_DRAIN_GATE: drainGate,
 			},
 			watchPaths: [sourceRoot],
 			debounceMs: 10,
@@ -71,7 +73,7 @@ describe("development server supervisor", () => {
 				),
 			).toBe(true);
 		});
-		await writeFile(watchedPath, "second edit while draining");
+		supervisor.requestRestart("second edit while draining");
 
 		await new Promise((resolve) => setTimeout(resolve, 50));
 		expect(
@@ -80,6 +82,7 @@ describe("development server supervisor", () => {
 		expect(
 			(await logLines(logPath)).some((line) => line.startsWith("forced:")),
 		).toBe(false);
+		await writeFile(drainGate, "released");
 
 		await vi.waitFor(
 			async () => {

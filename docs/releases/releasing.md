@@ -66,19 +66,21 @@ The `commonspace` npm name has prior unpublished registry history, so do not ass
 
 After the package exists, configure npm trusted publishing for `commonspaceai/commonspace`, `release.yml`, and the `npm-release` GitHub environment; then disable token-based package publication. If repository ownership changes, update the npm trusted publisher to match the new owner before publishing again. Create the repository variable `NPM_RELEASE_ENABLED=true` only after those controls are live. Non-dry runs fail closed while the variable is absent.
 
-Create the exact version tag on a reviewed `main` commit and push it, then create and publish a GitHub Release for that tag. The `published` release event starts the Release workflow automatically. The workflow also supports manual dispatch for dry-run and recovery; leave `dry_run` enabled first for that path.
+Wait for CI to pass on the reviewed `main` commit. Before tagging, run `node scripts/package-npm.mjs --check-tag v<version>` to check the intended tag against all five workspace versions. Create the exact version tag on that commit and push it. Never tag a new version before its manifest changes are merged.
+
+The workflow supports manual dispatch from `main`: run it with the existing tag and `dry_run=true` first, then `dry_run=false` to publish npm and create the GitHub Release from `docs/releases/v<version>.md`. Publishing a GitHub Release for the tag also starts the workflow through the `published` event. Manual dispatch can recover an existing release without replacing its notes.
 
 The workflow:
 
-1. Resolves the tag, requires its commit to belong to `main`, and checks all workspace versions.
+1. Resolves the tag, requires its commit to belong to `main`, checks all workspace versions, and requires the latest push CI run for that exact commit to have succeeded.
 2. Runs the complete local checks and integrated live verifier.
 3. Builds one npm tarball and installs it into a clean Linux prefix, then downloads that same artifact into the Windows job for runtime smoke testing. Publication requires both jobs to pass.
 4. Previews `npm publish` during a dry run.
-5. After an approved non-dry run, rechecks the remote tag commit and publishes with npm provenance.
-6. For a published GitHub Release, leaves the existing release in place; for manual dispatch, creates the GitHub Release after publishing.
+5. After an approved non-dry run, rechecks the remote tag commit and publishes with npm provenance. An already-published version skips the duplicate publication. Both paths verify npm's package identity and SHA-512 integrity against the tested tarball; an integrity mismatch fails the run.
+6. For a published GitHub Release, leaves the existing release in place; for manual dispatch, preserves an existing published release or creates one using the reviewed notes. API failures and existing drafts stop recovery with an error.
 
 The first `commonspace` package version needs a one-time maintainer-authenticated bootstrap because npm trusted-publisher configuration requires the package to exist. Publish the verified `0.0.1` tarball once with npm 2FA, then configure the GitHub Actions trusted publisher. If the published GitHub Release event sees that exact version already present, the workflow skips a duplicate npm publish and completes the GitHub-side release automation. Future versions use the published-release trigger end to end.
 
 Normal CI builds the CLI, server, shared package, and UI through `pnpm build`; its Windows job also builds and installs a candidate tarball on every pull request. The release workflow additionally proves that the exact Linux-built artifact destined for npm runs on Windows. Record the [Windows automated and manual checks](../guides/windows-validation.md) separately; a passing smoke does not establish native agent, folder-dialog, notification, or console-interrupt behavior.
 
-If npm publication succeeds but GitHub Release creation fails, create the GitHub Release for the existing tag manually. Never republish or move the tag to repair release notes.
+If npm publication succeeds but GitHub Release creation fails, rerun the failed job or manually dispatch the same tag. Recovery verifies the existing npm package before completing the GitHub Release. Never republish or move the tag to repair release notes.
