@@ -364,6 +364,10 @@ export class AcpAgentProcess {
 	readonly #availableConfigOptions = new Map<string, SessionConfigOption[]>();
 	readonly #availableModeIds = new Map<string, Set<string>>();
 	readonly #modelStates = new Map<string, SessionModelStateCompat>();
+	readonly #childCleanups = new WeakMap<
+		ChildProcessWithoutNullStreams,
+		Promise<void>
+	>();
 	#child: ChildProcessWithoutNullStreams | undefined;
 	#connection: ClientConnection | undefined;
 	#initializeResponse: InitializeResponse | undefined;
@@ -543,6 +547,10 @@ export class AcpAgentProcess {
 		connection?.close(new Error("ACP process closed by Commonspace"));
 		if (child !== undefined) await this.#terminateChild(child, "SIGTERM");
 		await this.#starting?.catch(() => undefined);
+		this.#clearConnectionState();
+	}
+
+	#clearConnectionState(): void {
 		this.#connection = undefined;
 		this.#initializeResponse = undefined;
 		this.#loadedSessions.clear();
@@ -563,6 +571,10 @@ export class AcpAgentProcess {
 	}
 
 	async #start(): Promise<void> {
+		const previousChild = this.#child;
+		if (previousChild !== undefined)
+			await this.#terminateChild(previousChild, "SIGKILL");
+		if (this.#closing) throw new Error("ACP process is closed");
 		const detached = process.platform !== "win32";
 		const child = spawn(
 			this.#options.command,
@@ -594,15 +606,8 @@ export class AcpAgentProcess {
 					: `${this.#options.command} exited: ${detail.slice(0, 4_000)}`,
 			);
 			this.#connection?.close(reason);
-			this.#child = undefined;
-			this.#connection = undefined;
-			this.#initializeResponse = undefined;
-			this.#loadedSessions.clear();
-			this.#sessionBindings.clear();
-			this.#appliedSettings.clear();
-			this.#availableConfigOptions.clear();
-			this.#availableModeIds.clear();
-			this.#modelStates.clear();
+			this.#clearConnectionState();
+			void this.#terminateChild(child, "SIGKILL");
 		});
 
 		try {
@@ -1209,7 +1214,24 @@ export class AcpAgentProcess {
 		}
 	}
 
-	async #terminateChild(
+	#terminateChild(
+		child: ChildProcessWithoutNullStreams,
+		signal: NodeJS.Signals,
+	): Promise<void> {
+		const existing = this.#childCleanups.get(child);
+		if (existing !== undefined) return existing;
+		const cleanup = this.#terminateChildGroup(child, signal).finally(() => {
+			if (this.#child !== child) return;
+			this.#child = undefined;
+			this.#clearConnectionState();
+		});
+		// Exit, close, startup failures, and timeouts join the same cleanup. Keep
+		// ownership until it finishes, even when the bridge has already exited.
+		this.#childCleanups.set(child, cleanup);
+		return cleanup;
+	}
+
+	async #terminateChildGroup(
 		child: ChildProcessWithoutNullStreams,
 		signal: NodeJS.Signals,
 	): Promise<void> {

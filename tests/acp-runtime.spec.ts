@@ -103,6 +103,62 @@ describe("ACP agent process", () => {
 		},
 	);
 
+	it.skipIf(process.platform === "win32")(
+		"reaps a native child after an unsolicited bridge exit before close begins",
+		async () => {
+			const root = await mkdtemp(
+				join(tmpdir(), "commonspace-acp-unsolicited-exit-"),
+			);
+			roots.push(root);
+			const nativePidPath = join(root, "native.pid");
+			const bridgePidPath = join(root, "bridge.pid");
+			const processClient = new AcpAgentProcess({
+				command: process.execPath,
+				args: [
+					fileURLToPath(
+						new URL("./fixtures/acp-shutdown-agent.mjs", import.meta.url),
+					),
+				],
+				cwd: root,
+				env: {
+					...process.env,
+					FAKE_ACP_LEAVE_CHILD: "1",
+					FAKE_ACP_EXIT_AFTER_PROMPT: "1",
+					FAKE_ACP_CHILD_PID_FILE: nativePidPath,
+					FAKE_ACP_BRIDGE_PID_FILE: bridgePidPath,
+				},
+			});
+			let nativePid: number | undefined;
+			try {
+				await processClient.run({ cwd: root, message: "Exit independently." });
+				nativePid = Number(await readFile(nativePidPath, "utf8"));
+				const bridgePid = Number(await readFile(bridgePidPath, "utf8"));
+				await vi.waitFor(() => {
+					expect(() => process.kill(bridgePid, 0)).toThrow();
+				});
+				const pid = nativePid;
+				await vi.waitFor(
+					() => {
+						expect(() => process.kill(pid, 0)).toThrow();
+					},
+					{ timeout: 3_000 },
+				);
+				nativePid = undefined;
+				// Neither assertion above can be satisfied by explicit close cleanup.
+				await Promise.all([processClient.close(), processClient.close()]);
+			} finally {
+				await processClient.close();
+				if (nativePid !== undefined) {
+					try {
+						process.kill(nativePid, "SIGKILL");
+					} catch {
+						/* Already reaped. */
+					}
+				}
+			}
+		},
+	);
+
 	it("lets the bridge flush its native child before terminating the process group", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-acp-shutdown-"));
 		roots.push(root);

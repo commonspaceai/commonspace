@@ -22,6 +22,8 @@ if (process.argv[2] === "worker") {
 	await once(worker, "message");
 	if (process.env.FAKE_ACP_CHILD_PID_FILE !== undefined)
 		await writeFile(process.env.FAKE_ACP_CHILD_PID_FILE, String(worker.pid));
+	if (process.env.FAKE_ACP_BRIDGE_PID_FILE !== undefined)
+		await writeFile(process.env.FAKE_ACP_BRIDGE_PID_FILE, String(process.pid));
 	let stopping = false;
 	const shutdown = async () => {
 		if (stopping) return;
@@ -47,6 +49,9 @@ if (process.argv[2] === "worker") {
 			);
 			process.stdout.write(
 				`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { stopReason: "end_turn" } })}\n`,
+				() => {
+					if (process.env.FAKE_ACP_EXIT_AFTER_PROMPT === "1") process.exit(0);
+				},
 			);
 		} else {
 			process.stdout.write(

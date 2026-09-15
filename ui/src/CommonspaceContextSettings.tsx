@@ -33,6 +33,27 @@ interface SettingsPaneProps {
 	onClose: () => void;
 }
 
+function useSettingsDraftValue<Value extends string | boolean | string[]>(
+	savedValue: Value,
+) {
+	const [draft, setDraft] = useState<{ value: Value } | null>(null);
+	const value = draft === null ? savedValue : draft.value;
+	const setValue = (next: Value | ((previous: Value) => Value)) => {
+		setDraft((current) => ({
+			value:
+				typeof next === "function"
+					? next(current === null ? savedValue : current.value)
+					: next,
+		}));
+	};
+	const acceptSavedValue = (submitted: Value) => {
+		setDraft((current) =>
+			current !== null && current.value === submitted ? null : current,
+		);
+	};
+	return [value, setValue, acceptSavedValue] as const;
+}
+
 function runtimeLabel(agent: CommonspaceAgentProfile): string {
 	return AGENT_ADAPTERS[agent.adapter].label;
 }
@@ -175,40 +196,47 @@ function AvatarEmojiPicker({
 	);
 }
 
-export function ChannelSettingsPane({
+interface ChannelSettingsEditorProps extends SettingsPaneProps {
+	channel: CommonspaceBootstrap["state"]["channels"][number];
+}
+
+export function ChannelSettingsPane(props: SettingsPaneProps) {
+	const channel = props.bootstrap.state.channels.find(
+		(candidate) => candidate.id === props.id,
+	);
+	if (channel === undefined) return null;
+	return (
+		<ChannelSettingsEditor key={channel.id} {...props} channel={channel} />
+	);
+}
+
+function ChannelSettingsEditor({
 	bootstrap,
 	id,
 	store,
 	onClose,
-}: SettingsPaneProps) {
-	const channel = bootstrap.state.channels.find(
-		(candidate) => candidate.id === id,
-	);
+	channel,
+}: ChannelSettingsEditorProps) {
 	const agents = bootstrap.agents;
-	const [agentIds, setAgentIds] = useState<string[]>(channel?.agentIds ?? []);
+	const [agentIds, setAgentIds] = useSettingsDraftValue(channel.agentIds);
 	const [query, setQuery] = useState("");
 	const [filter, setFilter] = useState<"all" | "included" | "available">("all");
-	const [instructions, setInstructions] = useState(channel?.instructions ?? "");
-	const [summary, setSummary] = useState(channel?.memory.summary ?? "");
-	const [decisions, setDecisions] = useState(
-		channel?.memory.decisions.join("\n") ?? "",
+	const [instructions, setInstructions] = useSettingsDraftValue(
+		channel.instructions,
 	);
-	const [questions, setQuestions] = useState(
-		channel?.memory.openQuestions.join("\n") ?? "",
+	const [summary, setSummary] = useSettingsDraftValue(channel.memory.summary);
+	const [decisions, setDecisions] = useSettingsDraftValue(
+		channel.memory.decisions.join("\n"),
+	);
+	const [questions, setQuestions] = useSettingsDraftValue(
+		channel.memory.openQuestions.join("\n"),
 	);
 	const [pinNote, setPinNote] = useState("");
+	const [pinning, setPinning] = useState(false);
+	const [pinError, setPinError] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 	const [compacting, setCompacting] = useState(false);
 	const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
-
-	useEffect(() => {
-		if (channel === undefined) return;
-		setAgentIds(channel.agentIds);
-		setInstructions(channel.instructions);
-		setSummary(channel.memory.summary);
-		setDecisions(channel.memory.decisions.join("\n"));
-		setQuestions(channel.memory.openQuestions.join("\n"));
-	}, [channel]);
 
 	const visibleAgents = useMemo(() => {
 		const normalized = query.trim().toLocaleLowerCase();
@@ -229,8 +257,6 @@ export function ChannelSettingsPane({
 			pin.scope.kind === "channel" &&
 			pin.scope.id === id,
 	);
-
-	if (channel === undefined) return null;
 
 	const save = async (event: FormEvent) => {
 		event.preventDefault();
@@ -255,6 +281,26 @@ export function ChannelSettingsPane({
 			onClose();
 		} finally {
 			setSaving(false);
+		}
+	};
+
+	const addNote = async () => {
+		const submittedDraft = pinNote;
+		const note = submittedDraft.trim();
+		if (pinning || note === "") return;
+		setPinning(true);
+		setPinError(null);
+		try {
+			await store.addPin({
+				scope: { kind: "channel", id },
+				kind: "note",
+				note,
+			});
+			setPinNote((current) => (current === submittedDraft ? "" : current));
+		} catch (error) {
+			setPinError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setPinning(false);
 		}
 	};
 
@@ -301,7 +347,10 @@ export function ChannelSettingsPane({
 					void save(event);
 				}}
 			>
-				<div className="min-h-0 flex-1 overflow-y-auto p-5">
+				<fieldset
+					disabled={saving}
+					className="min-h-0 min-w-0 flex-1 overflow-y-auto border-0 p-5"
+				>
 					<section aria-labelledby="channel-members-heading">
 						<header className="mb-4 flex items-start justify-between gap-3">
 							<div>
@@ -562,21 +611,19 @@ export function ChannelSettingsPane({
 								<Button
 									type="button"
 									variant="outline"
-									disabled={pinNote.trim() === ""}
+									disabled={pinning || pinNote.trim() === ""}
 									onClick={() => {
-										const note = pinNote.trim();
-										if (note === "") return;
-										void store.addPin({
-											scope: { kind: "channel", id },
-											kind: "note",
-											note,
-										});
-										setPinNote("");
+										void addNote();
 									}}
 								>
-									Pin
+									{pinning ? "Pinning..." : "Pin"}
 								</Button>
 							</div>
+							{pinError === null ? null : (
+								<p role="alert" className="text-xs text-destructive">
+									{pinError}
+								</p>
+							)}
 						</div>
 					</section>
 
@@ -591,7 +638,7 @@ export function ChannelSettingsPane({
 							Remove channel
 						</Button>
 					</section>
-				</div>
+				</fieldset>
 				<footer className="flex justify-end gap-2 border-t bg-muted px-5 py-3">
 					<Button type="button" variant="outline" onClick={onClose}>
 						Cancel
@@ -851,41 +898,44 @@ export function HarnessCapabilities({
 	);
 }
 
-export function AgentSettingsPane({
-	bootstrap,
+interface AgentSettingsEditorProps extends SettingsPaneProps {
+	agent: CommonspaceAgentProfile;
+}
+
+export function AgentSettingsPane(props: SettingsPaneProps) {
+	const agent = props.bootstrap.agents.find(
+		(candidate) => candidate.id === props.id,
+	);
+	if (agent === undefined) return null;
+	return <AgentSettingsEditor key={agent.id} {...props} agent={agent} />;
+}
+
+function AgentSettingsEditor({
 	id,
 	store,
 	onClose,
-}: SettingsPaneProps) {
-	const agent = bootstrap.agents.find((candidate) => candidate.id === id);
-	const [displayName, setDisplayName] = useState(agent?.displayName ?? "");
-	const [avatarEmoji, setAvatarEmoji] = useState(agent?.avatarEmoji ?? "");
-	const [accentColor, setAccentColor] = useState(
-		agent?.accentColor ?? "#4a154b",
+	agent,
+}: AgentSettingsEditorProps) {
+	const [displayName, setDisplayName, acceptDisplayName] =
+		useSettingsDraftValue(agent.displayName);
+	const [avatarEmoji, setAvatarEmoji, acceptAvatarEmoji] =
+		useSettingsDraftValue(agent.avatarEmoji ?? "");
+	const [accentColor, setAccentColor, acceptAccentColor] =
+		useSettingsDraftValue(agent.accentColor ?? "#4a154b");
+	const [fullAccess, setFullAccess, acceptFullAccess] = useSettingsDraftValue(
+		agent.fullAccess === true,
 	);
-	const [fullAccess, setFullAccess] = useState(agent?.fullAccess === true);
 	const [saving, setSaving] = useState(false);
 	const [saveState, setSaveState] = useState(
 		"Unsaved changes stay local until verified.",
 	);
 	const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
-	const agentAdapter = agent?.adapter;
-	const agentId = agent?.id;
+	const agentAdapter = agent.adapter;
 
 	useEffect(() => {
-		if (agent === undefined) return;
-		setDisplayName(agent.displayName);
-		setAvatarEmoji(agent.avatarEmoji ?? "");
-		setAccentColor(agent.accentColor ?? "#4a154b");
-		setFullAccess(agent.fullAccess === true);
-	}, [agent]);
-
-	useEffect(() => {
-		if (agentAdapter === undefined || agentId === undefined) return;
 		void store.discoverAgents(agentAdapter);
-	}, [agentAdapter, agentId, store]);
+	}, [agentAdapter, store]);
 
-	if (agent === undefined) return null;
 	const previewAgent: CommonspaceAgentProfile = {
 		...agent,
 		displayName: displayName || agent.displayName,
@@ -905,6 +955,10 @@ export function AgentSettingsPane({
 				accentColor,
 				fullAccess,
 			});
+			acceptDisplayName(displayName);
+			acceptAvatarEmoji(avatarEmoji);
+			acceptAccentColor(accentColor);
+			acceptFullAccess(fullAccess);
 			setSaveState(
 				"Workspace identity saved. Native harness profile verified unchanged.",
 			);
@@ -945,7 +999,10 @@ export function AgentSettingsPane({
 					<XIcon className="size-[18px]" aria-hidden="true" />
 				</button>
 			</header>
-			<div className="min-h-0 flex-1 overflow-y-auto">
+			<fieldset
+				disabled={saving}
+				className="min-h-0 min-w-0 flex-1 overflow-y-auto border-0 p-0"
+			>
 				<section className="border-b p-5">
 					<header className="mb-3 flex items-start justify-between gap-3">
 						<div>
@@ -1114,7 +1171,7 @@ export function AgentSettingsPane({
 						The native harness profile and its credentials remain untouched.
 					</p>
 				</section>
-			</div>
+			</fieldset>
 			<footer className="flex min-h-[68px] items-center gap-3 border-t bg-muted px-[18px] py-2.5">
 				<span className="min-w-0 flex-1 text-xs text-muted-foreground">
 					{saveState}

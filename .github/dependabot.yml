@@ -7,6 +7,10 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps)"
+    ignore:
+      # Keep Gemini within the verified ACP range documented in docs/start/support.md.
+      - dependency-name: "@google/gemini-cli"
+        versions: [">=0.44.0"]
     groups:
       npm-minor-and-patch:
         patterns: ["*"]

@@ -15,9 +15,8 @@
 		"types": ["node", "vitest/globals"],
 		"skipLibCheck": true,
 		"noEmit": true,
-		"baseUrl": ".",
 		"paths": {
-			"@commonspace/shared": ["packages/shared/src/index.ts"]
+			"@commonspace/shared": ["./packages/shared/src/index.ts"]
 		}
 	},
 	"include": ["packages/*/src", "server/src", "ui/src", "tests", "*.ts"]

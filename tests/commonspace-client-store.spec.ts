@@ -25,11 +25,104 @@ function jsonResponse(
 	});
 }
 
+function threadAdmission(): SendMessageResponse {
+	const original = storyBootstrap.state.threads[0];
+	if (original === undefined) throw new Error("Missing fixture thread");
+	const thread = {
+		...structuredClone(original),
+		id: "thread-delayed-admission",
+		rootMessageId: "message-delayed-admission",
+	};
+	const accepted: SendMessageResponse["accepted"] = {
+		id: thread.rootMessageId,
+		conversation: { kind: "channel", id: thread.channelId },
+		authorType: "user",
+		authorId: "user",
+		authorName: "Ralph",
+		text: "Delayed admission",
+		createdAt: "2026-09-15T00:00:00.000Z",
+		replyStatus: "queued",
+	};
+	const state = structuredClone(storyBootstrap.state);
+	state.revision += 1;
+	state.threads.push(thread);
+	const key = `channel:${thread.channelId}`;
+	state.messages[key] = [...(state.messages[key] ?? []), accepted];
+	return { accepted, state, thread };
+}
+
 afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
 describe("CommonspaceClientStore message admission", () => {
+	it.each(["send", "edit"] as const)(
+		"keeps a newer thread selection when a delayed %s finishes",
+		async (operation) => {
+			const admission = deferred<Response>();
+			const response = threadAdmission();
+			const original = storyBootstrap.state.threads[0];
+			if (original === undefined) throw new Error("Missing fixture thread");
+			vi.stubGlobal("fetch", (input: RequestInfo | URL) =>
+				String(input) === "/api/bootstrap"
+					? Promise.resolve(jsonResponse(storyBootstrap))
+					: admission.promise,
+			);
+			const store = new CommonspaceClientStore();
+			await store.refresh();
+			store.selectConversation(response.accepted.conversation);
+			const pending =
+				operation === "send"
+					? store.send("Delayed admission")
+					: store.editMessage(original.rootMessageId, {
+							text: "Delayed admission",
+						});
+			store.selectThread(original.id);
+			admission.resolve(jsonResponse(response));
+			await pending;
+			expect(store.getSnapshot().activeThreadId).toBe(original.id);
+			expect(store.messages().at(-1)?.id).toBe(response.accepted.id);
+		},
+	);
+
+	it("does not reopen a thread after the user closes it during admission", async () => {
+		const admission = deferred<Response>();
+		const response = threadAdmission();
+		const original = storyBootstrap.state.threads[0];
+		if (original === undefined) throw new Error("Missing fixture thread");
+		vi.stubGlobal("fetch", (input: RequestInfo | URL) =>
+			String(input) === "/api/bootstrap"
+				? Promise.resolve(jsonResponse(storyBootstrap))
+				: admission.promise,
+		);
+		const store = new CommonspaceClientStore();
+		await store.refresh();
+		store.selectConversation(response.accepted.conversation);
+		store.selectThread(original.id);
+		const pending = store.send("Delayed admission");
+		store.selectThread(null);
+		admission.resolve(jsonResponse(response));
+		await pending;
+		expect(store.getSnapshot().activeThreadId).toBeNull();
+	});
+
+	it("still opens the admitted thread when navigation has not changed", async () => {
+		const admission = deferred<Response>();
+		const response = threadAdmission();
+		vi.stubGlobal("fetch", (input: RequestInfo | URL) =>
+			String(input) === "/api/bootstrap"
+				? Promise.resolve(jsonResponse(storyBootstrap))
+				: admission.promise,
+		);
+		const store = new CommonspaceClientStore();
+		await store.refresh();
+		store.selectConversation(response.accepted.conversation);
+		const pending = store.send("Delayed admission");
+		admission.resolve(jsonResponse(response));
+		await pending;
+		expect(store.getSnapshot().activeThreadId).toBe(response.thread?.id);
+	});
+
 	it("keeps the composer queue open and projects concurrent sends optimistically", async () => {
 		const admissions = [deferred<Response>(), deferred<Response>()];
 		const fetch = vi.fn((input: RequestInfo | URL) => {

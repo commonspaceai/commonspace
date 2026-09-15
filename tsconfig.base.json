@@ -5,15 +5,13 @@
 		"lib": ["ES2023"],
 		"module": "NodeNext",
 		"moduleResolution": "NodeNext",
-		"ignoreDeprecations": "5.0",
 		"strict": true,
 		"noUncheckedIndexedAccess": true,
 		"exactOptionalPropertyTypes": true,
 		"verbatimModuleSyntax": true,
 		"isolatedModules": true,
-		"baseUrl": ".",
 		"paths": {
-			"@commonspace/shared": ["packages/shared/src/index.ts"]
+			"@commonspace/shared": ["./packages/shared/src/index.ts"]
 		},
 		"skipLibCheck": true,
 		"declaration": true,

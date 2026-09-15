@@ -181,6 +181,21 @@ function isToolTraceEntry(
 	);
 }
 
+function isCompactionTraceEntry(
+	value: TraceEntryCandidate,
+): value is Extract<CommonspaceTraceEntry, { type: "compaction" }> {
+	return (
+		value.type === "compaction" &&
+		"status" in value &&
+		(value.status === "in_progress" ||
+			value.status === "completed" ||
+			value.status === "failed" ||
+			value.status === "cancelled") &&
+		"text" in value &&
+		typeof value.text === "string"
+	);
+}
+
 function isUsageTraceEntry(
 	value: TraceEntryCandidate,
 ): value is Extract<CommonspaceTraceEntry, { type: "usage" }> {
@@ -206,6 +221,7 @@ function isTraceEntry<T>(value: T): value is T & CommonspaceTraceEntry {
 		isReasoningTraceEntry(value) ||
 		isPlanTraceEntry(value) ||
 		isToolTraceEntry(value) ||
+		isCompactionTraceEntry(value) ||
 		isUsageTraceEntry(value)
 	);
 }
@@ -349,6 +365,7 @@ export class CommonspaceClientStore {
 	};
 	private readonly listeners = new Set<Listener>();
 	private submissionRequest = 0;
+	private navigationRevision = 0;
 	private refreshPromise: Promise<void> | null = null;
 	private discoveryRequest = 0;
 	private pendingRevision = -1;
@@ -589,6 +606,7 @@ export class CommonspaceClientStore {
 	}
 
 	selectConversation(conversation: ConversationRef): void {
+		this.navigationRevision += 1;
 		this.set({
 			...this.snapshot,
 			activeConversation: conversation,
@@ -598,10 +616,12 @@ export class CommonspaceClientStore {
 	}
 
 	selectThread(threadId: string | null): void {
+		this.navigationRevision += 1;
 		this.set({ ...this.snapshot, activeThreadId: threadId, error: null });
 	}
 
 	selectProject(projectId: string): void {
+		this.navigationRevision += 1;
 		this.set({ ...this.snapshot, activeProjectId: projectId, error: null });
 	}
 
@@ -818,6 +838,7 @@ export class CommonspaceClientStore {
 		messageId: string,
 		request: Omit<EditMessageRequest, "messageId">,
 	): Promise<void> {
+		const navigationRevision = ++this.navigationRevision;
 		try {
 			const result = await requestJson<SendMessageResponse>(
 				`/api/messages/${encodeURIComponent(messageId)}/edit`,
@@ -836,7 +857,10 @@ export class CommonspaceClientStore {
 				...this.snapshot,
 				bootstrap: merged,
 				activeProjectId: this.resolveActiveProject(merged),
-				activeThreadId: result.thread?.id ?? this.snapshot.activeThreadId,
+				activeThreadId:
+					this.navigationRevision === navigationRevision
+						? (result.thread?.id ?? this.snapshot.activeThreadId)
+						: this.snapshot.activeThreadId,
 				error: null,
 			});
 		} catch (error) {
@@ -1047,6 +1071,7 @@ export class CommonspaceClientStore {
 	): Promise<void> {
 		const conversation = this.snapshot.activeConversation;
 		if (conversation === null) return;
+		const navigationRevision = ++this.navigationRevision;
 		const request: SendMessageRequest = {
 			conversation,
 			text,
@@ -1099,6 +1124,7 @@ export class CommonspaceClientStore {
 					bootstrap: merged,
 					activeProjectId: this.resolveActiveProject(merged),
 					activeThreadId:
+						this.navigationRevision === navigationRevision &&
 						this.snapshot.activeConversation?.kind === conversation.kind &&
 						this.snapshot.activeConversation.id === conversation.id
 							? (result.thread?.id ?? this.snapshot.activeThreadId)

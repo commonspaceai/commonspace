@@ -67,6 +67,57 @@ describe("Commonspace live event decoding", () => {
 		).toBeNull();
 	});
 
+	it.each(["in_progress", "completed", "failed", "cancelled"] as const)(
+		"preserves %s compaction alongside other live activity and follow-ups",
+		(status) => {
+			const event = {
+				...validActivityEvent,
+				activities: [
+					validActivity,
+					{
+						...validActivity,
+						id: "activity-compaction",
+						entries: [
+							{
+								type: "compaction",
+								id: "compaction-1",
+								status,
+								text: "Compacting native context.",
+								createdAt: "2026-09-03T10:00:01.000Z",
+								updatedAt: "2026-09-03T10:00:02.000Z",
+							},
+						],
+					},
+				],
+			};
+			expect(parseActivityEventData(JSON.stringify(event))).toEqual(event);
+		},
+	);
+
+	it.each([
+		{ status: "unknown", text: "Compacting native context." },
+		{ status: "completed", text: null },
+	])("rejects malformed compaction entries: %j", (entry) => {
+		const event = {
+			...validActivityEvent,
+			activities: [
+				{
+					...validActivity,
+					entries: [
+						{
+							type: "compaction",
+							id: "compaction-1",
+							createdAt: "2026-09-03T10:00:01.000Z",
+							updatedAt: "2026-09-03T10:00:02.000Z",
+							...entry,
+						},
+					],
+				},
+			],
+		};
+		expect(parseActivityEventData(JSON.stringify(event))).toBeNull();
+	});
+
 	it("rejects an activity event when a nested contract is malformed", () => {
 		const invalidActivity = {
 			...validActivityEvent,

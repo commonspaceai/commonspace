@@ -942,16 +942,44 @@ function redactPortableValue(
 	value: CommonspaceWorkspaceArchive["workspace"],
 	privateValues: readonly string[],
 ): CommonspaceWorkspaceArchive["workspace"] {
-	const serialized = JSON.stringify(value, (_key, item) => {
-		if (typeof item !== "string") return item;
-		let redacted = item;
-		for (const privateValue of privateValues) {
-			if (privateValue !== "")
-				redacted = redacted.replaceAll(privateValue, "[local path]");
-		}
-		return redacted;
-	});
-	return JSON.parse(serialized);
+	const redactManaged = <T>(metadata: T): T => {
+		const serialized = JSON.stringify(metadata, (_key, item) => {
+			if (typeof item !== "string") return item;
+			let redacted = item;
+			for (const privateValue of privateValues) {
+				if (privateValue !== "")
+					redacted = redacted.replaceAll(privateValue, "[local path]");
+			}
+			return redacted;
+		});
+		return JSON.parse(serialized);
+	};
+	// Authored messages, context, notes, and assignments are portable content.
+	// Only managed diagnostics and permission metadata receive host redaction.
+	return {
+		...value,
+		permissions: redactManaged(value.permissions),
+		messages: Object.fromEntries(
+			Object.entries(value.messages).map(([key, messages]) => [
+				key,
+				messages.map((message) => {
+					const portable = { ...message };
+					if (message.trace !== undefined)
+						portable.trace = redactManaged(message.trace);
+					if (message.runAttribution !== undefined)
+						portable.runAttribution = redactManaged(message.runAttribution);
+					if (message.replyError !== undefined)
+						portable.replyError = redactManaged(message.replyError);
+					if (message.routing !== undefined)
+						portable.routing = {
+							...message.routing,
+							reason: redactManaged(message.routing.reason),
+						};
+					return portable;
+				}),
+			]),
+		),
+	};
 }
 
 function sanitizeNotificationSettings(
@@ -2372,6 +2400,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private readonly activeConversationRuns = new Map<string, Promise<void>>();
 	private readonly pendingFollowups = new Map<string, PendingFollowup[]>();
 	private activeAdmissions = 0;
+	private exclusiveAdmission = false;
 	private readonly admissionIdleWaiters = new Set<() => void>();
 	private readonly acpProcesses = new Map<string, AcpAgentProcess>();
 	private readonly acpLaunchAccess = new WeakMap<AcpAgentProcess, boolean>();
@@ -2447,17 +2476,20 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				JSON.parse(await readFile(this.statePath, "utf8")),
 			);
 		} catch (error) {
-			if (errorCode(error) !== "ENOENT") {
-				try {
-					this.state = sanitizeLoadedState(
-						JSON.parse(await readFile(this.stateBackupPath, "utf8")),
-					);
+			const primaryMissing = errorCode(error) === "ENOENT";
+			try {
+				this.state = sanitizeLoadedState(
+					JSON.parse(await readFile(this.stateBackupPath, "utf8")),
+				);
+				if (!primaryMissing) {
 					await rm(this.stateCorruptPath, { force: true });
 					await rename(this.statePath, this.stateCorruptPath);
-					this.environment.logger?.warn(
-						"Commonspace recovered invalid state.json from state.backup.json",
-					);
-				} catch (recoveryError) {
+				}
+				this.environment.logger?.warn(
+					"Commonspace recovered unavailable state.json from state.backup.json",
+				);
+			} catch (recoveryError) {
+				if (!primaryMissing || errorCode(recoveryError) !== "ENOENT") {
 					this.environment.logger?.warn(error);
 					this.environment.logger?.warn(recoveryError);
 					throw new AggregateError(
@@ -2465,7 +2497,17 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 						"Commonspace state and rollback backup are both invalid",
 					);
 				}
-			} else {
+				let corruptStateExists = true;
+				try {
+					await readFile(this.stateCorruptPath, "utf8");
+				} catch (corruptError) {
+					if (errorCode(corruptError) !== "ENOENT") throw corruptError;
+					corruptStateExists = false;
+				}
+				if (corruptStateExists)
+					throw new Error(
+						"Commonspace saved state is corrupt and no rollback backup is available",
+					);
 				this.state = createInitialState();
 			}
 		}
@@ -2585,14 +2627,23 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		};
 	}
 
-	private async withAdmission<T>(operation: () => Promise<T>): Promise<T> {
+	private async withAdmission<T>(
+		operation: () => Promise<T>,
+		mode: "shared" | "exclusive" = "shared",
+	): Promise<T> {
 		if (this.closing) throw new Error("Commonspace is shutting down");
 		if (this.draining) throw new Error("Commonspace is restarting");
+		if (this.exclusiveAdmission)
+			throw new Error("workspace import is in progress");
+		if (mode === "exclusive" && this.activeAdmissions > 0)
+			throw new Error("workspace import requires no in-flight operations");
+		if (mode === "exclusive") this.exclusiveAdmission = true;
 		this.activeAdmissions += 1;
 		try {
 			return await operation();
 		} finally {
 			this.activeAdmissions -= 1;
+			if (mode === "exclusive") this.exclusiveAdmission = false;
 			if (this.activeAdmissions === 0) {
 				for (const resolveIdle of this.admissionIdleWaiters) resolveIdle();
 				this.admissionIdleWaiters.clear();
@@ -3167,6 +3218,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			...Object.values(this.state.agentSessions).flatMap((sessions) =>
 				Object.values(sessions),
 			),
+			this.routingConfiguration.apiKey ?? "",
+			...Array.from(this.mcpCredentials.values(), ({ token }) => token),
 		];
 		const archive: CommonspaceWorkspaceArchive = {
 			format: "commonspace-workspace",
@@ -3393,7 +3446,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			this.synchronizeNotificationBaseline();
 			this.broadcastRevision();
 			return this.publicSnapshot();
-		});
+		}, "exclusive");
 	}
 
 	previewRetention(
