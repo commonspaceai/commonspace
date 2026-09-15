@@ -1,9 +1,9 @@
-import { appendFile } from "node:fs/promises";
+import { appendFile, readFile } from "node:fs/promises";
+import { setTimeout } from "node:timers/promises";
 
 const logPath = process.env.FAKE_DEVELOPMENT_SERVER_LOG;
-const drainDelayMs = Number(
-	process.env.FAKE_DEVELOPMENT_SERVER_DRAIN_MS ?? 150,
-);
+const drainGate = process.env.FAKE_DEVELOPMENT_SERVER_DRAIN_GATE;
+if (drainGate === undefined) throw new Error("A drain gate is required");
 
 async function record(event) {
 	if (logPath !== undefined)
@@ -28,10 +28,10 @@ process.on("message", (message) => {
 		message.type !== "commonspace:development-restart"
 	)
 		return;
-	void record("restart-requested").then(() => {
-		setTimeout(() => {
-			void exit("drained");
-		}, drainDelayMs);
+	void record("restart-requested").then(async () => {
+		while ((await readFile(drainGate, "utf8")) !== "released")
+			await setTimeout(10);
+		await exit("drained");
 	});
 });
 process.once("SIGINT", () => {
