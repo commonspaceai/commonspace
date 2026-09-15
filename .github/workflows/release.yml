@@ -30,6 +30,9 @@ jobs:
   resolve:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
       prerelease: ${{ steps.version.outputs.prerelease }}
       sha: ${{ steps.version.outputs.sha }}
@@ -62,6 +65,18 @@ jobs:
             exit 1
           fi
           printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Require passing main CI for the exact release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.version.outputs.sha }}
+        run: |
+          result="$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f branch=main -f event=push -f head_sha="$SOURCE_SHA" -f per_page=1 \
+            --jq '.workflow_runs[0] | [.status, .conclusion] | join(":")')"
+          if [[ "$result" != "completed:success" ]]; then
+            echo "::error::The tagged commit must pass CI on main before release. Current result: $result"
+            exit 1
+          fi
       - name: Require publication to be explicitly enabled
         if: ${{ github.event_name == 'release' || ! inputs.dry_run }}
         env:
@@ -190,15 +205,11 @@ jobs:
             exit 1
           fi
           npm publish artifacts/npm/*.tgz --access public --provenance --tag "$dist_tag"
-      - name: Create GitHub release for manual dispatch
+      - name: Verify npm serves the tested tarball
+        run: node scripts/verify-npm-publication.mjs
+      - name: Ensure GitHub release for manual dispatch
         if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "${{ needs.resolve.outputs.sha }}" \
-            --verify-tag \
-            --prerelease="$RELEASE_PRERELEASE" \
-            --title "Commonspace $RELEASE_TAG" \
-            --generate-notes
+          SOURCE_SHA: ${{ needs.resolve.outputs.sha }}
+        run: node scripts/ensure-github-release.mjs
