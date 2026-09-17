@@ -27,7 +27,7 @@ Preserve local serving, request validation, private session data, exact native-s
 Use the smallest check that proves the change. Replace the example test with the relevant file:
 
 ```bash
-pnpm test -- tests/channel-context.spec.ts
+pnpm test tests/channel-context.spec.ts
 pnpm check
 git diff --check
 ```

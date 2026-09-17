@@ -42,6 +42,23 @@ The live verifier uses temporary workspace data and test runtimes. It proves pro
 
 Use [Desktop usage](desktop-usage.md) for assembled flows and [Visual verification](../design/visual-verification.md) for rendered evidence.
 
+### Focused iteration
+
+Run a relevant file while iterating, then use the change-specific requirements in [Contributing](../../CONTRIBUTING.md#verify) before handing off. Examples:
+
+| Change | Focused check | Evidence limit |
+| --- | --- | --- |
+| Server state or shared context | `pnpm test tests/channel-context.spec.ts` | Synthetic state transitions; use the test file that owns the changed behavior |
+| Routing contracts or dispatch | `pnpm test tests/ai-router.spec.ts tests/commonspace-host.spec.ts` | Parsing and service mechanics, not live semantic routing quality |
+| UI component | `pnpm test:storybook:watch -- Conversation` | Isolated interactions and accessibility; assembled behavior needs browser flows |
+| ACP lifecycle | `pnpm test tests/acp-runtime.spec.ts` | Protocol fixtures, not authenticated harness compatibility |
+| Portable scripts or installation | `pnpm test:platform` | Account-free platform behavior; packaging also needs clean tarball verification |
+| Documentation or templates | Check relative links, referenced commands, Markdown syntax, and `git diff --check` | No application test run is required for prose-only changes |
+
+`check:fast` is a broader iteration gate, not a replacement for `check`. `verify:live` and `test:e2e` exercise assembled behavior; use `verify:live:built` and `test:e2e:built` after a current build to avoid rebuilding the same candidate. Pixel baselines, authenticated runtime checks, routing-quality evaluation, and benchmarks answer separate questions and are not implied by green unit tests.
+
+The Node test workers disable native Web Storage so jsdom owns isolated browser storage. This keeps UI tests consistent across supported Node versions without writing browser-like state to a host storage file.
+
 ## Fast UI loop
 
 Run Storybook while editing components:
@@ -77,7 +94,7 @@ The server continues accepting work while waiting, so continuous activity can de
 
 ## CI and service verification
 
-CI runs static/build checks, unit/integration tests, Storybook browser checks, integrated Playwright E2E, reviewed macOS visual baselines, and a Windows platform job. The aggregate `check` job succeeds only when all five jobs pass. The Windows job runs the focused `pnpm test:platform` suite, Storybook smoke, production browser flows, and npm build/install smoke; the complete unit/runtime suite remains on Linux. See [Windows validation](windows-validation.md) for PowerShell commands and evidence limits. GitHub enforces `check` as a merge requirement only after a maintainer configures branch protection; see [Maintaining](maintaining.md).
+CI runs static/build checks, unit/integration tests, Storybook browser checks, integrated Playwright E2E, reviewed macOS visual baselines, and a Windows platform job. The aggregate `check` job succeeds only when all five jobs pass. The Windows job runs the focused `pnpm test:platform` suite, Storybook smoke, production browser flows, and npm build/install smoke; the complete unit/runtime suite remains on Linux. See [Windows validation](windows-validation.md) for PowerShell commands and evidence limits. The default branch requires the aggregate `check`; [Maintaining](maintaining.md#configure-github) owns the configuration and verification procedure.
 
 CI and local browser checks install/use Playwright's managed Chromium unless `COMMONSPACE_USE_SYSTEM_CHROME=1` is set.
 

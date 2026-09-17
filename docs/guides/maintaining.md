@@ -30,11 +30,23 @@ Keep these repository controls enabled:
 
 ## Configure GitHub
 
-Configure branch rules and required checks in the repository's GitHub settings. Use rules supported by the repository's plan.
+The default branch requires the aggregate CI `check` from GitHub Actions, an up-to-date branch, resolved review conversations, and one code-owner approval. New commits dismiss stale approvals. Force pushes and branch deletion are disabled, and these controls apply to administrators.
 
-The default branch should require the CI `check` status and, for outside contributions, pull requests with resolved conversations and maintainer or code-owner review. Prevent force pushes and branch deletion. Keep any owner recovery exception narrow and explicit.
+[`main-branch-protection.json`](../../.github/main-branch-protection.json) is the versioned configuration. An administrator can apply it from the repository root with an authenticated GitHub CLI:
+
+```bash
+gh api --method PUT repos/commonspaceai/commonspace/branches/main/protection \
+  --input .github/main-branch-protection.json
+gh api repos/commonspaceai/commonspace/branches/main/protection
+```
+
+The required check is bound to the GitHub Actions app, ID `15368`; another status publisher cannot satisfy it. Verify the returned settings after applying the file, including the required check, administrator enforcement, review and conversation requirements, and force-push/deletion restrictions. The file alone does not enable protection.
+
+The sole PR-review bypass is `ralphbibera`, the repository owner and current code owner. Reserve it for owner-authored maintenance and recovery without self-approval. GitHub scopes this allowance to the acting user, not the PR author, so the owner must still review outside contributions through the normal PR path. The allowance does not bypass required CI, conversation resolution, or force-push/deletion restrictions. Revisit it and [CODEOWNERS](../../.github/CODEOWNERS) when the maintainer group changes.
 
 Check the issue and pull request templates and reporting routes. The repository description, topics, and links should describe Commonspace accurately. Do not require checks that the repository does not run.
+
+Use Linear for investigation and validation. Promote a finding to a GitHub issue only once its implementation scope and acceptance check are established; a clear, focused PR does not need a duplicate issue.
 
 ## Handle security and conduct reports
 

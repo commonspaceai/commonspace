@@ -14,6 +14,8 @@ export default defineConfig({
 	},
 	test: {
 		environment: "node",
+		// jsdom owns browser storage; native Node storage can shadow its globals.
+		execArgv: ["--no-experimental-webstorage"],
 		setupFiles: ["./tests/test-setup.ts"],
 		exclude: [
 			"**/node_modules/**",
