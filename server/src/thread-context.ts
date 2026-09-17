@@ -62,7 +62,8 @@ export function createThreadContext(
 ): CommonspaceThreadContext {
 	return {
 		channelSnapshot: {
-			summary: channelMemory.summary,
+			// Match saved Thread normalization so snapshots survive restart and archive validation.
+			summary: channelMemory.summary.slice(0, 16_000).normalize("NFKC").trim(),
 			decisions: [...channelMemory.decisions],
 			openQuestions: [...channelMemory.openQuestions],
 			updatedAt: channelMemory.updatedAt,

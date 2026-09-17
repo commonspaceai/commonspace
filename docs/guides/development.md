@@ -104,9 +104,14 @@ Workspace-scale measurements are opt-in and never part of the normal test gate:
 pnpm benchmark:workspace
 COMMONSPACE_BENCHMARK_SIZES=1000,10000,20000 pnpm benchmark:workspace
 COMMONSPACE_BENCHMARK_REPETITIONS=5 pnpm benchmark:workspace
+COMMONSPACE_BENCHMARK_SHAPES=dm pnpm benchmark:workspace
 ```
 
-The benchmark discards one warm-up, then runs three measured samples per size by default. It seeds progressively larger synthetic DM transcripts and reports message acceptance/persistence, bootstrap payload and processing, search, export/import, and process heap/RSS deltas as JSON. Run it on an otherwise idle machine and record Node, operating system, CPU architecture, size list, repetition count, dispersion, and raw output with any performance claim.
+The benchmark runs the original long DM and a multi-Channel workspace at equal seeded message counts. The second shape has four Channels, three agents, three Projects, mixed Thread lengths, multi-Project messages, routing receipts/corrections, context, tool activity, pins, and real 4 KiB managed attachments. `COMMONSPACE_BENCHMARK_SHAPES` selects `dm`, `multi-channel`, or both (the default).
+
+It discards one warm-up per shape, then runs three measured samples per size by default. The original initialization, acceptance/persistence, bootstrap, broad search, export, and import timings remain separate. Additional timings cover Project-filtered message search and context projection/compaction prompt preparation for the busiest Channel and its longest Thread. Payload/archive serialization contributes reported sizes, outside those operation timings. Workers are synthetic; acceptance uses explicit routing and reply completion is outside its timing. No providers or native sessions are invoked.
+
+JSON includes the base commit and changed-file list, benchmark source hashes, machine/runtime details, seeded/measured/restored counts, raw samples, and min/median/max dispersion. Heap/RSS values are operation deltas, not peaks or retained memory. Run on an otherwise idle machine and retain the raw output with any performance claim. These service-level measurements do not cover browser rendering/reconnect, HTTP transfer, concurrent streaming, large attachments, or separate routing-resolution/reply writes; measure those before making architecture decisions about them.
 
 Normal development does not register a background service. To exercise source-based macOS installation, use `pnpm service:install` with a committed `main` checkout. The service commands and managed paths are documented in [Operations](operations.md#installed-macos-service).
 
