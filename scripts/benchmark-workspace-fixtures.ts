@@ -104,7 +104,6 @@ function addCorrectionAndAttachment(
 	request.routing.assignments.push({
 		id: previousAssignmentId,
 		agentId: previousAgent.id,
-		subRequest: request.text,
 		projectIds: assignment.projectIds,
 	});
 	request.routing.corrections.push({
@@ -198,7 +197,6 @@ function addThread(
 				{
 					id: assignmentId,
 					agentId: agent.id,
-					subRequest: request.text,
 					projectIds,
 				},
 			],
