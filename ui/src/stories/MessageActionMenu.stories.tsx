@@ -24,6 +24,7 @@ const meta = {
 		summary: "Please review the current visual baseline.",
 		saved: false,
 		onToggleSaved: fn(),
+		onPin: fn(),
 		onMarkUnread: fn(),
 		onCopyLink: fn(),
 	},
@@ -49,4 +50,8 @@ export const AttachmentOnly: Story = {
 		authorName: "Design Critic",
 		summary: "",
 	},
+};
+
+export const Pinned: Story = {
+	args: { defaultOpen: true, pinned: true },
 };

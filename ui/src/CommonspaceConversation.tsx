@@ -6,6 +6,7 @@ import {
 	type CommonspaceLiveAgentActivity,
 	type CommonspaceMessage,
 	type CommonspacePermissionRequest,
+	type CommonspacePin,
 	type CommonspaceThread,
 	type ConversationRef,
 	deriveCommonspaceInboxItems,
@@ -31,6 +32,7 @@ import {
 	useCallback,
 	useEffect,
 	useId,
+	useMemo,
 	useRef,
 	useState,
 	useSyncExternalStore,
@@ -738,6 +740,7 @@ function MessageRow({
 	highlighted = false,
 	onReplyToAgent,
 	onPin,
+	pinned = false,
 	onEdit,
 	onDelete,
 	onOpenVersion,
@@ -755,6 +758,7 @@ function MessageRow({
 	highlighted?: boolean;
 	onReplyToAgent?: (message: CommonspaceMessage) => void;
 	onPin?: (message: CommonspaceMessage, attachmentId?: string) => Promise<void>;
+	pinned?: boolean;
 	onEdit?: (message: CommonspaceMessage, text: string) => Promise<void>;
 	onDelete?: (message: CommonspaceMessage) => Promise<void>;
 	onOpenVersion?: (messageId: string) => void;
@@ -775,6 +779,22 @@ function MessageRow({
 	const [editing, setEditing] = useState(false);
 	const [editedText, setEditedText] = useState(message.text);
 	const [savingEdit, setSavingEdit] = useState(false);
+	const [pinning, setPinning] = useState(false);
+	const [pinError, setPinError] = useState<string | null>(null);
+	const pinMessage = async () => {
+		if (onPin === undefined || pinning) return;
+		setPinning(true);
+		setPinError(null);
+		try {
+			await onPin(message);
+		} catch (error) {
+			setPinError(
+				error instanceof Error ? error.message : "Could not update pin.",
+			);
+		} finally {
+			setPinning(false);
+		}
+	};
 	const submitEdit = async (event: FormEvent) => {
 		event.preventDefault();
 		if (onEdit === undefined || editedText.trim() === "" || savingEdit) return;
@@ -815,14 +835,16 @@ function MessageRow({
 						<MessageCircleReplyIcon className="size-4" aria-hidden="true" />
 					</button>
 				)}
-				{onPin !== undefined && (
+				{onPin !== undefined && message.deletedAt === undefined && (
 					<button
 						type="button"
 						className={messageActionButtonClassName}
-						aria-label={`Pin message from ${message.authorName}`}
-						title={`Pin message from ${message.authorName}`}
+						aria-label={`${pinned ? "Unpin" : "Pin"} message from ${message.authorName}`}
+						title={`${pinned ? "Unpin" : "Pin"} message from ${message.authorName}`}
+						aria-pressed={pinned}
+						disabled={pinning}
 						onClick={() => {
-							void onPin(message);
+							void pinMessage();
 						}}
 					>
 						<PinIcon className="size-4" aria-hidden="true" />
@@ -870,6 +892,15 @@ function MessageRow({
 						authorName={message.authorName}
 						summary={message.text}
 						saved={saved}
+						pinned={pinned}
+						pinning={pinning}
+						{...(onPin === undefined || message.deletedAt !== undefined
+							? {}
+							: {
+									onPin: () => {
+										void pinMessage();
+									},
+								})}
 						{...(onReplyInThread === undefined ? {} : { onReplyInThread })}
 						onToggleSaved={() => {
 							void onToggleSaved(message, !saved);
@@ -887,6 +918,11 @@ function MessageRow({
 					/>
 				)}
 			</div>
+			{pinError !== null && (
+				<p role="alert" className="col-span-2 text-xs text-destructive">
+					{pinError}
+				</p>
+			)}
 			{message.authorType === "agent" ? (
 				<AgentAvatar
 					agent={messageAgent}
@@ -2321,24 +2357,65 @@ export function CommonspaceConversation({
 		setThreadPinNote("");
 	};
 
+	const pinnedMessagesByScope = useMemo(() => {
+		const scopes = new Map<string, Set<string>>();
+		for (const pin of bootstrap?.state.pins ?? []) {
+			if (
+				pin.removedAt !== null ||
+				pin.kind !== "message" ||
+				pin.messageId === undefined
+			)
+				continue;
+			const key = `${pin.scope.kind}:${pin.scope.id}`;
+			const messages = scopes.get(key) ?? new Set<string>();
+			messages.add(pin.messageId);
+			scopes.set(key, messages);
+		}
+		return scopes;
+	}, [bootstrap?.state.pins]);
+	const toggleMessagePin = async (
+		scope: CommonspacePin["scope"],
+		message: CommonspaceMessage,
+		attachmentId?: string,
+	) => {
+		const existingPins = (bootstrap?.state.pins ?? []).filter(
+			(pin) =>
+				pin.removedAt === null &&
+				pin.scope.kind === scope.kind &&
+				pin.scope.id === scope.id &&
+				pin.kind === "message" &&
+				pin.messageId === message.id,
+		);
+		if (attachmentId === undefined && existingPins.length > 0) {
+			for (const pin of existingPins) await store.removePin(pin.id);
+			return;
+		}
+		await store.addPin(
+			attachmentId === undefined
+				? { scope, kind: "message", messageId: message.id }
+				: { scope, kind: "attachment", messageId: message.id, attachmentId },
+		);
+	};
+	const pinChannelMessage = async (
+		message: CommonspaceMessage,
+		attachmentId?: string,
+	) => {
+		if (message.conversation.kind !== "channel") return;
+		await toggleMessagePin(
+			{ kind: "channel", id: message.conversation.id },
+			message,
+			attachmentId,
+		);
+	};
 	const pinThreadMessage = async (
 		message: CommonspaceMessage,
 		attachmentId?: string,
 	) => {
 		if (activeThread === undefined) return;
-		await store.addPin(
-			attachmentId === undefined
-				? {
-						scope: { kind: "thread", id: activeThread.id },
-						kind: "message",
-						messageId: message.id,
-					}
-				: {
-						scope: { kind: "thread", id: activeThread.id },
-						kind: "attachment",
-						messageId: message.id,
-						attachmentId,
-					},
+		await toggleMessagePin(
+			{ kind: "thread", id: activeThread.id },
+			message,
+			attachmentId,
 		);
 	};
 
@@ -2614,6 +2691,12 @@ export function CommonspaceConversation({
 														message={root}
 														bootstrap={bootstrap}
 														flush
+														onPin={pinChannelMessage}
+														pinned={
+															pinnedMessagesByScope
+																.get(`channel:${root.conversation.id}`)
+																?.has(root.id) ?? false
+														}
 														onEdit={editDeliveredMessage}
 														onDelete={deleteDeliveredMessage}
 														onOpenVersion={openMessageVersion}
@@ -3248,6 +3331,11 @@ export function CommonspaceConversation({
 										flush
 										highlighted={activeRoot.id === focusedMessageId}
 										onPin={pinThreadMessage}
+										pinned={
+											pinnedMessagesByScope
+												.get(`thread:${activeThread.id}`)
+												?.has(activeRoot.id) ?? false
+										}
 										onEdit={editDeliveredMessage}
 										onDelete={deleteDeliveredMessage}
 										onOpenVersion={openMessageVersion}
@@ -3270,6 +3358,11 @@ export function CommonspaceConversation({
 										highlighted={reply.id === focusedMessageId}
 										onReplyToAgent={replyDirectlyToAgent}
 										onPin={pinThreadMessage}
+										pinned={
+											pinnedMessagesByScope
+												.get(`thread:${activeThread.id}`)
+												?.has(reply.id) ?? false
+										}
 										onEdit={editDeliveredMessage}
 										onDelete={deleteDeliveredMessage}
 										onOpenVersion={openMessageVersion}

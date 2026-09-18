@@ -258,6 +258,17 @@ function ChannelSettingsEditor({
 			pin.scope.id === id,
 	);
 
+	const messagesById = useMemo(
+		() =>
+			new Map(
+				(bootstrap.state.messages[`channel:${id}`] ?? []).map((message) => [
+					message.id,
+					message,
+				]),
+			),
+		[bootstrap.state.messages, id],
+	);
+
 	const save = async (event: FormEvent) => {
 		event.preventDefault();
 		if (saving) return;
@@ -489,22 +500,120 @@ function ChannelSettingsEditor({
 
 					<section
 						className="mt-7 border-t pt-6"
-						aria-labelledby="channel-context-heading"
+						aria-labelledby="channel-pins-heading"
 					>
-						<h3
-							id="channel-context-heading"
-							className="font-heading text-sm font-bold"
-						>
-							Channel context
-						</h3>
-						<p className="mt-1 text-xs text-muted-foreground">
-							Instructions and canonical memory remain attached to this room.
+						<div className="flex items-center justify-between">
+							<h3
+								id="channel-pins-heading"
+								className="font-heading text-sm font-bold"
+							>
+								Pinned messages & notes
+							</h3>
+							<span className="font-mono text-xs text-muted-foreground">
+								{pins.length}
+							</span>
+						</div>
+						<p className="mt-2 text-xs text-muted-foreground">
+							Keep useful messages, files, and notes available to everyone in
+							this channel.
+						</p>
+						<div className="mt-3 grid gap-2">
+							{pins.length === 0 && (
+								<p className="text-xs text-muted-foreground">
+									No pins yet. Open a message’s menu and choose Pin message, or
+									add a note below.
+								</p>
+							)}
+							{pins.map((pin) => {
+								const source =
+									pin.messageId === undefined
+										? undefined
+										: messagesById.get(pin.messageId);
+								const attachment =
+									pin.kind === "attachment"
+										? [
+												...(source?.attachments ?? []),
+												...(source?.files ?? []),
+											].find((file) => file.id === pin.attachmentId)
+										: undefined;
+								const label =
+									pin.kind === "note"
+										? pin.note
+										: source?.deletedAt !== undefined
+											? "Deleted message"
+											: pin.kind === "attachment"
+												? (attachment?.name ?? "Unavailable attachment")
+												: source?.text || "Attachment message";
+
+								return (
+									<div
+										key={pin.id}
+										className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-sm border bg-muted p-3 text-xs"
+									>
+										<div className="min-w-0">
+											{source !== undefined && (
+												<p className="mb-1 font-semibold">
+													{source.authorName}
+												</p>
+											)}
+											<p className="whitespace-pre-wrap break-words">{label}</p>
+										</div>
+										<button
+											type="button"
+											className="text-destructive"
+											aria-label={`Remove channel pin ${label}`}
+											onClick={() => {
+												void store.removePin(pin.id);
+											}}
+										>
+											Remove
+										</button>
+									</div>
+								);
+							})}
+							<div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+								<input
+									className="min-h-11 rounded-sm border px-3 text-[13px]"
+									aria-label="New channel pin note"
+									placeholder="Pin a channel note"
+									value={pinNote}
+									onChange={(event) => {
+										setPinNote(event.target.value);
+									}}
+								/>
+								<Button
+									type="button"
+									variant="outline"
+									disabled={pinning || pinNote.trim() === ""}
+									onClick={() => {
+										void addNote();
+									}}
+								>
+									{pinning ? "Pinning..." : "Pin"}
+								</Button>
+							</div>
+							{pinError === null ? null : (
+								<p role="alert" className="text-xs text-destructive">
+									{pinError}
+								</p>
+							)}
+						</div>
+					</section>
+
+					<details className="mt-7 border-t pt-6" aria-label="Advanced context">
+						<summary className="cursor-pointer font-heading text-sm font-bold">
+							Advanced context
+						</summary>
+						<p className="mt-2 text-xs text-muted-foreground">
+							Review or edit the context agents can read. Ordinary conversation
+							needs no setup here.
 						</p>
 						<div className="mt-4 grid gap-3 [&_input]:min-h-11 [&_input]:rounded-sm [&_input]:border [&_input]:px-3 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-xs [&_label]:font-semibold [&_select]:min-h-11 [&_select]:rounded-sm [&_select]:border [&_select]:bg-background [&_select]:px-3 [&_textarea]:min-h-20 [&_textarea]:rounded-sm [&_textarea]:border [&_textarea]:p-3">
 							<label>
-								Instructions
+								Channel guidance (optional)
 								<textarea
 									aria-label="Channel instructions"
+									placeholder="Optional guidance shared across this channel"
 									value={instructions}
 									onChange={(event) => {
 										setInstructions(event.target.value);
@@ -555,77 +664,7 @@ function ChannelSettingsEditor({
 								{compacting ? "Compacting…" : "Compact context"}
 							</Button>
 						</div>
-					</section>
-
-					<section
-						className="mt-7 border-t pt-6"
-						aria-labelledby="channel-pins-heading"
-					>
-						<div className="flex items-center justify-between">
-							<h3
-								id="channel-pins-heading"
-								className="font-heading text-sm font-bold"
-							>
-								Pins
-							</h3>
-							<span className="font-mono text-xs text-muted-foreground">
-								{pins.length}
-							</span>
-						</div>
-						<div className="mt-3 grid gap-2">
-							{pins.map((pin) => {
-								const label =
-									pin.note ??
-									pin.attachmentId ??
-									pin.messageId ??
-									"Pinned source";
-								return (
-									<div
-										key={pin.id}
-										className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-sm border bg-muted p-3 text-xs"
-									>
-										<p className="truncate">{label}</p>
-										<button
-											type="button"
-											className="text-destructive"
-											aria-label={`Remove channel pin ${label}`}
-											onClick={() => {
-												void store.removePin(pin.id);
-											}}
-										>
-											Remove
-										</button>
-									</div>
-								);
-							})}
-							<div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-								<input
-									className="min-h-11 rounded-sm border px-3 text-[13px]"
-									aria-label="New channel pin note"
-									placeholder="Pin a channel note"
-									value={pinNote}
-									onChange={(event) => {
-										setPinNote(event.target.value);
-									}}
-								/>
-								<Button
-									type="button"
-									variant="outline"
-									disabled={pinning || pinNote.trim() === ""}
-									onClick={() => {
-										void addNote();
-									}}
-								>
-									{pinning ? "Pinning..." : "Pin"}
-								</Button>
-							</div>
-							{pinError === null ? null : (
-								<p role="alert" className="text-xs text-destructive">
-									{pinError}
-								</p>
-							)}
-						</div>
-					</section>
+					</details>
 
 					<section className="mt-7 border-t pt-6">
 						<Button

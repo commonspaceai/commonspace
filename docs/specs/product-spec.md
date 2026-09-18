@@ -197,12 +197,13 @@ A structured handoff that starts a planned relay participant includes the origin
 Compaction summarizes context so it fits within input limits. It does not delete the conversation transcript or alter the runtime's private memory.
 
 1. The user can inspect the Project, Channel, and Thread context available to an Agent.
-2. Channel context shows its summary, decisions, open questions, the source messages it covers, estimated token pressure, who wrote it, and its compaction state.
+2. Channel context shows its summary, decisions, open questions, the source messages it covers, estimated token pressure, who wrote it, and its compaction state. Channel settings put readable pins first and keep optional channel guidance and memory editing under collapsed **Advanced context**, preserving existing saved context without requiring setup for ordinary conversation.
 3. A new Thread snapshots the current Channel context and then develops its own Thread context.
 4. Automatic compaction responds to estimated context/token pressure.
 5. The user can trigger compaction manually and edit the stored summary, decisions, and questions.
 6. User-written context remains authoritative and is not silently overwritten by automatic projection.
 7. If new source messages make edited context incomplete, Commonspace marks it stale.
+8. Channel timeline messages expose Pin/Unpin in the hover toolbar and message menu. These pins belong to the Channel even when a Thread is open; actions inside the Thread belong to that Thread. Pin lists show readable source content instead of internal message IDs.
 
 ### 5.8 Message correction
 

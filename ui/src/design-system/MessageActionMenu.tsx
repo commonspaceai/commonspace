@@ -4,6 +4,7 @@ import {
 	CopyIcon,
 	MessageCircleReplyIcon,
 	MoreHorizontalIcon,
+	PinIcon,
 } from "lucide-react";
 import {
 	DropdownMenu,
@@ -20,6 +21,9 @@ export interface MessageActionMenuProps {
 	summary: string;
 	defaultOpen?: boolean;
 	saved: boolean;
+	onPin?: () => void;
+	pinned?: boolean;
+	pinning?: boolean;
 	onReplyInThread?: () => void;
 	onToggleSaved: () => void;
 	onMarkUnread?: () => void;
@@ -31,6 +35,9 @@ export function MessageActionMenu({
 	summary,
 	defaultOpen = false,
 	saved,
+	onPin,
+	pinned = false,
+	pinning = false,
 	onReplyInThread,
 	onToggleSaved,
 	onMarkUnread,
@@ -59,6 +66,16 @@ export function MessageActionMenu({
 					</DropdownMenuLabel>
 				</DropdownMenuGroup>
 				<DropdownMenuGroup>
+					{onPin !== undefined && (
+						<DropdownMenuItem
+							className="min-h-10 gap-2.5 px-2.5 text-[13px]"
+							onClick={onPin}
+							disabled={pinning}
+						>
+							<PinIcon aria-hidden="true" />
+							{pinned ? "Unpin message" : "Pin message"}
+						</DropdownMenuItem>
+					)}
 					{onReplyInThread === undefined ? null : (
 						<DropdownMenuItem
 							className="min-h-10 gap-2.5 px-2.5 text-[13px]"

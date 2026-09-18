@@ -43,6 +43,11 @@ export const ChannelSettings: Story = {
 		await expect(
 			canvas.queryByLabelText("Channel reasoning"),
 		).not.toBeInTheDocument();
+		await expect(
+			canvas.getByLabelText("Channel instructions"),
+		).not.toBeVisible();
+		await expect(canvas.getByText("Pinned messages & notes")).toBeVisible();
+		await userEvent.click(canvas.getByText("Advanced context"));
 		await expect(canvas.getByLabelText("Channel instructions")).toBeVisible();
 	},
 };
