@@ -1,18 +1,18 @@
 # Add support for an agent harness
 
-Use this guide to add a supported native harness to Commonspace. Start from the [adapter proposal template](agent-adapter-template.md), then use [Claude Code](../../server/src/adapters/claude-code.ts) as the smallest complete implementation.
+To use an existing agent, follow [runtime setup](../start/runtimes.md). This guide is for implementing or maintaining an adapter. Start from the [adapter proposal template](agent-adapter-template.md), then use [Claude Code](../../server/src/adapters/claude-code.ts) as the smallest complete implementation.
 
 An adapter connects an installed agent to the workspace. It discovers existing identities and translates Commonspace settings into that harness's ACP controls. Credentials, tools, models, native configuration, and transcripts remain owned by the harness. Adding an adapter does not create Commonspace personas or install a runtime for the user.
 
 ## Supported adapters
 
-| Adapter ID | Discovery | ACP process | Native identity |
-| --- | --- | --- | --- |
-| `codex` | `codex --version` | Bundled `@agentclientprotocol/codex-acp` | Installed Codex harness |
-| `hermes` | `hermes profile list`, optional `profile describe` | Installed `hermes [-p <profile>] acp` | Each existing Hermes profile |
-| `claude-code` | `claude --version` | Bundled `@agentclientprotocol/claude-agent-acp` | Installed Claude Code harness |
-| `gemini` | `gemini --version`, supported-version check | Installed `gemini --acp` | Installed Gemini CLI harness |
-| `opencode` | `opencode --version` | Installed `opencode acp` | Installed OpenCode harness |
+| Adapter ID    | Discovery                                          | ACP process                                     | Native identity               |
+| ------------- | -------------------------------------------------- | ----------------------------------------------- | ----------------------------- |
+| `codex`       | `codex --version`                                  | Bundled `@agentclientprotocol/codex-acp`        | Installed Codex harness       |
+| `hermes`      | `hermes profile list`, optional `profile describe` | Installed `hermes [-p <profile>] acp`           | Each existing Hermes profile  |
+| `claude-code` | `claude --version`                                 | Bundled `@agentclientprotocol/claude-agent-acp` | Installed Claude Code harness |
+| `gemini`      | `gemini --version`, supported-version check        | Installed `gemini --acp`                        | Installed Gemini CLI harness  |
+| `opencode`    | `opencode --version`                               | Installed `opencode acp`                        | Installed OpenCode harness    |
 
 The built-in general-purpose harnesses are Codex, Hermes, Claude Code, Gemini CLI, and OpenCode. Pi coding agent is a follow-up: its adapter must pass the same scoped MCP and native-session checks before registration. Setup and verification below define tested versions; the [support matrix](../start/support.md) covers platform support.
 
@@ -34,13 +34,13 @@ The shared catalog contains browser-safe metadata only. The server registry is a
 
 Every configured adapter implements these members:
 
-| Member | Responsibility |
-| --- | --- |
-| `privatePaths` | List configured executable paths and argument paths for the host's redaction boundary. Never send them to the browser. |
-| `discover()` | Return existing `CommonspaceAgentProfile` identities. Use bounded commands; do not authenticate, start a model turn, inspect credentials, or mutate native profiles. Throw installation failures; the host logs once and reports no candidates. |
-| `inspectCapabilities(agent)` | Return browser-safe native inventory groups for the selected identity. Use bounded read-only sources; preserve source and scope, distinguish empty inventory from unsupported inspection and failure, and exclude native secrets, paths, endpoints, and memory contents. Never start a model turn or change native configuration. |
+| Member                              | Responsibility                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `privatePaths`                      | List configured executable paths and argument paths for the host's redaction boundary. Never send them to the browser.                                                                                                                                                                                                                                               |
+| `discover()`                        | Return existing `CommonspaceAgentProfile` identities. Use bounded commands; do not authenticate, start a model turn, inspect credentials, or mutate native profiles. Throw installation failures; the host logs once and reports no candidates.                                                                                                                      |
+| `inspectCapabilities(agent)`        | Return browser-safe native inventory groups for the selected identity. Use bounded read-only sources; preserve source and scope, distinguish empty inventory from unsupported inspection and failure, and exclude native secrets, paths, endpoints, and memory contents. Never start a model turn or change native configuration.                                    |
 | `launch(agent, fullAccess, signal)` | Return executable, argument array, environment, and any `validateInitialization` compatibility check, synchronously or asynchronously. Honor cancellation during preflight checks and select the exact native identity. The optional check runs against ACP initialization before sending session references or MCP bindings. Never construct shell command strings. |
-| `sessionSettings(input)` | Return native ACP mode, model, and config IDs. Leave unsupported settings absent. `AcpAgentProcess` applies controls only when the session advertises them. Model selection precedes model-dependent settings; finite choices are checked against refreshed options, while native model aliases remain available. |
+| `sessionSettings(input)`            | Return native ACP mode, model, and config IDs. Leave unsupported settings absent. `AcpAgentProcess` applies controls only when the session advertises them. Model selection precedes model-dependent settings; finite choices are checked against refreshed options, while native model aliases remain available.                                                    |
 
 The adapter does not implement its own message queue, subprocess pool, permission UI, transcript parser, or session persistence. `AcpAgentProcess` owns ACP framing, session setup, updates, cancellation, and process disposal. `CommonspaceHostService` owns durable acceptance, per-session serialization, independent concurrency, context scope, private session references, and recovery.
 
@@ -48,13 +48,13 @@ The adapter does not implement its own message queue, subprocess pool, permissio
 
 Open an added Agent's settings to browse and refresh inventory. This is user/profile metadata, not a promise of effective capability in every Project or session. Unsupported categories remain visible as unavailable; malformed or failed reads are shown separately from empty inventory.
 
-| Harness | Inventory sources |
-| --- | --- |
-| Hermes | The documented default `hermes-acp` tool surface; profile-specific MCP, skill, plugin, agent, and memory inventory remains unavailable because native inventory commands can initialize files or execute plugin/provider hooks |
-| Codex | Native MCP/plugin JSON listings and user skill folders, including system skill markers |
-| Claude Code | Native plugin JSON, user agent-definition filenames, user skill folders, and global MCP configuration names without running MCP health checks; `claude agents` is not used because current versions list native sessions |
-| Gemini CLI | User MCP settings and skill/extension folders with native file markers, including linked folders; no CLI initialization or MCP connections |
-| OpenCode | Global MCP configuration names, including JSONC, and global skill folders; environment/project overrides are excluded |
+| Harness     | Inventory sources                                                                                                                                                                                                              |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Hermes      | The documented default `hermes-acp` tool surface; profile-specific MCP, skill, plugin, agent, and memory inventory remains unavailable because native inventory commands can initialize files or execute plugin/provider hooks |
+| Codex       | Native MCP/plugin JSON listings and user skill folders, including system skill markers                                                                                                                                         |
+| Claude Code | Native plugin JSON, user agent-definition filenames, user skill folders, and global MCP configuration names without running MCP health checks; `claude agents` is not used because current versions list native sessions       |
+| Gemini CLI  | User MCP settings and skill/extension folders with native file markers, including linked folders; no CLI initialization or MCP connections                                                                                     |
+| OpenCode    | Global MCP configuration names, including JSONC, and global skill folders; environment/project overrides are excluded                                                                                                          |
 
 Skill directory readers expose folder labels only when `SKILL.md` exists; they do not read prompts or establish that a skill is enabled. Native tool inventories are not universally available through ACP, so adapters without a safe tool source report that category as unavailable. Memory browsing is limited to native status metadata where supplied; private memory contents are never read into the browser. Inventory is not persisted or exported.
 
@@ -84,21 +84,13 @@ Resource directory scans inspect at most 2,000 entries per category. Gemini exte
 
 ## Hermes setup
 
-Install and configure [Hermes Agent](https://hermes-agent.nousresearch.com/docs/quickstart), then verify its dedicated ACP host surface without starting a model turn:
-
-```bash
-hermes --version
-hermes acp --check
-hermes profile list
-```
-
-In Commonspace, choose **Add Agent → Hermes**, then add the discovered native profile. Commonspace discovers identities with `hermes profile list` and invokes the selected profile as `hermes [-p <profile>] acp`; it does not copy credentials or rewrite Hermes configuration. The optional executable overrides are `COMMONSPACE_HERMES_PATH` for discovery and `COMMONSPACE_HERMES_ACP_PATH` for launch.
+User installation and authentication live in [Hermes setup](../start/runtimes.md#hermes). The adapter discovers identities with `hermes profile list` and invokes `hermes [-p <profile>] acp`. Executable overrides are `COMMONSPACE_HERMES_PATH` and `COMMONSPACE_HERMES_ACP_PATH`.
 
 The Agent settings capability browser lists the documented default `hermes-acp` tool names as the supported integration surface. It deliberately does not run Hermes inventory commands: local dependencies, profile configuration, and session policy still determine whether a configured tool is available during a turn.
 
 ## Claude Code setup
 
-Install and authenticate [Claude Code](https://code.claude.com/docs/en/quickstart) separately. Confirm `claude --version` and `claude auth status`, then choose **Add Agent → Claude Code → Add discovered agent Claude Code**. A custom executable uses an absolute path in `COMMONSPACE_CLAUDE_CODE_PATH`. Commonspace passes that executable to the bridge through `CLAUDE_CODE_EXECUTABLE`; the bridge uses native Claude authentication and configuration.
+User installation and authentication live in [Claude Code setup](../start/runtimes.md#claude-code). A custom executable uses an absolute path in `COMMONSPACE_CLAUDE_CODE_PATH`; the bridge receives it through `CLAUDE_CODE_EXECUTABLE`.
 
 The adapter pins [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) and launches its executable entry point with Node. This is the maintained successor to `@zed-industries/claude-code-acp`. The normal ACP mode is `default`; explicit Full access requests `bypassPermissions`. Model selection uses ACP `model`. Native effort levels `low`, `medium`, `high`, and `max` map to `effort`; other Commonspace reasoning values leave the native default intact. Controls still depend on the bridge's advertised capabilities.
 
@@ -110,7 +102,7 @@ One Claude Code identity is added. Claude subagent definitions, plugins, memory 
 
 [OpenCode](https://opencode.ai/docs/acp/) supplies ACP through `opencode acp`; version `1.18.30` is covered by the real runtime fixture. Its normal permissions come from native configuration. Explicit Full access sets `OPENCODE_PERMISSION` to `{"*":"allow"}` for the child process only. Native `build` and `plan` modes are agent choices, so Commonspace does not treat them as approval modes. Model and effort settings use advertised ACP config options.
 
-Configure authentication and model access in each native runtime, then choose **Add Agent → Gemini CLI** or **Add Agent → OpenCode**. Each adds one native harness identity. Private executable overrides are `COMMONSPACE_GEMINI_PATH` and `COMMONSPACE_OPENCODE_PATH`; optional ACP executable overrides use `COMMONSPACE_GEMINI_ACP_PATH` and `COMMONSPACE_OPENCODE_ACP_PATH`. Commonspace does not copy credentials or rewrite native configuration.
+See [runtime setup](../start/runtimes.md) for authentication. Each adds one native harness identity. Private executable overrides are `COMMONSPACE_GEMINI_PATH` and `COMMONSPACE_OPENCODE_PATH`; optional ACP executable overrides use `COMMONSPACE_GEMINI_ACP_PATH` and `COMMONSPACE_OPENCODE_ACP_PATH`. Commonspace does not copy credentials or rewrite native configuration.
 
 ### Gemini revalidation evidence
 

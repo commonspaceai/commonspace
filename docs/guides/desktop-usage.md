@@ -1,6 +1,6 @@
 # Using the desktop workspace
 
-Commonspace opens to Inbox at `/`. Use the sidebar to open Channels, agent DMs, Projects, and Threads. The URL records the selected destination; browser Back, Forward, and reloading a detail link return to that location. Workspace branding does not navigate. Unknown or stale links return to Inbox, including when a selected destination disappears during a live refresh.
+New here? Follow [your first conversation](../start/first-conversation.md). Commonspace opens to Inbox at `/`. Use the sidebar to open Channels, agent DMs, Projects, and Threads. The URL records the selected destination; browser Back, Forward, and reloading a detail link return to that location. Workspace branding does not navigate. Unknown or stale links return to Inbox, including when a selected destination disappears during a live refresh.
 
 ## Find and return to work
 
@@ -26,7 +26,7 @@ Open Workspace settings from the sidebar. Focus enters the settings pane and cov
 
 Choose **Light**, **Dark**, or **System** under Appearance. Light is the default. The choice applies immediately and persists in this browser. System follows operating-system changes while the app is open; native form controls and scrollbars use the resolved appearance too. Reduced-motion preferences suppress interface animations and smooth scrolling.
 
-Inference settings save the routing source, connection, and workspace run defaults together. Notification preferences have a separate save action. Changing appearance needs no save. A failed save keeps entered values available for correction or retry. Channel and agent settings are available from their headers or action menus; Project settings are available from the Project view. Native capability browsing is read-only and identifies unavailable inspection separately from an empty inventory.
+Inference settings save the routing source, connection, and workspace run defaults together. Configuration status does not test model access; an actual reply establishes access for that request. DMs and explicit single-member Channel requests bypass automatic routing. Notification preferences have a separate save action. Changing appearance needs no save. A failed save keeps entered values available for correction or retry. Channel and agent settings are available from their headers or action menus; Project settings are available from the Project view. Native capability browsing is read-only and identifies unavailable inspection separately from an empty inventory.
 
 ## Recovery and limits
 

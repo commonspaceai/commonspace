@@ -1,12 +1,14 @@
 # Contributing to Commonspace
 
-Bug fixes, features, tests, documentation, and focused improvements are welcome. Read the page that owns your work: [Product model](docs/specs/product.md), [Development](docs/guides/development.md), or [Operations](docs/guides/operations.md).
+You can help by reporting a problem, improving a guide, or sending a focused fix. Normal development and fixture tests do not require agent credentials.
 
-## Before editing
+## Choose a starting point
 
-Search existing issues and pull requests. For a larger feature or product-model change, agree on the user problem and approach with a maintainer first. Keep one logical change per pull request.
+- **Improve the docs:** open the relevant Markdown page on GitHub and choose **Edit this file** to propose a correction. Explain what was confusing and check its links and commands. You do not need to run the app build for a docs-only change.
+- **Report a bug:** [search existing issues](https://github.com/commonspaceai/commonspace/issues), then [file a report](https://github.com/commonspaceai/commonspace/issues/new?template=bug_report.yml) with steps to reproduce, expected behavior, and your version and OS.
+- **Change code:** check [issues](https://github.com/commonspaceai/commonspace/issues) and [pull requests](https://github.com/commonspaceai/commonspace/pulls) for related work. Agree on the problem and approach before starting a larger feature. Keep one logical change per pull request.
 
-Read the relevant [Product specification](docs/specs/product-spec.md), [Architecture](docs/guides/architecture.md), and [Development guide](docs/guides/development.md). Keep behavior in its existing owner; do not add a second product object or implementation path for the same rule.
+For code changes, use the [Product specification](docs/specs/product-spec.md) for behavior, [Architecture](docs/guides/architecture.md) to find the owning package, and [Development](docs/guides/development.md) for commands. Read the sections relevant to your change.
 
 ## Set up
 
@@ -32,12 +34,12 @@ pnpm check
 git diff --check
 ```
 
-| Change | Required evidence |
-| --- | --- |
-| Shared types, server, saved data, or security | Focused regression test, `pnpm check`, and `pnpm verify:live` |
-| UI component or screen | Storybook states, behavior checks, `pnpm check`, and desktop inspection |
+| Change                                            | Required evidence                                                               |
+| ------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Shared types, server, saved data, or security     | Focused regression test, `pnpm check`, and `pnpm verify:live`                   |
+| UI component or screen                            | Storybook states, behavior checks, `pnpm check`, and desktop inspection         |
 | Packaging, installation, dependencies, or release | Focused checks, `pnpm check`, `pnpm package:npm`, and `pnpm verify:npm-package` |
-| Documentation or templates only | Links, commands, Markdown syntax, and `git diff --check` |
+| Documentation or templates only                   | Links, commands, Markdown syntax, and `git diff --check`                        |
 
 Use [Visual verification](docs/design/visual-verification.md) for rendered UI review and [Releasing](docs/guides/releasing.md) for candidate checks. Real-agent and real-service checks are additional; record what ran and what did not.
 

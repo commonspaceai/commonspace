@@ -25,7 +25,7 @@ Open `http://127.0.0.1:3100` in your desktop browser. Keep the terminal open whi
 Pin an exact release when needed:
 
 ```bash
-npx --yes commonspace@0.0.1
+npx --yes commonspace@0.0.4
 ```
 
 These commands print package information without starting the app:
@@ -56,20 +56,36 @@ npx.cmd --yes commonspace@latest
 
 Open `http://127.0.0.1:3100` and keep the terminal open. Commonspace does not install a Windows service. Read the [validation guide](../guides/windows-validation.md) for candidate tarball/source commands, console shutdown checks, and the remaining native integration checks. Windows application smoke coverage does not establish support for each agent runtime.
 
-## Add an agent
+## Get your first answer
 
-You can open the workspace without an agent. To send your first message:
+1. [Install and sign in to one agent runtime](runtimes.md), then choose **Add Agent** and select it.
+2. Add a **Project** pointing to a local repository folder.
+3. Open the agent’s DM. Type `@@`, select your Project, and send:
 
-1. Install and configure a [supported Codex, Claude Code, Gemini CLI, OpenCode, or Hermes runtime](support.md#agent-runtimes) separately, then choose **Add Agent** in Commonspace and select it.
-2. Select the agent in the sidebar to open its **Direct Message**, then send a message. This conversation goes directly to that agent and does not need Channel routing setup.
-3. For code work, create a **Project** with the relevant local folder or folders. In a message, type `@@` and select the Project to insert its `@@project` reference.
+   > Explain this repository’s entry points and how to run it. Don’t change any files.
+
+You’re ready when the agent replies about your repository. Follow up with “Which file should I read first?” to continue the same native session. A DM needs no Channel routing configuration.
+
+[Follow the full walkthrough](first-conversation.md), including a Channel with two agents.
+
+## Reopen and update
+
+Run the same command whenever you want to reopen Commonspace:
+
+```bash
+npx --yes commonspace@latest
+```
+
+Your saved conversations and Projects remain in `~/.commonspace`. To update, let active work finish, stop the old process with Ctrl+C, then run that command again. Check the startup version or run `npx --yes commonspace@latest --version`. See [GitHub releases](https://github.com/commonspaceai/commonspace/releases) for changes. Back up your Commonspace data directory before upgrading; native session backups belong to each runtime.
+
+Closing the browser leaves the server running. Closing its terminal or pressing Ctrl+C stops it and active work. Use the same data directory when restarting, and run only one server against that directory.
 
 ## Run from source
 
 Contributors and maintainers can run the repository directly with Node.js 22.13+ or 24+:
 
 ```bash
-git clone git@github.com:commonspaceai/commonspace.git
+git clone https://github.com/commonspaceai/commonspace.git
 cd commonspace
 corepack enable
 pnpm install --frozen-lockfile
@@ -91,8 +107,6 @@ The service installs committed source, not uncommitted checkout edits. See [Oper
 
 ## Get help
 
-See [Operations](../guides/operations.md) for logs, configuration, and common failures. Bug reports should include the Commonspace version, operating system, Node.js version, and reproduction steps. Keep credentials, agent transcripts, native session IDs, and workspace state out of reports.
+Start with the [FAQ and troubleshooting](help.md), [runtime setup](runtimes.md), or [file a bug](https://github.com/commonspaceai/commonspace/issues/new?template=bug_report.yml). Include the Commonspace version, OS, Node version, and reproduction steps. Keep credentials, transcripts, session IDs, and workspace data out of reports.
 
-Follow the [security policy](../../SECURITY.md) for suspected vulnerabilities. To contribute, start with [Contributing](../../CONTRIBUTING.md).
-
-Commonspace is [MIT licensed](../../LICENSE). The npm package includes this project license.
+Use the [security policy](../../SECURITY.md) for vulnerabilities and [Contributing](../../CONTRIBUTING.md) for development. Commonspace is [MIT licensed](../../LICENSE).
