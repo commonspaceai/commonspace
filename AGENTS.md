@@ -17,10 +17,6 @@ Keep behavior in its owning package. Shared types belong in `packages/shared`; s
 
 When a shared contract changes, update consumers, validation, migrations, tests, and the owning documentation together. Use synthetic data; keep credentials, local state, sessions, and generated artifacts out of commits.
 
-## TypeSafe
-
-Use the [TypeSafe skill](.agents/skills/typesafe-ai/SKILL.md) when working on this project. Apply it where AI judgments help, such as routing, ranking, extraction, and verification, while preserving the requested scope. Follow the skill's live-documentation guidance before designing or changing a TypeSafe integration.
-
 ## Verify
 
 Add a focused failing test for behavior changes. Use Storybook for isolated UI states and browser flows for assembled behavior.
