@@ -115,6 +115,11 @@ import {
 	parseChannelContextCompaction,
 } from "./context.js";
 import {
+	ContextHistoryIndex,
+	type ContextHistoryMatches,
+	type ContextHistoryPage,
+} from "./context-history.js";
+import {
 	createDesktopNotifier,
 	desktopNotificationForItem,
 } from "./desktop-notifications.js";
@@ -129,6 +134,7 @@ import {
 } from "./file-attachments.js";
 import { routeWithJev } from "./jev-router.js";
 import { type JsonObject, type JsonValue, jsonObject } from "./json.js";
+import { LocalHistoryEmbeddings } from "./local-history-embeddings.js";
 import {
 	mergeChannelMemoryProjection,
 	projectChannelMemory,
@@ -153,6 +159,7 @@ import {
 	completeRunAttribution,
 	type RunSnapshot,
 } from "./run-attribution.js";
+import type { HistoryEmbedder } from "./semantic-history.js";
 import {
 	addDiscoveredAgent,
 	applyMutation,
@@ -327,6 +334,7 @@ export interface AgentPermissionOutcome {
 }
 
 export interface CommonspaceHostDependencies {
+	historyEmbeddings: HistoryEmbedder;
 	discoverAgents(adapter: AgentAdapterKind): Promise<CommonspaceAgentProfile[]>;
 	runAgent(input: AgentRunInput): Promise<string | AgentRunResult>;
 	routeAgents(input: CommonspaceRouteInput): Promise<CommonspaceRouteResult>;
@@ -2421,6 +2429,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	>();
 	private readonly backgroundRuns = new Set<Promise<void>>();
 	private readonly routingIndexes = new Map<string, RoutingMessageIndex>();
+	private readonly historyIndexes = new Map<string, ContextHistoryIndex>();
+	private readonly historyEmbeddings = new LocalHistoryEmbeddings();
 	private readonly contextRefreshes = new Map<string, { dirty: boolean }>();
 	private readonly inferenceShutdown = new AbortController();
 	private readonly activeConversationRuns = new Map<string, Promise<void>>();
@@ -2711,7 +2721,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		this.closing = true;
 		this.inferenceShutdown.abort(new Error("Commonspace is shutting down"));
 		this.routingIndexes.clear();
+		this.historyIndexes.clear();
 		this.closeOperation ??= (async () => {
+			await this.historyEmbeddings.close();
 			const permissionsInterrupted = this.interruptPendingPermissions();
 			const processes = [...this.acpProcesses.values()];
 			this.acpProcesses.clear();
@@ -2891,6 +2903,51 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					"Handoff to at most one peer at a time. Do not mention peers for status, acknowledgement, or work you can complete yourself.",
 			};
 		return context;
+	}
+
+	async browseHistory(
+		scope: CommonspaceMcpScope,
+		nodeId?: string,
+	): Promise<ContextHistoryPage> {
+		return this.historyIndex(scope).browse(nodeId);
+	}
+
+	async findHistory(
+		scope: CommonspaceMcpScope,
+		input: { query: string; limit: number },
+	): Promise<ContextHistoryMatches> {
+		const index = this.historyIndex(scope);
+		const result = await index.findHybrid(input.query, input.limit);
+		// Scope or sources can change while the worker is running, including /new.
+		if (
+			this.closing ||
+			this.historyIndex(scope).browse().rootId !== result.rootId
+		)
+			throw new Error("History changed during retrieval; retry.");
+		return result;
+	}
+
+	private historyIndex(scope: CommonspaceMcpScope): ContextHistoryIndex {
+		// Recheck live membership and generation before touching any cached source.
+		this.resolveMcpScope(scope);
+		const key = JSON.stringify([
+			scope.conversation,
+			scope.threadId,
+			scope.sessionName,
+		]);
+		let index = this.historyIndexes.get(key);
+		this.historyIndexes.delete(key);
+		if (index === undefined)
+			index = new ContextHistoryIndex(
+				this.overrides.historyEmbeddings ?? this.historyEmbeddings,
+			);
+		this.historyIndexes.set(key, index);
+		if (this.historyIndexes.size > 16) {
+			const oldest = this.historyIndexes.keys().next();
+			if (!oldest.done) this.historyIndexes.delete(oldest.value);
+		}
+		index.sync(this.messagesForMcpScope(scope));
+		return index;
 	}
 
 	async readMessages(

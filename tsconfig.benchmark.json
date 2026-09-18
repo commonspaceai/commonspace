@@ -7,6 +7,10 @@
 	},
 	"include": [
 		"scripts/benchmark-workspace*.ts",
-		"tests/benchmark-workspace*.spec.ts"
+		"tests/benchmark-workspace*.spec.ts",
+		"scripts/context-evaluation*.ts",
+		"scripts/evaluate-context.ts",
+		"scripts/benchmark-context.ts",
+		"tests/context-evaluation.spec.ts"
 	]
 }

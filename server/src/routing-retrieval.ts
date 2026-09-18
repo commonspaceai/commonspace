@@ -172,6 +172,8 @@ export function buildRetrievedRoutingContext(
 
 export interface RoutingPassage {
 	messageId: string;
+	/** UTF-16 offset into the canonical message text. */
+	start: number;
 	author: string;
 	text: string;
 	threadId?: string;
@@ -215,6 +217,7 @@ export class RoutingMessageIndex {
 				const id = `${message.id}:${String(offset)}`;
 				const passage: IndexedPassage = {
 					messageId: message.id,
+					start: offset,
 					author: message.authorName,
 					text,
 					length: tokens.length,
@@ -271,6 +274,7 @@ export class RoutingMessageIndex {
 				if (passage === undefined) return [];
 				const result: RoutingPassage = {
 					messageId: passage.messageId,
+					start: passage.start,
 					author: passage.author,
 					text: passage.text,
 				};

@@ -62,6 +62,12 @@ describe("Commonspace MCP gateway", () => {
 			}),
 		);
 		const gateway = new CommonspaceMcpGateway({
+			browseHistory: async () => {
+				throw new Error("History not configured in this gateway fixture");
+			},
+			findHistory: async () => {
+				throw new Error("History not configured in this gateway fixture");
+			},
 			readContext: async (scope) => ({
 				agent: {
 					id: scope.agentId,
@@ -161,6 +167,8 @@ describe("Commonspace MCP gateway", () => {
 		const tools = await client.listTools();
 		expect(tools.tools.map((tool) => tool.name)).toEqual([
 			"commonspace_get_context",
+			"commonspace_browse_history",
+			"commonspace_find_history",
 			"commonspace_read_messages",
 			"commonspace_search",
 			"commonspace_handoff",

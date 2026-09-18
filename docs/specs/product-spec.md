@@ -326,6 +326,8 @@ Routing retrieves bounded public conversation passages through a local, ephemera
 
 Automatic Channel and Thread context refresh runs as tracked background work, coalescing repeated refreshes for one Thread. It does not hold the conversation delivery queue while awaiting inference. Idle and shutdown account for these jobs; newer human edits remain authoritative and newer messages update source coverage. Native session resumption and native compaction remain harness-owned.
 
+Agents can navigate an eight-way tree of authorized conversation passages and retrieve ranked keyword and local semantic evidence through `commonspace_browse_history` and `commonspace_find_history`. Leaves preserve exact source text, message IDs, revisions, and offsets; edits and deletions invalidate affected nodes. This is on-demand retrieval, separate from shared summary compaction. It respects the same Thread, edit-branch, and DM-generation boundaries as scoped message reads and never rewrites native context. See [Shared history retrieval](context-retrieval.md) for the contract, cost model, and semantic-search limitations.
+
 ### 6.7 Message versions, deletion, pins, and files
 
 | ID | Target | Requirement | Acceptance condition |

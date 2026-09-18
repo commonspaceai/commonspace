@@ -61,6 +61,8 @@
 		"package:npm": "node scripts/package-npm.mjs",
 		"verify:npm-package": "node scripts/verify-npm-package.mjs",
 		"benchmark:workspace": "node --expose-gc --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-workspace.ts",
+		"evaluate:context": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/evaluate-context.ts",
+		"benchmark:context": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-context.ts",
 		"service:install": "node scripts/commonspace-service.mjs install --source .",
 		"service:update": "node scripts/commonspace-service.mjs update",
 		"service:start": "node scripts/commonspace-service.mjs start",

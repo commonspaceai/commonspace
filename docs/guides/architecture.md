@@ -19,6 +19,10 @@ The product consists of Projects, Channels, Direct Messages, Agents, messages, T
 
 Two protocols connect agent work to the workspace. Agent Client Protocol (ACP) carries native session requests, responses, activity, and permission choices over local child-process input/output. Model Context Protocol (MCP) exposes scoped Commonspace context and progress tools over authenticated loopback HTTP.
 
+`server/src/context-history.ts` owns the derived history tree and exact passage provenance. Scoped MCP history tools reuse the local inverted passage index in `routing-retrieval.ts`; `service.ts` revalidates scope before every read and bounds its process-local index cache. Retrieval does not rewrite shared summaries or native prompt history. [Shared history retrieval](../specs/context-retrieval.md) defines freshness, authorization, and cost limits.
+
+`semantic-history.ts` owns scope-local vector reconciliation and keyword/semantic rank fusion. `local-history-embeddings.ts` owns the lazy CPU worker, pinned public model download, bounded inference queue, and shutdown. Conversation text stays local. The host revalidates scope and source revision after inference; unavailable inference returns explicitly marked lexical results.
+
 ## Where changes belong
 
 | Change | Primary owner | Update together |
