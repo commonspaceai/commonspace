@@ -173,8 +173,37 @@ export const ChannelConversation: Story = {
 		await expect(
 			canvas.getByText(/Design review matches Hermes\./u),
 		).toBeVisible();
+		await expect(canvas.getByText(/Original message/u)).toBeVisible();
+	},
+};
+
+const historicalRoutingBootstrap = structuredClone(storyBootstrap);
+for (const messages of Object.values(
+	historicalRoutingBootstrap.state.messages,
+)) {
+	for (const message of messages) {
+		const delivery = message.routing?.assignments[0];
+		if (delivery !== undefined)
+			delivery.legacySubRequest = "Inspect only the desktop UI boundary.";
+	}
+}
+
+export const HistoricalRouting: Story = {
+	args: {
+		store: createStoryStore(historicalRoutingBootstrap, {
+			activeConversation: channel,
+			activeProjectId: primaryProject.id,
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByText("Routed to Review Bot · AI selected · Completed"),
+		);
 		await expect(
-			canvas.getByText(/Inspect only the desktop UI boundary\./u),
+			canvas.getByText(
+				/Historical request: Inspect only the desktop UI boundary\./u,
+			),
 		).toBeVisible();
 	},
 };

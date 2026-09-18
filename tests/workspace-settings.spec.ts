@@ -28,6 +28,59 @@ async function createService(): Promise<{
 }
 
 describe("workspace settings", () => {
+	it("keeps versioned Jev credentials private across restart, preservation, clearing and disabling", async () => {
+		const { root, service } = await createService();
+		const text = {
+			provider: "openai-compatible",
+			model: "text-writer",
+		} as const;
+		await service.updateRoutingConfiguration({
+			...text,
+			jev: { model: "jev-1.13.0", apiKey: "synthetic-jev-secret" },
+		});
+		expect(service.routing().jev).toEqual({
+			model: "jev-1.13.0",
+			apiKeyConfigured: true,
+		});
+		expect((await service.diagnostics()).inference).toMatchObject({
+			location: "remote",
+			configured: true,
+		});
+		expect(JSON.stringify(await service.bootstrap())).not.toContain(
+			"synthetic-jev-secret",
+		);
+		const persisted = JSON.parse(
+			await readFile(join(root, "routing.json"), "utf8"),
+		);
+		expect(persisted.jev).toEqual({
+			version: 1,
+			model: "jev-1.13.0",
+			apiKey: "synthetic-jev-secret",
+		});
+		await service.close();
+		const restarted = new CommonspaceHostService(
+			{},
+			{ root },
+			{ discoverAgents: async () => [] },
+		);
+		await restarted.initialize();
+		expect(restarted.routing().jev?.apiKeyConfigured).toBe(true);
+		await restarted.updateRoutingConfiguration({
+			...text,
+			jev: { model: "jev-latest" },
+		});
+		expect(restarted.routing().jev?.apiKeyConfigured).toBe(true);
+		await restarted.updateRoutingConfiguration({
+			...text,
+			jev: { model: "jev-latest", apiKey: null },
+		});
+		expect(
+			JSON.parse(await readFile(join(root, "routing.json"), "utf8")).jev.apiKey,
+		).toBeUndefined();
+		await restarted.updateRoutingConfiguration({ ...text, jev: null });
+		expect(restarted.routing().jev).toBeUndefined();
+		await restarted.close();
+	});
 	it("validates an unsaved routing candidate without changing durable settings", async () => {
 		const { root, service } = await createService();
 		const before = service.routing();

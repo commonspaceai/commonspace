@@ -21,6 +21,58 @@ const bootstrapSchema = z.object({
 	}),
 });
 
+test("persists Jev settings without returning its credential and can disable routing judgments", async ({
+	page,
+}) => {
+	await page.goto("/");
+	await page.getByRole("button", { name: "Commonspace settings" }).click();
+	await page.getByRole("checkbox", { name: "Use Jev for routing" }).focus();
+	await page.keyboard.press("Space");
+	await expect(
+		page.getByRole("checkbox", { name: "Use Jev for routing" }),
+	).toBeChecked();
+	await page
+		.getByLabel("TypeSafe API key", { exact: true })
+		.fill("synthetic-typesafe-key");
+	await page.screenshot({
+		path: "artifacts/jev-settings-light.png",
+		animations: "disabled",
+	});
+	await page.getByRole("radio", { name: /^Dark/ }).focus();
+	await page.keyboard.press("Space");
+	await page.getByLabel("Jev model").scrollIntoViewIfNeeded();
+	await page.screenshot({
+		path: "artifacts/jev-settings-dark.png",
+		animations: "disabled",
+	});
+	await page.getByRole("radio", { name: /^Light/ }).focus();
+	await page.keyboard.press("Space");
+	await page.getByRole("button", { name: "Save inference settings" }).click();
+	await expect(
+		page.getByRole("form", { name: "Workspace settings" }),
+	).toHaveCount(0);
+	const configuration = await page.request.get("/api/bootstrap", {
+		headers: { origin: new URL(page.url()).origin },
+	});
+	const body = await configuration.text();
+	expect(body).toContain("jev-1.13.0");
+	expect(body).not.toContain("synthetic-typesafe-key");
+	await page.reload();
+	await page.getByRole("button", { name: "Commonspace settings" }).click();
+	await expect(
+		page.getByRole("checkbox", { name: "Use Jev for routing" }),
+	).toBeChecked();
+	await expect(
+		page.getByLabel("TypeSafe API key", { exact: true }),
+	).toHaveValue("");
+	await page.getByRole("checkbox", { name: "Use Jev for routing" }).focus();
+	await page.keyboard.press("Space");
+	await page.getByRole("button", { name: "Save inference settings" }).click();
+	await expect(
+		page.getByRole("form", { name: "Workspace settings" }),
+	).toHaveCount(0);
+});
+
 test("keeps Workspace settings keyboard focus above the covered conversation", async ({
 	page,
 }) => {

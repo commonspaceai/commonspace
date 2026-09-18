@@ -221,7 +221,6 @@ describe("standalone Commonspace server", () => {
 				sourceMessageId: "missing-message",
 				assignmentId: "missing-assignment",
 				agentId: "missing-agent",
-				subRequest: "Correct this assignment.",
 				projectIds: [],
 			}),
 		});

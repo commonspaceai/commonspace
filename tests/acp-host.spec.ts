@@ -636,6 +636,7 @@ describe("Commonspace ACP host path", () => {
 			.filter((frame) => frame.method === "session/prompt")
 			.map((frame) =>
 				frame.params.prompt
+					.slice(0, 1)
 					.map((part: { text?: string }) => part.text ?? "")
 					.join(""),
 			);
@@ -643,6 +644,15 @@ describe("Commonspace ACP host path", () => {
 			"Historical room message.",
 			"is the acp finished for @@commonspace",
 		]);
+		const participantBlocks = frames
+			.filter((frame) => frame.method === "session/prompt")
+			.map((frame) => frame.params.prompt[1]);
+		expect(participantBlocks).toHaveLength(2);
+		for (const block of participantBlocks) {
+			expect(block.type).toBe("text");
+			expect(block.text).toContain('"name":"Hermes"');
+			expect(block.text).not.toContain("Historical room message.");
+		}
 		expect(deliveredText.join("\n")).not.toContain("Recent room history:");
 		expect(deliveredText.join("\n")).not.toContain("Execution contract:");
 		expect(
@@ -914,7 +924,6 @@ describe("Commonspace ACP host path", () => {
 					assignments: [
 						{
 							agentId: worker.id,
-							subRequest: "Handle this Channel request.",
 							projectIds: [],
 						},
 					],

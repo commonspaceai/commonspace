@@ -489,6 +489,10 @@ export function CommonspaceSidebar({
 		"https://api.openai.com/v1",
 	);
 	const [routingApiKey, setRoutingApiKey] = useState("");
+	const [jevEnabled, setJevEnabled] = useState(false);
+	const [jevModel, setJevModel] = useState("jev-1.13.0");
+	const [jevApiKey, setJevApiKey] = useState("");
+	const [clearJevApiKey, setClearJevApiKey] = useState(false);
 	const [clearRoutingApiKey, setClearRoutingApiKey] = useState(false);
 	const [savingInference, setSavingInference] = useState(false);
 	const [searchOpen, setSearchOpen] = useState(false);
@@ -1013,19 +1017,26 @@ export function CommonspaceSidebar({
 		setChannelPinNote("");
 	};
 
-	const routingUpdateRequest = (): UpdateRoutingConfigurationRequest =>
-		routingProvider === "harness"
-			? { provider: "harness", harnessAgentId: routingHarnessAgentId }
-			: {
-					provider: "openai-compatible",
-					model: routingModel,
-					baseUrl: routingBaseUrl,
-					...(clearRoutingApiKey
-						? { apiKey: null }
-						: routingApiKey.trim() === ""
-							? {}
-							: { apiKey: routingApiKey }),
-				};
+	const routingUpdateRequest = (): UpdateRoutingConfigurationRequest => {
+		const request: UpdateRoutingConfigurationRequest =
+			routingProvider === "harness"
+				? { provider: "harness", harnessAgentId: routingHarnessAgentId }
+				: {
+						provider: "openai-compatible",
+						model: routingModel,
+						baseUrl: routingBaseUrl,
+					};
+		if (request.provider === "openai-compatible") {
+			if (clearRoutingApiKey) request.apiKey = null;
+			else if (routingApiKey.trim()) request.apiKey = routingApiKey;
+		}
+		request.jev = jevEnabled ? { model: jevModel } : null;
+		if (request.jev !== null) {
+			if (clearJevApiKey) request.jev.apiKey = null;
+			else if (jevApiKey.trim()) request.jev.apiKey = jevApiKey;
+		}
+		return request;
+	};
 
 	const saveDefaults = async (event: FormEvent) => {
 		event.preventDefault();
@@ -1448,8 +1459,83 @@ export function CommonspaceSidebar({
 								</div>
 								<section className="pt-2">
 									<SettingsSectionHeading
+										title="Fast routing with Jev"
+										description="Jev chooses participants, Projects, and delivery order from relevant conversation context. Selected agents receive the original message. Text generation handles context compaction."
+									/>
+									<div className="mb-8 grid gap-3 rounded-md border bg-card p-4">
+										<div className="flex items-center justify-between gap-4">
+											<strong className="text-[13px]">
+												Use Jev for routing
+											</strong>
+											<SettingsCheckbox
+												label="Use Jev for routing"
+												checked={jevEnabled}
+												onCheckedChange={setJevEnabled}
+											/>
+										</div>
+										{jevEnabled && (
+											<>
+												<p className="text-xs text-muted-foreground">
+													Sends message text, relevant conversation passages,
+													context notes, and Agent and Project labels to
+													TypeSafe.
+												</p>
+												<label>
+													Jev model
+													<input
+														aria-label="Jev model"
+														required
+														value={jevModel}
+														onChange={(event) =>
+															setJevModel(event.target.value)
+														}
+													/>
+												</label>
+												<label>
+													TypeSafe API key
+													<input
+														aria-label="TypeSafe API key"
+														type="password"
+														autoComplete="new-password"
+														value={jevApiKey}
+														placeholder={
+															bootstrap?.routing?.jev?.apiKeyConfigured
+																? "Configured — leave blank to keep"
+																: "API key or TYPESAFE_API_KEY on the server"
+														}
+														onChange={(event) => {
+															setJevApiKey(event.target.value);
+															setClearJevApiKey(false);
+														}}
+													/>
+												</label>
+												{bootstrap?.routing?.jev?.apiKeyConfigured && (
+													<div className="flex items-center justify-between gap-4">
+														<div>
+															<strong className="text-[13px]">
+																Clear saved TypeSafe API key
+															</strong>
+															<p className="text-xs text-muted-foreground">
+																A key set on the server still applies.
+															</p>
+														</div>
+														<SettingsCheckbox
+															label="Clear saved TypeSafe API key"
+															checked={clearJevApiKey}
+															onCheckedChange={setClearJevApiKey}
+														/>
+													</div>
+												)}
+											</>
+										)}
+									</div>
+									<SettingsSectionHeading
 										title="Routing source"
-										description="Choose where Commonspace gets routing and context decisions."
+										description={
+											jevEnabled
+												? "Choose the text provider for context compaction."
+												: "Choose where Commonspace gets routing and context decisions."
+										}
 									/>
 									<fieldset className="m-0 grid min-w-0 grid-cols-2 gap-3 border-0 p-0 max-[640px]:grid-cols-1">
 										<legend className="sr-only">Routing engine</legend>
@@ -3462,6 +3548,10 @@ export function CommonspaceSidebar({
 						setRoutingProvider(routing?.provider ?? "openai-compatible");
 						setRoutingHarnessAgentId(routing?.harnessAgentId ?? "");
 						setRoutingModel(routing?.model ?? "");
+						setJevEnabled(routing?.jev !== undefined);
+						setJevModel(routing?.jev?.model ?? "jev-1.13.0");
+						setJevApiKey("");
+						setClearJevApiKey(false);
 						setRoutingBaseUrl(routing?.baseUrl ?? "https://api.openai.com/v1");
 						setRoutingApiKey("");
 						setClearRoutingApiKey(false);

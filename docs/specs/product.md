@@ -39,9 +39,9 @@ Visible `@@project` tags explicitly choose context. When there are no tags, infe
 
 A Channel is a shared room with a chosen set of agents, instructions, shared context, and threads. It can exist without a Project or any agents. Model and reasoning configuration applies across the workspace; a Channel has no separate override.
 
-Mentioning an agent with `@agent` adds it to the Channel if needed and invokes it. Without an explicit mention, the configured inference provider selects the smallest useful set of agents and may divide the request into separate assignments, called **sub-requests**. Independent assignments run in parallel. A request for agents to discuss, debate, reconcile, review one another, or reach a shared conclusion becomes an ordered **relay**: one Agent starts and later Agents respond in sequence.
+Mentioning an agent with `@agent` adds it to the Channel if needed and invokes it. Without an explicit mention, the configured inference provider selects the smallest useful set of agents and their Project scopes. Every selected Agent receives the original user message unchanged. Independent participants run in parallel. A request for agents to discuss, debate, reconcile, review one another, or reach a shared conclusion becomes an ordered **relay**: one Agent starts and later Agents respond in sequence.
 
-The first Agent receives only its assigned sub-request. A later relay Agent receives a bounded head-and-tail excerpt of the preceding peer response plus its own assignment. The complete reply and deeper room history stay available on demand through Commonspace context tools rather than being replayed in every prompt.
+Agents receive separate participation metadata identifying their roster responsibility, peers, and delivery mode. A later relay Agent receives the original user message plus a bounded head-and-tail excerpt of the preceding peer response. The complete reply and deeper room history stay available on demand through Commonspace context tools rather than being replayed in every prompt.
 
 ### Direct Message
 
@@ -79,7 +79,7 @@ A thread starts with a snapshot of the Channel's current context. It then develo
 
 Commonspace inference uses one configured provider for agent selection, request division, Project references, shared-context summaries, and summaries of routing corrections.
 
-Routing should feel immediate. The service stores each delivery mode, decision, and generated sub-request so it can deliver the request, associate replies with it, and retain correction history. Conversation receipts show destinations, selection source, and outcomes; expanded receipts expose assignments, Project references, reasons, timing, and correction history. Failed routing can be retried without duplicating the accepted request.
+Routing should feel immediate. The service stores each delivery mode, decision, and participant delivery reference so it can deliver the request, associate replies with it, and retain correction history. Conversation receipts show destinations, selection source, and outcomes; expanded receipts expose assignments, Project references, reasons, timing, and correction history. Failed routing can be retried without duplicating the accepted request.
 
 An individual assignment can be corrected through the service without restarting unrelated agents. Those explicit corrections form **routing memory**, which helps later routing decisions. Inline correction controls are deferred from the conversation UI.
 

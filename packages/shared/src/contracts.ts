@@ -2,7 +2,7 @@ import type { AgentAdapterKind } from "./agent-adapters.js";
 
 export type { AgentAdapterKind } from "./agent-adapters.js";
 
-export const COMMONSPACE_STATE_VERSION = 29 as const;
+export const COMMONSPACE_STATE_VERSION = 30 as const;
 export const COMMONSPACE_EXPORT_VERSION = 1 as const;
 
 export type CommonspaceReasoning =
@@ -25,6 +25,8 @@ export type CommonspaceRoutingProvider = "harness" | "openai-compatible";
 
 /** Public, Commonspace-wide AI routing configuration. Credentials are never included. */
 export interface CommonspaceRoutingConfiguration {
+	/** Optional Jev judgments; the text provider handles context compaction. */
+	jev?: { model: string; apiKeyConfigured: boolean };
 	provider: CommonspaceRoutingProvider;
 	model: string;
 	harnessAgentId: string | null;
@@ -132,7 +134,7 @@ export interface ApplyRetentionRequest {
 	expectedRevision: number;
 }
 
-export type UpdateRoutingConfigurationRequest =
+export type UpdateRoutingConfigurationRequest = (
 	| { provider: "harness"; harnessAgentId: string }
 	| {
 			provider: "openai-compatible";
@@ -140,7 +142,14 @@ export type UpdateRoutingConfigurationRequest =
 			baseUrl?: string | undefined;
 			/** Omit to preserve the saved key, provide a value to replace it, or null to clear it. */
 			apiKey?: string | null | undefined;
-	  };
+	  }
+) & {
+	/** Omit to preserve, null to disable; an omitted key preserves the Jev credential. */
+	jev?:
+		| { model: string; apiKey?: string | null | undefined }
+		| null
+		| undefined;
+};
 
 export interface UpdateWorkspaceSettingsRequest {
 	routing: UpdateRoutingConfigurationRequest;
@@ -150,7 +159,8 @@ export interface UpdateWorkspaceSettingsRequest {
 export interface CommonspaceRoutingAssignment {
 	id: string;
 	agentId: string;
-	subRequest: string;
+	/** Historical wording only; never used for new delivery. */
+	legacySubRequest?: string;
 	projectIds: string[];
 }
 
@@ -719,7 +729,6 @@ export interface RerouteAssignmentRequest {
 	sourceMessageId: string;
 	assignmentId: string;
 	agentId: string;
-	subRequest: string;
 	projectIds: string[];
 }
 

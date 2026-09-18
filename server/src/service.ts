@@ -110,6 +110,7 @@ import type {
 } from "./commonspace-mcp.js";
 import {
 	buildChannelContextCompactionPrompt,
+	hasInvalidatedContextSources,
 	inferredChannelMemory,
 	parseChannelContextCompaction,
 } from "./context.js";
@@ -126,6 +127,7 @@ import {
 	type PreparedFileAttachment,
 	prepareAgentFileAttachments,
 } from "./file-attachments.js";
+import { routeWithJev } from "./jev-router.js";
 import { type JsonObject, type JsonValue, jsonObject } from "./json.js";
 import {
 	mergeChannelMemoryProjection,
@@ -142,6 +144,10 @@ import {
 	buildRoutingMemoryCompactionPrompt,
 	parseRoutingMemoryCompaction,
 } from "./routing-memory.js";
+import {
+	buildRetrievedRoutingContext,
+	RoutingMessageIndex,
+} from "./routing-retrieval.js";
 import {
 	captureRunSnapshot,
 	completeRunAttribution,
@@ -270,6 +276,8 @@ export interface AgentRunInput {
 	sessionName: string;
 	/** The one newly delivered Commonspace message, without replayed context. */
 	message: string;
+	/** Roster and delivery metadata supplied separately from the original message. */
+	participationContext?: string;
 	maxResponseChars?: number;
 	images?: readonly AgentImageInput[];
 	files?: readonly AgentFileInput[];
@@ -378,8 +386,9 @@ interface PreparedSend {
 }
 
 interface PrivateRoutingConfiguration
-	extends Omit<CommonspaceRoutingConfiguration, "apiKeyConfigured"> {
+	extends Omit<CommonspaceRoutingConfiguration, "apiKeyConfigured" | "jev"> {
 	apiKey?: string;
+	jev?: { version: 1; model: string; apiKey?: string };
 }
 
 interface PreparedImageAttachment {
@@ -635,6 +644,18 @@ function sanitizeRoutingConfiguration(
 		baseUrl,
 	};
 	if (apiKey !== undefined) configuration.apiKey = apiKey;
+	const jev = plainRecord(record.jev);
+	if (
+		jev !== null &&
+		jev.version === 1 &&
+		typeof jev.model === "string" &&
+		jev.model.trim() !== "" &&
+		jev.model.length <= 200
+	) {
+		configuration.jev = { version: 1, model: jev.model.trim() };
+		if (typeof jev.apiKey === "string" && jev.apiKey.trim() !== "")
+			configuration.jev.apiKey = jev.apiKey.trim().slice(0, 10_000);
+	}
 	return configuration;
 }
 
@@ -1589,7 +1610,6 @@ function sanitizeRoutingDecision(
 	agentIds: ReadonlySet<string>,
 	projectIds: ReadonlySet<string>,
 	messageId: string,
-	messageText: string,
 	fallbackProjectIds: readonly string[],
 ): CommonspaceRoutingDecision | undefined {
 	const routing = plainRecord(value);
@@ -1650,7 +1670,10 @@ function sanitizeRoutingDecision(
 			const assignment = plainRecord(candidate);
 			const id = loadedId(assignment?.id);
 			const agentId = loadedId(assignment?.agentId);
-			const subRequest = loadedString(assignment?.subRequest, MAX_MESSAGE_CHARS)
+			const legacySubRequest = loadedString(
+				assignment?.legacySubRequest ?? assignment?.subRequest,
+				MAX_MESSAGE_CHARS,
+			)
 				.normalize("NFKC")
 				.trim();
 			const assignmentProjectIds = loadedStringArray(
@@ -1663,18 +1686,19 @@ function sanitizeRoutingDecision(
 				id === null ||
 				assignmentIds.has(id) ||
 				agentId === null ||
-				!routedAgentIds.includes(agentId) ||
-				subRequest === ""
+				!routedAgentIds.includes(agentId)
 			)
 				continue;
 			assignmentIds.add(id);
 			assignedAgents.add(agentId);
-			assignments.push({
+			const sanitizedAssignment: CommonspaceRoutingAssignment = {
 				id,
 				agentId,
-				subRequest,
 				projectIds: assignmentProjectIds,
-			});
+			};
+			if (legacySubRequest !== "")
+				sanitizedAssignment.legacySubRequest = legacySubRequest;
+			assignments.push(sanitizedAssignment);
 		}
 	}
 	for (const agentId of routedAgentIds) {
@@ -1684,7 +1708,6 @@ function sanitizeRoutingDecision(
 		assignments.push({
 			id,
 			agentId,
-			subRequest: messageText.slice(0, MAX_MESSAGE_CHARS),
 			projectIds: [...fallbackProjectIds],
 		});
 	}
@@ -1971,7 +1994,6 @@ function sanitizeMessages(
 				agentIds,
 				projectIds,
 				id,
-				deletedAt === null ? message.text : "[deleted]",
 				referencedProjects,
 			);
 			const routing =
@@ -1980,8 +2002,9 @@ function sanitizeMessages(
 					: {
 							...loadedRouting,
 							assignments: loadedRouting.assignments.map((assignment) => ({
-								...assignment,
-								subRequest: "[deleted]",
+								id: assignment.id,
+								agentId: assignment.agentId,
+								projectIds: assignment.projectIds,
 							})),
 							reason: "Routing record retained for deleted message.",
 						};
@@ -2397,6 +2420,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		(outcome: AgentPermissionOutcome) => void
 	>();
 	private readonly backgroundRuns = new Set<Promise<void>>();
+	private readonly routingIndexes = new Map<string, RoutingMessageIndex>();
+	private readonly contextRefreshes = new Map<string, { dirty: boolean }>();
+	private readonly inferenceShutdown = new AbortController();
 	private readonly activeConversationRuns = new Map<string, Promise<void>>();
 	private readonly pendingFollowups = new Map<string, PendingFollowup[]>();
 	private activeAdmissions = 0;
@@ -2683,6 +2709,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 
 	async close(): Promise<void> {
 		this.closing = true;
+		this.inferenceShutdown.abort(new Error("Commonspace is shutting down"));
+		this.routingIndexes.clear();
 		this.closeOperation ??= (async () => {
 			const permissionsInterrupted = this.interruptPendingPermissions();
 			const processes = [...this.acpProcesses.values()];
@@ -3105,11 +3133,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		const workspaceReady = await stat(this.defaultCwd)
 			.then((info) => info.isDirectory())
 			.catch(() => false);
-		const routingUrl = new URL(this.routingConfiguration.baseUrl);
-		const localRoutingHost =
-			routingUrl.hostname === "localhost" ||
-			routingUrl.hostname === "127.0.0.1" ||
-			routingUrl.hostname === "::1";
 		return {
 			service: {
 				status: storageReady && workspaceReady ? "ready" : "attention",
@@ -3117,27 +3140,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				storage: storageReady ? "ready" : "attention",
 				projectlessWorkspace: workspaceReady ? "ready" : "attention",
 			},
-			inference: {
-				provider: this.routingConfiguration.provider,
-				location:
-					this.routingConfiguration.provider === "harness" || localRoutingHost
-						? "local"
-						: "remote",
-				configured:
-					this.routingConfiguration.provider === "harness"
-						? this.state.agents.some(
-								(agent) =>
-									agent.id === this.routingConfiguration.harnessAgentId,
-							)
-						: this.routingConfiguration.model !== "",
-				sends: [
-					"message text",
-					"Agent labels",
-					"Project labels",
-					"shared context",
-					"routing corrections",
-				],
-			},
+			inference: this.routingDiagnostics(this.routingConfiguration),
 			harnesses: AGENT_ADAPTER_KINDS.map((adapter) => ({
 				adapter,
 				installed: installed.has(adapter),
@@ -3710,13 +3713,35 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			baseUrl,
 		};
 		if (apiKey !== undefined) next.apiKey = apiKey;
+		if (request.jev === undefined) {
+			if (this.routingConfiguration.jev !== undefined)
+				next.jev = this.routingConfiguration.jev;
+		} else if (request.jev !== null) {
+			const jevModel = request.jev.model.normalize("NFKC").trim();
+			if (jevModel === "" || jevModel.length > 200)
+				throw new Error("Jev model is required and must fit 200 characters");
+			next.jev = { version: 1, model: jevModel };
+			const jevKey =
+				request.jev.apiKey === undefined
+					? this.routingConfiguration.jev?.apiKey
+					: request.jev.apiKey?.trim();
+			if (jevKey !== undefined && jevKey !== "") {
+				if (jevKey.length > 10_000) throw new Error("Jev API key is too long");
+				next.jev.apiKey = jevKey;
+			}
+		}
 		return next;
 	}
 
 	validateRoutingConfiguration(
 		request: UpdateRoutingConfigurationRequest,
 	): CommonspaceDiagnostics["inference"] {
-		const candidate = this.prepareRoutingConfiguration(request);
+		return this.routingDiagnostics(this.prepareRoutingConfiguration(request));
+	}
+
+	private routingDiagnostics(
+		candidate: PrivateRoutingConfiguration,
+	): CommonspaceDiagnostics["inference"] {
 		const routingUrl = new URL(candidate.baseUrl);
 		const localRoutingHost =
 			routingUrl.hostname === "localhost" ||
@@ -3725,15 +3750,19 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		return {
 			provider: candidate.provider,
 			location:
-				candidate.provider === "harness" || localRoutingHost
+				candidate.jev === undefined &&
+				(candidate.provider === "harness" || localRoutingHost)
 					? "local"
 					: "remote",
 			configured:
-				candidate.provider === "harness"
+				(candidate.jev === undefined ||
+					candidate.jev.apiKey !== undefined ||
+					Boolean(process.env.TYPESAFE_API_KEY)) &&
+				(candidate.provider === "harness"
 					? this.state.agents.some(
 							(agent) => agent.id === candidate.harnessAgentId,
 						)
-					: candidate.model !== "",
+					: candidate.model !== ""),
 			sends: [
 				"message text",
 				"Agent labels",
@@ -3826,7 +3855,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					(candidate) => candidate.id === channelId,
 				);
 				if (channel === undefined) throw new Error("unknown channel");
-				const memoryBefore = channel.memory;
+				const memoryBefore: CommonspaceChannelMemory = {
+					...channel.memory,
+					status: "compacting",
+				};
 				const projection = projectChannelMemory(
 					this.state,
 					channelId,
@@ -3839,7 +3871,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 						candidate.id === channelId
 							? {
 									...candidate,
-									memory: { ...candidate.memory, status: "compacting" },
+									memory: memoryBefore,
 								}
 							: candidate,
 					),
@@ -3952,6 +3984,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				);
 				if (thread === undefined) throw new Error("unknown thread");
 				const projection = projectThreadMemory(this.state, threadId);
+				const memoryBeforeInference: CommonspaceThreadContext["memory"] = {
+					...thread.context.memory,
+					status: "compacting",
+				};
 				this.state = {
 					...this.state,
 					revision: this.state.revision + 1,
@@ -3961,10 +3997,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 									...candidate,
 									context: {
 										...candidate.context,
-										memory: {
-											...candidate.context.memory,
-											status: "compacting",
-										},
+										memory: memoryBeforeInference,
 									},
 								}
 							: candidate,
@@ -3973,6 +4006,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				await this.persist();
 				this.broadcastRevision();
 				try {
+					const sourceState = this.state;
 					const compacted = parseChannelContextCompaction(
 						await this.completeInference(
 							"You compact bounded shared workspace context. Return only the requested JSON object.",
@@ -3989,12 +4023,28 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 						throw new Error("thread was removed during context compaction");
 					const latestProjection = projectThreadMemory(this.state, threadId);
 					const memory =
-						projection.compactedThroughMessageId ===
-							latestProjection.compactedThroughMessageId &&
-						projection.sourceMessageCount ===
-							latestProjection.sourceMessageCount
-							? inferred
-							: mergeThreadMemoryProjection(inferred, latestProjection);
+						current.context.memory !== memoryBeforeInference &&
+						current.context.memory.origin === "user"
+							? mergeThreadMemoryProjection(
+									current.context.memory,
+									latestProjection,
+								)
+							: hasInvalidatedContextSources(
+										sourceState,
+										this.state,
+										thread.channelId,
+										threadId,
+									)
+								? mergeThreadMemoryProjection(
+										current.context.memory,
+										latestProjection,
+									)
+								: projection.compactedThroughMessageId ===
+											latestProjection.compactedThroughMessageId &&
+										projection.sourceMessageCount ===
+											latestProjection.sourceMessageCount
+									? inferred
+									: mergeThreadMemoryProjection(inferred, latestProjection);
 					const context = { ...current.context, memory };
 					this.state = {
 						...this.state,
@@ -4943,7 +4993,11 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				deleted.routing = {
 					...located.message.routing,
 					assignments: located.message.routing.assignments.map(
-						(assignment) => ({ ...assignment, subRequest: "[deleted]" }),
+						(assignment) => ({
+							id: assignment.id,
+							agentId: assignment.agentId,
+							projectIds: assignment.projectIds,
+						}),
 					),
 					reason: "Routing record retained for deleted message.",
 				};
@@ -5182,16 +5236,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				throw new Error("assignment id is required");
 			if (typeof request.agentId !== "string" || request.agentId.trim() === "")
 				throw new Error("agent id is required");
-			if (typeof request.subRequest !== "string")
-				throw new Error("corrected sub-request is required");
 			if (!Array.isArray(request.projectIds))
 				throw new Error("project ids must be an array");
-			const subRequest = request.subRequest
-				.normalize("NFKC")
-				.trim()
-				.slice(0, MAX_MESSAGE_CHARS);
-			if (subRequest === "")
-				throw new Error("corrected sub-request is required");
 			const requestedProjectIds = [
 				...new Set(
 					request.projectIds.map((projectId) => {
@@ -5262,7 +5308,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			const assignment: CommonspaceRoutingAssignment = {
 				id: crypto.randomUUID(),
 				agentId: target.id,
-				subRequest,
 				projectIds: projects.map((project) => project.id),
 			};
 			const correction: CommonspaceRoutingCorrection = {
@@ -5738,7 +5783,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					assignments: agentIds.map((agentId) => ({
 						id: crypto.randomUUID(),
 						agentId,
-						subRequest: text,
 						projectIds: projects.map((project) => project.id),
 					})),
 					corrections: [],
@@ -5777,7 +5821,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 						assignments: agentIds.map((agentId) => ({
 							id: crypto.randomUUID(),
 							agentId,
-							subRequest: text,
 							projectIds: projects.map((project) => project.id),
 						})),
 						corrections: [],
@@ -5882,28 +5925,28 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				? []
 				: [{ id: project.id, name: project.name }];
 		});
-		const context =
-			thread === undefined
-				? []
-				: [
-						...referencedProjectIds(thread).flatMap((projectId) => {
-							const project = this.state.projects.find(
-								(candidate) => candidate.id === projectId,
-							);
-							return project === undefined
-								? []
-								: [`Referenced Project: ${project.name}`];
-						}),
-						...(
-							this.state.messages[conversationKey(request.conversation)] ?? []
-						)
-							.filter((message) => message.threadId === thread.id)
-							.slice(-8)
-							.map(
-								(message) =>
-									`${message.authorName}: ${message.text.slice(0, 1_000)}`,
-							),
-					];
+		const channelId = request.conversation.id;
+		for (const id of this.routingIndexes.keys())
+			if (!this.state.channels.some((c) => c.id === id))
+				this.routingIndexes.delete(id);
+		let index = this.routingIndexes.get(channelId);
+		if (index === undefined) {
+			index = new RoutingMessageIndex();
+			this.routingIndexes.set(channelId, index);
+		}
+		const context = buildRetrievedRoutingContext(
+			this.state,
+			channelId,
+			text,
+			index,
+			thread,
+			request.threadId,
+		);
+		context.unshift(
+			...projects
+				.filter((p) => explicitProjectIds.includes(p.id))
+				.map((p) => `Referenced Project: ${p.name}`),
+		);
 		const input: CommonspaceRouteInput = {
 			text,
 			context,
@@ -5924,13 +5967,31 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				this.overrides.routeAgents === undefined
 					? await this.routeAgents(request.conversation.id, input)
 					: await this.overrides.routeAgents(input);
-			const allowed = new Set(candidates.map((candidate) => candidate.id));
-			const allowedProjects = new Set(projects.map((project) => project.id));
+			const currentChannel = this.state.channels.find(
+				(c) => c.id === channelId,
+			);
+			if (currentChannel === undefined)
+				throw new Error("Channel was removed during routing");
+			const allowed = new Set(
+				candidates
+					.filter(
+						(c) =>
+							currentChannel.agentIds.includes(c.id) &&
+							this.state.agents.some((a) => a.id === c.id),
+					)
+					.map((c) => c.id),
+			);
+			const allowedProjects = new Set(
+				projects
+					.filter((p) =>
+						this.state.projects.some((current) => current.id === p.id),
+					)
+					.map((p) => p.id),
+			);
 			const rawAssignments =
 				result.assignments ??
 				(result.agentIds ?? []).map((agentId) => ({
 					agentId,
-					subRequest: text,
 					projectIds: projects.map((project) => project.id),
 				}));
 			if (
@@ -5948,19 +6009,13 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					assignedAgents.has(assignment.agentId)
 				)
 					throw new Error("inference routing returned an invalid assignment");
-				const subRequest = assignment.subRequest.normalize("NFKC").trim();
 				const projectIds = [...new Set(assignment.projectIds)];
-				if (
-					subRequest === "" ||
-					subRequest.length > MAX_MESSAGE_CHARS ||
-					projectIds.some((projectId) => !allowedProjects.has(projectId))
-				) {
+				if (projectIds.some((projectId) => !allowedProjects.has(projectId))) {
 					throw new Error("inference routing returned an invalid assignment");
 				}
 				assignedAgents.add(assignment.agentId);
 				assignments.push({
 					agentId: assignment.agentId,
-					subRequest,
 					projectIds,
 				});
 			}
@@ -6514,6 +6569,26 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 									),
 								signal: activeRun.abortController.signal,
 							};
+							if (prepared.request.conversation.kind === "channel") {
+								runInput.participationContext = [
+									"Commonspace participation context. The delivered original user message remains authoritative. Follow the role explicitly requested for you; otherwise act within your roster responsibility. Coordinate with other participants and avoid unrequested duplicate implementation. Use scoped Commonspace tools for Channel/Thread instructions and deeper conversation context when needed.",
+									JSON.stringify({
+										agent: {
+											name: agent.displayName,
+											responsibility: agent.description ?? null,
+										},
+										mode: prepared.routing?.mode ?? "parallel",
+										participants: prepared.agents
+											.filter((participant) =>
+												prepared.agentIds.includes(participant.id),
+											)
+											.map((participant) => ({
+												name: participant.displayName,
+												responsibility: participant.description ?? null,
+											})),
+									}),
+								].join("\n\n");
+							}
 							if (delivery.images !== undefined)
 								runInput.images = delivery.images;
 							if (delivery.files !== undefined) runInput.files = delivery.files;
@@ -6704,6 +6779,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 							authorName: agent.displayName,
 							text: `From ${agent.displayName}:\n\n${requestedHandoff.request}`,
 						};
+						if (plannedAssignment !== undefined)
+							handoffDelivery.text = `Original user message:\n\n${response.accepted.text}\n\nFrom ${agent.displayName}:\n\n${boundedRelayPeerResponse(reply.text)}\n\nPeer handoff request:\n\n${requestedHandoff.request}`;
 						if (targetAssignment !== undefined) {
 							handoffDelivery.projectIds = targetAssignment.projectIds;
 							handoffDelivery.routingAssignmentId = targetAssignment.id;
@@ -6755,10 +6832,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 							authorType: "agent",
 							authorId: agent.id,
 							authorName: agent.displayName,
-							text:
-								next === undefined
-									? `From ${agent.displayName}:\n\n${peerResponse}`
-									: `From ${agent.displayName}:\n\n${peerResponse}\n\nYour relay assignment:\n\n${next.subRequest}`,
+							text: `Original user message:\n\n${response.accepted.text}\n\nFrom ${agent.displayName}:\n\n${peerResponse}`,
 						};
 						if (targetAssignment !== undefined) {
 							nextDelivery.projectIds = targetAssignment.projectIds;
@@ -6816,7 +6890,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 						agentId: assignment.agentId,
 						delivery: {
 							...rootDelivery,
-							text: assignment.subRequest,
 							projectIds: assignment.projectIds,
 							routingAssignmentId: assignment.id,
 						},
@@ -6831,8 +6904,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			thread !== undefined &&
 			this.conversationIsCurrent(prepared, thread)
 		) {
-			await this.updateThreadMemory(thread.id);
-			await this.updateChannelMemory(thread.channelId);
+			this.scheduleContextRefresh(thread.id, thread.channelId);
 		}
 	}
 
@@ -6847,7 +6919,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			return { prepared, response };
 		}
 		try {
-			const routingThread = prepared.thread ?? response.thread;
+			const routingThread = this.state.threads.find(
+				(t) => t.id === (prepared.thread ?? response.thread)?.id,
+			);
 			const memberIds =
 				prepared.thread !== undefined && prepared.thread.agentIds.length > 0
 					? prepared.thread.agentIds
@@ -6860,6 +6934,16 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				prepared.agents,
 				prepared.inferProjects,
 			);
+			const currentAccepted = (
+				this.state.messages[conversationKey(prepared.request.conversation)] ??
+				[]
+			).find((message) => message.id === response.accepted.id);
+			if (
+				currentAccepted === undefined ||
+				currentAccepted.deletedAt !== undefined ||
+				currentAccepted.routing?.status !== "pending"
+			)
+				return null;
 			const assignments: CommonspaceRoutingAssignment[] = (
 				decision.assignments ?? []
 			).map((assignment) => ({
@@ -6902,11 +6986,16 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			if (decision.mode !== undefined) routing.mode = decision.mode;
 			if (decision.confidence !== undefined)
 				routing.confidence = decision.confidence;
+			const currentThread = this.state.threads.find(
+				(t) => t.id === response.thread?.id,
+			);
+			if (response.thread !== undefined && currentThread === undefined)
+				throw new Error("Thread was removed during routing");
 			const thread =
-				response.thread === undefined
+				currentThread === undefined
 					? undefined
 					: {
-							...response.thread,
+							...currentThread,
 							agentIds: routing.agentIds,
 							projectIds: resolvedProjects.map((project) => project.id),
 							projectId: resolvedProjects[0]?.id ?? null,
@@ -6952,6 +7041,16 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			if (thread !== undefined) nextResponse.thread = thread;
 			return { prepared: nextPrepared, response: nextResponse };
 		} catch (error) {
+			const currentAccepted = (
+				this.state.messages[conversationKey(prepared.request.conversation)] ??
+				[]
+			).find((message) => message.id === response.accepted.id);
+			if (
+				currentAccepted === undefined ||
+				currentAccepted.deletedAt !== undefined ||
+				currentAccepted.routing?.status !== "pending"
+			)
+				return null;
 			const timing = completedRoutingTiming(
 				prepared.routing.startedAt ?? response.accepted.createdAt,
 			);
@@ -7125,6 +7224,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		channelId: string,
 		projection: CommonspaceChannelMemory,
 	): Promise<CommonspaceChannelMemory> {
+		const sourceState = this.state;
 		if ((projection.sourceMessageCount ?? 0) === 0)
 			return { ...projection, origin: "inference" };
 		const compacted = parseChannelContextCompaction(
@@ -7135,12 +7235,19 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				{ kind: "isolated" },
 			),
 		);
+		if (hasInvalidatedContextSources(sourceState, this.state, channelId))
+			return projectChannelMemory(
+				this.state,
+				channelId,
+				this.state.defaults.memoryThreads,
+			);
 		return inferredChannelMemory(projection, compacted, now());
 	}
 
 	private async compactRoutingMemory(channelId: string): Promise<void> {
 		await this.withChannelMemoryLock(channelId, async () => {
-			const source = buildRoutingMemoryCompactionPrompt(this.state, channelId);
+			const sourceState = this.state;
+			const source = buildRoutingMemoryCompactionPrompt(sourceState, channelId);
 			if (source === null) return;
 			try {
 				const summary = parseRoutingMemoryCompaction(
@@ -7152,6 +7259,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					),
 				);
 				if (!this.state.channels.some((channel) => channel.id === channelId))
+					return;
+				if (hasInvalidatedContextSources(sourceState, this.state, channelId))
 					return;
 				this.state = {
 					...this.state,
@@ -7177,6 +7286,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					`Commonspace routing memory compaction failed: ${error instanceof Error ? error.message : String(error)}`,
 				);
 				if (!this.state.channels.some((channel) => channel.id === channelId))
+					return;
+				if (hasInvalidatedContextSources(sourceState, this.state, channelId))
 					return;
 				this.state = {
 					...this.state,
@@ -7235,6 +7346,29 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		return sourceChanged
 			? mergeChannelMemoryProjection(inferred, latestProjection)
 			: inferred;
+	}
+
+	private scheduleContextRefresh(threadId: string, channelId: string): void {
+		const current = this.contextRefreshes.get(threadId);
+		if (current !== undefined) {
+			current.dirty = true;
+			return;
+		}
+		const refresh = { dirty: true };
+		this.contextRefreshes.set(threadId, refresh);
+		const operation = (async () => {
+			while (refresh.dirty && !this.closing) {
+				refresh.dirty = false;
+				await this.updateThreadMemory(threadId);
+				if (!this.closing) await this.updateChannelMemory(channelId);
+			}
+		})()
+			.catch((error) => this.environment.logger?.warn(error))
+			.finally(() => {
+				this.contextRefreshes.delete(threadId);
+				this.backgroundRuns.delete(operation);
+			});
+		this.backgroundRuns.add(operation);
 	}
 
 	private async updateChannelMemory(channelId: string): Promise<void> {
@@ -7313,6 +7447,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				(memory.origin === "automatic" || memory.status === "stale")
 			) {
 				try {
+					const sourceState = this.state;
 					const compacted = parseChannelContextCompaction(
 						await this.completeInference(
 							"You compact bounded shared workspace context. Return only the requested JSON object.",
@@ -7322,6 +7457,22 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 						),
 					);
 					const inferred = inferredThreadMemory(projection, compacted, now());
+					const current = this.state.threads.find((t) => t.id === threadId);
+					if (current === undefined) return;
+					if (
+						current.context.memory !== thread.context.memory &&
+						current.context.memory.origin === "user"
+					)
+						return;
+					if (
+						hasInvalidatedContextSources(
+							sourceState,
+							this.state,
+							thread.channelId,
+							threadId,
+						)
+					)
+						return;
 					const latestProjection = projectThreadMemory(this.state, threadId);
 					memory =
 						projection.compactedThroughMessageId ===
@@ -7595,7 +7746,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			>[0] = {
 				baseUrl: this.routingConfiguration.baseUrl,
 				model: this.routingConfiguration.model,
-				signal: AbortSignal.timeout(30_000),
+				signal: AbortSignal.any([
+					AbortSignal.timeout(30_000),
+					this.inferenceShutdown.signal,
+				]),
 			};
 			if (apiKey !== undefined) inferenceOptions.apiKey = apiKey;
 			return completeWithOpenAICompatible(inferenceOptions, {
@@ -7615,7 +7769,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				scope.kind === "channel-routing"
 					? `${ROUTING_SESSION_SCOPE_PREFIX}${scope.channelId}: ${crypto.randomUUID()}`
 					: `Commonspace Inference: ${crypto.randomUUID()}`;
-			const signal = AbortSignal.timeout(30_000);
+			const signal = AbortSignal.any([
+				AbortSignal.timeout(30_000),
+				this.inferenceShutdown.signal,
+			]);
 			const scopeIsActive = (): boolean =>
 				!signal.aborted &&
 				(scope.kind === "isolated" ||
@@ -7674,6 +7831,24 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		channelId: string,
 		input: CommonspaceRouteInput,
 	): Promise<CommonspaceRouteResult> {
+		const jev = this.routingConfiguration.jev;
+		if (jev !== undefined) {
+			const apiKey = jev.apiKey ?? process.env.TYPESAFE_API_KEY;
+			if (!apiKey)
+				throw new Error(
+					"Jev routing requires a TypeSafe API key in Settings or TYPESAFE_API_KEY",
+				);
+			const decision = await routeWithJev(
+				{ apiKey, model: jev.model, signal: this.inferenceShutdown.signal },
+				input,
+			);
+			return {
+				assignments: decision.assignments,
+				mode: decision.mode,
+				confidence: decision.confidence,
+				reason: decision.reason,
+			};
+		}
 		let retryableFailure: unknown;
 		for (let attempt = 0; attempt < 2; attempt += 1) {
 			try {
@@ -7864,6 +8039,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					input.signal.removeEventListener("abort", abortSetup);
 				},
 			};
+			if (input.participationContext !== undefined)
+				acpInput.participationContext = input.participationContext;
 			if (input.maxResponseChars !== undefined)
 				acpInput.maxResponseChars = input.maxResponseChars;
 			if (input.images !== undefined) acpInput.images = input.images;
@@ -8050,7 +8227,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	}
 
 	private publicRoutingConfiguration(): CommonspaceRoutingConfiguration {
-		return {
+		const configuration: CommonspaceRoutingConfiguration = {
 			provider: this.routingConfiguration.provider,
 			model: this.routingConfiguration.model,
 			harnessAgentId: this.routingConfiguration.harnessAgentId,
@@ -8060,6 +8237,14 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				(routingUsesOpenAiOrigin(this.routingConfiguration.baseUrl) &&
 					process.env.OPENAI_API_KEY !== undefined),
 		};
+		if (this.routingConfiguration.jev !== undefined)
+			configuration.jev = {
+				model: this.routingConfiguration.jev.model,
+				apiKeyConfigured:
+					this.routingConfiguration.jev.apiKey !== undefined ||
+					Boolean(process.env.TYPESAFE_API_KEY),
+			};
+		return configuration;
 	}
 
 	private async persistRoutingConfiguration(

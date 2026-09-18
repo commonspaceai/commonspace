@@ -27,7 +27,6 @@ describe("routing correction", () => {
 				assignments: [
 					{
 						agentId: "frontend",
-						subRequest: "Fix the failed-routing controls.",
 						projectIds: [],
 					},
 				],
@@ -219,12 +218,10 @@ describe("routing correction", () => {
 					assignments: [
 						{
 							agentId: "backend",
-							subRequest: "Change the API.",
 							projectIds: [mustExist(input.projects[0]).id],
 						},
 						{
 							agentId: "frontend",
-							subRequest: "Change the UI.",
 							projectIds: [mustExist(input.projects[1]).id],
 						},
 					],
@@ -293,7 +290,6 @@ describe("routing correction", () => {
 				sourceMessageId: sent.accepted.id,
 				assignmentId: mustExist(frontendAssignment).id,
 				agentId: "outsider",
-				subRequest: "Review only the UI change.",
 				projectIds: [second.id],
 			}),
 		).rejects.toThrow("reroute agent must belong to the channel");
@@ -301,7 +297,6 @@ describe("routing correction", () => {
 			sourceMessageId: sent.accepted.id,
 			assignmentId: mustExist(frontendAssignment).id,
 			agentId: "reviewer",
-			subRequest: "Review only the UI change.",
 			projectIds: [second.id],
 		});
 		await service.whenIdle();
@@ -324,7 +319,6 @@ describe("routing correction", () => {
 		});
 		expect(replacement).toMatchObject({
 			agentId: "reviewer",
-			subRequest: "Review only the UI change.",
 			projectIds: [second.id],
 		});
 		const deliveries = runAgent.mock.calls.map((call) => ({
@@ -334,9 +328,9 @@ describe("routing correction", () => {
 		expect(deliveries).toHaveLength(3);
 		expect(deliveries).toEqual(
 			expect.arrayContaining([
-				{ agentId: "backend", message: "Change the API." },
-				{ agentId: "frontend", message: "Change the UI." },
-				{ agentId: "reviewer", message: "Review only the UI change." },
+				{ agentId: "backend", message: "Change the API and UI." },
+				{ agentId: "frontend", message: "Change the API and UI." },
+				{ agentId: "reviewer", message: "Change the API and UI." },
 			]),
 		);
 		const replies = messages
@@ -349,15 +343,15 @@ describe("routing correction", () => {
 		expect(replies).toEqual(
 			expect.arrayContaining([
 				{
-					text: "backend: Change the API.",
+					text: "backend: Change the API and UI.",
 					routingAssignmentId: source.routing?.assignments[0]?.id,
 				},
 				{
-					text: "frontend: Change the UI.",
+					text: "frontend: Change the API and UI.",
 					routingAssignmentId: mustExist(frontendAssignment).id,
 				},
 				{
-					text: "reviewer: Review only the UI change.",
+					text: "reviewer: Change the API and UI.",
 					routingAssignmentId: replacement?.id,
 				},
 			]),
@@ -395,7 +389,6 @@ describe("routing correction", () => {
 			assignments: [
 				{
 					agentId: "backend",
-					subRequest: "Review this change.",
 					projectIds: [],
 				},
 			],
@@ -447,7 +440,6 @@ describe("routing correction", () => {
 			sourceMessageId: first.accepted.id,
 			assignmentId: assignment.id,
 			agentId: "reviewer",
-			subRequest: "Review this change only.",
 			projectIds: [],
 		});
 		await service.whenIdle();

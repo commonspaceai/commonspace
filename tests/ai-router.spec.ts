@@ -71,6 +71,24 @@ describe("Commonspace AI router", () => {
 		expect(routingOutputTokenBudget(100)).toBe(2_304);
 	});
 
+	it("rejects router-authored replacement text in a participant decision", () => {
+		expect(() =>
+			parseRoutingResponse(
+				JSON.stringify({
+					mode: "parallel",
+					assignments: [
+						{
+							agentId: "frontend",
+							projectIds: [],
+							subRequest: "Change the request",
+						},
+					],
+					reason: "UI",
+				}),
+			),
+		).toThrow(/required shape/);
+	});
+
 	it("builds a bounded classifier prompt with candidate responsibilities", () => {
 		const prompt = buildRoutingPrompt(input);
 		expect(prompt).toContain("Select one owner by default");
@@ -78,7 +96,7 @@ describe("Commonspace AI router", () => {
 		expect(prompt).toContain('"routingScore":1');
 		expect(prompt).toContain('"matchedTerms":["css"]');
 		expect(prompt).toContain('"id":"web"');
-		expect(prompt).toContain("one bounded sub-request per selected agent");
+		expect(prompt).toContain("original user message unchanged");
 		expect(prompt).toContain("useful evidence");
 		expect(prompt).toContain("Fix the login screen CSS.");
 	});
@@ -116,14 +134,13 @@ describe("Commonspace AI router", () => {
 	it("parses strict or fenced JSON routing results", () => {
 		expect(
 			parseRoutingResponse(
-				'```json\n{"mode":"parallel","assignments":[{"agentId":"frontend","subRequest":"Fix the login CSS only.","projectIds":["web"]}],"confidence":0.96,"reason":"UI work"}\n```',
+				'```json\n{"mode":"parallel","assignments":[{"agentId":"frontend","projectIds":["web"]}],"confidence":0.96,"reason":"UI work"}\n```',
 			),
 		).toEqual({
 			mode: "parallel",
 			assignments: [
 				{
 					agentId: "frontend",
-					subRequest: "Fix the login CSS only.",
 					projectIds: ["web"],
 				},
 			],
@@ -135,19 +152,17 @@ describe("Commonspace AI router", () => {
 	it("preserves relay mode for sequential peer discussion", () => {
 		expect(
 			parseRoutingResponse(
-				'{"mode":"relay","assignments":[{"agentId":"frontend","subRequest":"Start the discussion.","projectIds":[]},{"agentId":"backend","subRequest":"Respond to the frontend boundary.","projectIds":[]}],"confidence":0.94,"reason":"The user asked agents to talk together."}',
+				'{"mode":"relay","assignments":[{"agentId":"frontend","projectIds":[]},{"agentId":"backend","projectIds":[]}],"confidence":0.94,"reason":"The user asked agents to talk together."}',
 			),
 		).toEqual({
 			mode: "relay",
 			assignments: [
 				{
 					agentId: "frontend",
-					subRequest: "Start the discussion.",
 					projectIds: [],
 				},
 				{
 					agentId: "backend",
-					subRequest: "Respond to the frontend boundary.",
 					projectIds: [],
 				},
 			],
@@ -159,7 +174,7 @@ describe("Commonspace AI router", () => {
 	it("rejects a valid-looking routing response without an explicit mode", () => {
 		expect(() =>
 			parseRoutingResponse(
-				'{"assignments":[{"agentId":"frontend","subRequest":"Handle it.","projectIds":[]}],"reason":"UI work"}',
+				'{"assignments":[{"agentId":"frontend","projectIds":[]}],"reason":"UI work"}',
 			),
 		).toThrow("routing response mode must be parallel or relay");
 	});
@@ -167,7 +182,7 @@ describe("Commonspace AI router", () => {
 	it("rejects a relay without two speakers", () => {
 		expect(() =>
 			parseRoutingResponse(
-				'{"mode":"relay","assignments":[{"agentId":"frontend","subRequest":"Start the discussion.","projectIds":[]}],"reason":"Peer discussion"}',
+				'{"mode":"relay","assignments":[{"agentId":"frontend","projectIds":[]}],"reason":"Peer discussion"}',
 			),
 		).toThrow("relay routing requires at least two assignments");
 	});
@@ -175,19 +190,17 @@ describe("Commonspace AI router", () => {
 	it("round-trips a deterministic multi-assignment routing contract", () => {
 		expect(
 			parseRoutingResponse(
-				'{"mode":"parallel","assignments":[{"agentId":"backend","subRequest":"Implement API validation; preserve existing callers.","projectIds":["api"]},{"agentId":"frontend","subRequest":"Update UI error handling; do not change API code.","projectIds":["web","design"]}],"confidence":0.89,"reason":"Independent API and UI responsibilities"}',
+				'{"mode":"parallel","assignments":[{"agentId":"backend","projectIds":["api"]},{"agentId":"frontend","projectIds":["web","design"]}],"confidence":0.89,"reason":"Independent API and UI responsibilities"}',
 			),
 		).toEqual({
 			mode: "parallel",
 			assignments: [
 				{
 					agentId: "backend",
-					subRequest: "Implement API validation; preserve existing callers.",
 					projectIds: ["api"],
 				},
 				{
 					agentId: "frontend",
-					subRequest: "Update UI error handling; do not change API code.",
 					projectIds: ["web", "design"],
 				},
 			],
@@ -210,7 +223,6 @@ describe("Commonspace AI router", () => {
 					assignments: [
 						{
 							agentId: "frontend",
-							subRequest: "Fix CSS.",
 							projectIds: [42],
 						},
 					],
@@ -238,7 +250,7 @@ describe("Commonspace AI router provider boundary", () => {
 							{
 								message: {
 									content:
-										'{"mode":"parallel","assignments":[{"agentId":"frontend","subRequest":"Fix CSS.","projectIds":["web"]}],"confidence":0.91,"reason":"CSS is frontend work"}',
+										'{"mode":"parallel","assignments":[{"agentId":"frontend","projectIds":["web"]}],"confidence":0.91,"reason":"CSS is frontend work"}',
 								},
 							},
 						],
@@ -260,9 +272,7 @@ describe("Commonspace AI router provider boundary", () => {
 			),
 		).resolves.toEqual({
 			mode: "parallel",
-			assignments: [
-				{ agentId: "frontend", subRequest: "Fix CSS.", projectIds: ["web"] },
-			],
+			assignments: [{ agentId: "frontend", projectIds: ["web"] }],
 			confidence: 0.91,
 			reason: "CSS is frontend work",
 		});

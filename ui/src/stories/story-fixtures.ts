@@ -248,7 +248,6 @@ const rootMessage: CommonspaceMessage = {
 			{
 				id: "assignment-design-review",
 				agentId: hermesAgent.id,
-				subRequest: "Inspect only the desktop UI boundary.",
 				projectIds: [primaryProject.id],
 			},
 		],

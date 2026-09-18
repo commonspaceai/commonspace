@@ -71,8 +71,6 @@ beforeEach(() => {
 			const projectsJson =
 				/Available Projects: (\[[^\n]+\])/u.exec(prompt)?.[1] ?? "[]";
 			const projects = projectSchema.parse(JSON.parse(projectsJson));
-			const subRequest =
-				/Newest user message: ([\s\S]*)$/u.exec(prompt)?.[1]?.trim() ?? "";
 			const selected = candidates.toSorted(
 				(left, right) => right.routingScore - left.routingScore,
 			)[0];
@@ -89,7 +87,6 @@ beforeEach(() => {
 											: [
 													{
 														agentId: selected.id,
-														subRequest,
 														projectIds: projects.map((project) => project.id),
 													},
 												],
@@ -1091,17 +1088,14 @@ describe("Commonspace host authority", () => {
 					assignments: [
 						{
 							agentId: "backend",
-							subRequest: "Define the server boundary.",
 							projectIds: [],
 						},
 						{
 							agentId: "frontend",
-							subRequest: "Reconcile client dependencies.",
 							projectIds: [],
 						},
 						{
 							agentId: "infrastructure",
-							subRequest: "Synthesize the shared boundary.",
 							projectIds: [],
 						},
 					],
@@ -1139,7 +1133,7 @@ describe("Commonspace host authority", () => {
 			]);
 		});
 		expect(runAgent.mock.calls[1]?.[0].message).toBe(
-			"From Backend:\n\nBackend owns API contracts.\n\nYour relay assignment:\n\nReconcile client dependencies.",
+			"Original user message:\n\nTalk to each other and agree on the ownership boundary.\n\nFrom Backend:\n\nBackend owns API contracts.",
 		);
 
 		frontend.resolve("Frontend accepts the API contract.");
@@ -1151,7 +1145,7 @@ describe("Commonspace host authority", () => {
 			]);
 		});
 		expect(runAgent.mock.calls[2]?.[0].message).toBe(
-			"From Frontend:\n\nFrontend accepts the API contract.\n\nYour relay assignment:\n\nSynthesize the shared boundary.",
+			"Original user message:\n\nTalk to each other and agree on the ownership boundary.\n\nFrom Frontend:\n\nFrontend accepts the API contract.",
 		);
 
 		infrastructure.resolve("Ownership boundary agreed.");
@@ -1183,7 +1177,7 @@ describe("Commonspace host authority", () => {
 		await restarted.close();
 	});
 
-	it("bounds relayed peer text while preserving the next assignment", async () => {
+	it("bounds relayed peer text while preserving the original request", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-relay-bounds-"));
 		roots.push(root);
 		const agents = ["backend", "frontend"].map((id) => ({
@@ -1209,12 +1203,10 @@ describe("Commonspace host authority", () => {
 					assignments: [
 						{
 							agentId: "backend",
-							subRequest: "Start.",
 							projectIds: [],
 						},
 						{
 							agentId: "frontend",
-							subRequest: "Preserve TARGET_ASSIGNMENT.",
 							projectIds: [],
 						},
 					],
@@ -1253,7 +1245,9 @@ describe("Commonspace host authority", () => {
 		expect(relayed).toContain(
 			"Peer response truncated; use commonspace_get_context for the full reply.",
 		);
-		expect(relayed).toContain("Preserve TARGET_ASSIGNMENT.");
+		expect(relayed).toContain(
+			"Discuss this without replaying oversized context.",
+		);
 		expect(runAgent.mock.calls[1]?.[0].images).toEqual([
 			{
 				name: "boundary.png",
@@ -1407,12 +1401,10 @@ describe("Commonspace host authority", () => {
 					assignments: [
 						{
 							agentId: "backend",
-							subRequest: "Define the API contract.",
 							projectIds: [backendProjectId],
 						},
 						{
 							agentId: "frontend",
-							subRequest: "Review the client contract.",
 							projectIds: [frontendProjectId],
 						},
 					],
@@ -1456,11 +1448,20 @@ describe("Commonspace host authority", () => {
 		await service.send({
 			conversation: { kind: "channel", id: channel.id },
 			projectIds: [backendProject.id, frontendProject.id],
-			text: "Discuss the API and client contract.",
+			text: "Discuss the API and client contract. Preserve ORIGINAL_CONSTRAINT.",
 		});
 		await service.whenIdle();
 
 		expect(runAgent.mock.calls[1]?.[0].cwd).toBe(await realpath(frontendRoot));
+		expect(runAgent.mock.calls[1]?.[0].message).toContain(
+			"Discuss the API and client contract. Preserve ORIGINAL_CONSTRAINT.",
+		);
+		expect(runAgent.mock.calls[1]?.[0].message).toContain(
+			"From Backend:\n\nBackend contract ready.",
+		);
+		expect(runAgent.mock.calls[1]?.[0].message).toContain(
+			"Review the client contract.",
+		);
 		expect(runAgent.mock.calls[2]?.[0].cwd).toBe(await realpath(backendRoot));
 		const messages = service.snapshot().messages[`channel:${channel.id}`] ?? [];
 		const source = mustExist(
@@ -1723,17 +1724,14 @@ describe("Commonspace host authority", () => {
 					assignments: [
 						{
 							agentId: "backend",
-							subRequest: "Start the boundary discussion.",
 							projectIds: [],
 						},
 						{
 							agentId: "frontend",
-							subRequest: "Reconcile the client boundary.",
 							projectIds: [],
 						},
 						{
 							agentId: "infrastructure",
-							subRequest: "Validate the runtime boundary.",
 							projectIds: [],
 						},
 					],
@@ -1765,7 +1763,7 @@ describe("Commonspace host authority", () => {
 			"frontend",
 		]);
 		expect(runAgent.mock.calls[1]?.[0].message).toBe(
-			"From Backend:\n\nNeed runtime input first.\n\n@infrastructure inspect the boundary.\n\nYour relay assignment:\n\nValidate the runtime boundary.",
+			"Original user message:\n\nTalk together and agree on the boundary.\n\nFrom Backend:\n\nNeed runtime input first.\n\n@infrastructure inspect the boundary.",
 		);
 	});
 
@@ -2035,7 +2033,6 @@ describe("Commonspace host authority", () => {
 				assignments: [
 					{
 						agentId: "frontend",
-						subRequest: "Fix only the login screen CSS.",
 						projectIds: input.projects.map((project) => project.id),
 					},
 				],
@@ -2116,7 +2113,7 @@ describe("Commonspace host authority", () => {
 			"frontend",
 		]);
 		expect(runAgent.mock.calls[0]?.[0]?.message).toBe(
-			"Fix only the login screen CSS.",
+			"Fix the login screen CSS.",
 		);
 		expect(
 			(await service.bootstrap()).state.messages[`channel:${channel.id}`]?.find(
@@ -2130,7 +2127,6 @@ describe("Commonspace host authority", () => {
 				{
 					id: expect.any(String),
 					agentId: "frontend",
-					subRequest: "Fix only the login screen CSS.",
 					projectIds: [project.id],
 				},
 			],
@@ -2154,7 +2150,6 @@ describe("Commonspace host authority", () => {
 				assignments: [
 					{
 						agentId: mustExist(input.candidates[0]).id,
-						subRequest: "Handle it.",
 						projectIds: [],
 					},
 				],
@@ -2219,7 +2214,6 @@ describe("Commonspace host authority", () => {
 					assignments: [
 						{
 							agentId: agent.id,
-							subRequest: "Work only in Second.",
 							projectIds: [project.id],
 						},
 					],
@@ -2279,7 +2273,7 @@ describe("Commonspace host authority", () => {
 			}),
 		);
 		expect(runAgent.mock.calls[0]?.[0]).toMatchObject({
-			message: "Work only in Second.",
+			message: "Handle the second workspace.",
 			cwd: await realpath(secondRoot),
 			additionalCwds: [],
 		});
@@ -2432,7 +2426,7 @@ describe("Commonspace host authority", () => {
 								finish_reason: "stop",
 								message: {
 									content:
-										'{"mode":"parallel","assignments":[{"agentId":"frontend","subRequest":"Fix the UI only.","projectIds":[]}],"reason":"UI ownership"}',
+										'{"mode":"parallel","assignments":[{"agentId":"frontend","projectIds":[]}],"reason":"UI ownership"}',
 								},
 							},
 				],
@@ -2472,7 +2466,7 @@ describe("Commonspace host authority", () => {
 		expect(runAgent).toHaveBeenCalledTimes(1);
 		expect(runAgent.mock.calls[0]?.[0]).toMatchObject({
 			agent: expect.objectContaining({ id: "frontend" }),
-			message: "Fix the UI only.",
+			message: "Fix the UI.",
 		});
 	});
 
@@ -2509,7 +2503,7 @@ describe("Commonspace host authority", () => {
 				routingAttempts += 1;
 				return routingAttempts === 1
 					? '{"assignments":['
-					: '{"mode":"parallel","assignments":[{"agentId":"frontend","subRequest":"Fix the CSS layout.","projectIds":[]}],"confidence":0.93,"reason":"CSS work"}';
+					: '{"mode":"parallel","assignments":[{"agentId":"frontend","projectIds":[]}],"confidence":0.93,"reason":"CSS work"}';
 			}
 			return "Handled.";
 		});
@@ -2654,7 +2648,7 @@ describe("Commonspace host authority", () => {
 		vi.stubEnv("FAKE_ACP_SESSION_ID", "123e4567-e89b-42d3-a456-426614174000");
 		vi.stubEnv(
 			"FAKE_ACP_INFERENCE_RESPONSE",
-			'{"mode":"parallel","assignments":[{"agentId":"hermes","subRequest":"Handle it.","projectIds":[]}],"confidence":0.9,"reason":"Hermes owns the request."}',
+			'{"mode":"parallel","assignments":[{"agentId":"hermes","projectIds":[]}],"confidence":0.9,"reason":"Hermes owns the request."}',
 		);
 		const service = new CommonspaceHostService(
 			{},
@@ -2724,8 +2718,12 @@ describe("Commonspace host authority", () => {
 			expect(JSON.stringify(routingPrompts[1]?.params)).toContain(
 				"First request.",
 			);
-			expect(JSON.stringify(routingPrompts[2]?.params)).not.toContain(
+			// A fresh native classifier session can still receive explicit Channel retrieval evidence.
+			expect(JSON.stringify(routingPrompts[2]?.params)).toContain(
 				"First request.",
+			);
+			expect(JSON.stringify(routingPrompts[2]?.params)).toContain(
+				"Retrieved message",
 			);
 
 			await service.close();
@@ -2780,7 +2778,7 @@ describe("Commonspace host authority", () => {
 		vi.stubEnv("FAKE_ACP_SESSION_ID", "123e4567-e89b-42d3-a456-426614174000");
 		vi.stubEnv(
 			"FAKE_ACP_INFERENCE_RESPONSE",
-			'{"mode":"parallel","assignments":[{"agentId":"hermes","subRequest":"Handle it.","projectIds":[]}],"confidence":0.9,"reason":"Hermes owns the request."}',
+			'{"mode":"parallel","assignments":[{"agentId":"hermes","projectIds":[]}],"confidence":0.9,"reason":"Hermes owns the request."}',
 		);
 		vi.stubEnv(
 			"FAKE_ACP_COMPACTION_RESPONSE",
@@ -2850,7 +2848,7 @@ describe("Commonspace host authority", () => {
 		vi.stubEnv("FAKE_ACP_SESSION_ID", "123e4567-e89b-42d3-a456-426614174000");
 		vi.stubEnv(
 			"FAKE_ACP_INFERENCE_RESPONSE",
-			'{"mode":"parallel","assignments":[{"agentId":"hermes","subRequest":"Handle it.","projectIds":[]}],"confidence":0.9,"reason":"Hermes owns the request."}',
+			'{"mode":"parallel","assignments":[{"agentId":"hermes","projectIds":[]}],"confidence":0.9,"reason":"Hermes owns the request."}',
 		);
 		const service = new CommonspaceHostService(
 			{ warn: () => undefined },
@@ -2942,12 +2940,10 @@ describe("Commonspace host authority", () => {
 					assignments: [
 						{
 							agentId: "backend",
-							subRequest: "Change the API.",
 							projectIds: [],
 						},
 						{
 							agentId: "not-a-channel-agent",
-							subRequest: "Do unrelated work.",
 							projectIds: [],
 						},
 					],
@@ -3103,7 +3099,6 @@ describe("Commonspace host authority", () => {
 				{
 					id: expect.any(String),
 					agentId: "backend",
-					subRequest: "Fix the API.",
 					projectIds: [],
 				},
 			],

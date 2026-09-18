@@ -61,6 +61,7 @@ export interface AcpRunInput {
 	cwd: string;
 	additionalCwds?: readonly string[];
 	message: string;
+	participationContext?: string;
 	maxResponseChars?: number;
 	images?: readonly AcpImageInput[];
 	files?: readonly AcpFileInput[];
@@ -460,6 +461,9 @@ export class AcpAgentProcess {
 					...(input.message === ""
 						? []
 						: [{ type: "text" as const, text: input.message }]),
+					...(input.participationContext === undefined
+						? []
+						: [{ type: "text" as const, text: input.participationContext }]),
 					...(input.images ?? []).map((image) => ({
 						type: "image" as const,
 						mimeType: image.mimeType,

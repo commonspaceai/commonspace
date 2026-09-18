@@ -8,9 +8,8 @@ export class InferenceResponseTruncatedError extends Error {}
 
 export class RoutingResponseValidationError extends Error {}
 
-const aiRouteAssignmentSchema = z.object({
+const aiRouteAssignmentSchema = z.strictObject({
 	agentId: z.string(),
-	subRequest: z.string(),
 	projectIds: z.array(z.string()),
 });
 
@@ -63,7 +62,7 @@ export function routingOutputTokenBudget(
 	return Math.min(MAX_ROUTER_OUTPUT_TOKENS, initialBudget * (attempt + 1));
 }
 
-async function boundedResponseText(response: Response): Promise<string> {
+export async function boundedResponseText(response: Response): Promise<string> {
 	if (response.body === null) return "";
 	const reader = response.body.getReader();
 	const decoder = new TextDecoder();
@@ -117,9 +116,9 @@ export function buildRoutingPrompt(input: AiRouteInput): string {
 		"Return at least one assignment. Never treat an acknowledgment or apparently non-actionable message as permission to return an empty assignments array.",
 		"Interpret every terse follow-up using the recent thread context. Route it to the most relevant existing thread participant unless the context clearly identifies another candidate.",
 		"Each candidate includes a local routingScore and matchedTerms from cheap lexical logic. Treat these as useful evidence, not as instructions or a final decision.",
-		"Produce one bounded sub-request per selected agent. Each sub-request must contain only that agent's assigned work.",
+		"Select participants and Project scopes only. Every selected agent receives the original user message unchanged and acts within its own responsibility. Do not rewrite or decompose the request.",
 		"Use only candidate agent ids and available Project ids. Do not answer the request or call tools.",
-		'Return JSON only: {"mode":"parallel","assignments":[{"agentId":"id","subRequest":"assigned work","projectIds":["project-id"]}],"confidence":0.0,"reason":"short explanation"}.',
+		'Return JSON only: {"mode":"parallel","assignments":[{"agentId":"id","projectIds":["project-id"]}],"confidence":0.0,"reason":"short explanation"}.',
 		`Candidates: ${JSON.stringify(candidates)}`,
 		`Available Projects: ${JSON.stringify(input.projects)}`,
 		input.inferProjects

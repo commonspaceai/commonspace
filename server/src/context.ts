@@ -7,6 +7,29 @@ import { type JsonValue, parseJsonObject } from "./json.js";
 
 const MAX_COMPACTION_SOURCE_CHARS = 56_000;
 
+/** Appends can be reconciled, but changed or removed covered text invalidates the inferred representation. */
+export function hasInvalidatedContextSources(
+	before: CommonspaceState,
+	after: CommonspaceState,
+	channelId: string,
+	threadId?: string,
+): boolean {
+	const key = conversationKey({ kind: "channel", id: channelId });
+	const latest = new Map(
+		(after.messages[key] ?? []).map((message) => [message.id, message]),
+	);
+	return (before.messages[key] ?? []).some((message) => {
+		if (threadId !== undefined && message.threadId !== threadId) return false;
+		const current = latest.get(message.id);
+		return (
+			current === undefined ||
+			current.text !== message.text ||
+			current.deletedAt !== message.deletedAt ||
+			current.authorName !== message.authorName
+		);
+	});
+}
+
 export interface CompactedChannelContext {
 	summary: string;
 	decisions: string[];

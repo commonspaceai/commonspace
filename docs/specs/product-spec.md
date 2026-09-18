@@ -22,7 +22,7 @@ Commonspace solves this by providing:
 
 - Shared Channels and focused threads for agent collaboration.
 - Persistent one-to-one DMs with exact agent continuity.
-- Routing through one inference provider, with stored decisions and correction history.
+- Routing through a configured text provider or optional Jev judgments, with stored decisions and correction history.
 - Visible Project references that identify the resources relevant to a conversation.
 - Shared context that people can inspect and edit separately from private runtime context.
 - Local persistence, search, unread state, attachments, activity, and recovery.
@@ -90,14 +90,14 @@ A user can open Commonspace, talk naturally in a Channel or DM, and trust that:
 
 ## 4. Conceptual model
 
-For an unaddressed Channel message, Commonspace uses the message and its context to choose agents and create assignments. Each assignment becomes a turn in the appropriate native session. Replies and activity return to the same thread.
+For an unaddressed Channel message, Commonspace uses the message and its context to choose participants, delivery order, and Project scopes. Each assignment becomes a turn in the appropriate native session. Replies and activity return to the same thread.
 
 ```mermaid
 flowchart TD
     M["Human Channel message"] --> I["Commonspace inference"]
     C["Shared context"] --> I
     P["Project references"] --> I
-    I --> S["Agent-specific sub-requests"]
+    I --> S["Original message + participant scope"]
     S --> N["Native ACP sessions"]
     N --> T["Replies and activity in one thread"]
 ```
@@ -111,8 +111,8 @@ flowchart TD
 | DM | A persistent conversation between the human and exactly one chosen Agent. | Smart routing never substitutes another Agent. |
 | Message | Human, Agent, or system conversation content with references and attachments. | Accepted messages are persisted before inference or agent execution. |
 | Thread | The focused continuation created by a Channel root message. | Each participating Agent has its own native session inside the Thread. |
-| Project reference | A visible link from a message, sub-request, or Thread to a Project. | References can be explicit or inferred and must be correctable. |
-| Sub-request | The part of a request assigned to one Agent during routing. | The Agent receives its sub-request, not the entire original message as its new turn. |
+| Project reference | A visible link from a message, participant delivery, or Thread to a Project. | References can be explicit or inferred and must be correctable. |
+| Participant delivery | A selected Agent and its Project scope, linked to the original request. | The Agent receives the original user message unchanged, with separate responsibility metadata. |
 | Native session | The opaque session owned by a harness for one Agent in one Thread or DM generation. | Its identifier remains host-private. |
 | Shared context | Conversation information made available by Commonspace separately from the runtime's private session context. | Users can inspect, edit, and manually compact it. |
 | Routing memory | Compacted knowledge derived from explicit routing corrections. | It influences later routing without altering historical decisions. |
@@ -157,10 +157,10 @@ Agent settings provide an on-demand, read-only native capability browser for eve
 1. The human sends a root message in a Channel, with zero or more explicit Project references.
 2. Commonspace persists and displays the message immediately.
 3. The message creates a Thread.
-4. The inference layer resolves missing Project references, selects the smallest useful set of Agents, decomposes the message when responsibilities differ, and classifies delivery as parallel or relay.
+4. The inference layer resolves missing Project references, selects the smallest useful set of Agents and classifies delivery as parallel or relay.
 5. A request for independent work uses parallel delivery. A request for Agents to discuss, debate, reconcile, review one another, or reach a shared conclusion uses an ordered relay with at least two assignments.
-6. The service stores the routing mode, selected Agents, ordered sub-requests, Project references, and routing reason. These records support delivery, associate replies with assignments, and retain diagnostics and corrections. Every routed human message shows a compact receipt naming the destination, selection source, and queued, running, completed, cancelled, or failed outcome; sub-requests, reasons, Projects, timing, and reroutes remain expandable. A failed routing receipt lets the user retry inference or choose a Channel Agent manually without duplicating the persisted message.
-7. Parallel assignments run concurrently. In a relay, only the first Agent starts; each later Agent receives a bounded head-and-tail excerpt of the preceding peer response plus its own assignment. The complete reply remains available through on-demand context.
+6. The service stores the routing mode, selected Agents, ordered participant deliveries, Project references, and routing reason. These records support delivery, associate replies with assignments, and retain diagnostics and corrections. Every routed human message shows a compact receipt naming the destination, selection source, and queued, running, completed, cancelled, or failed outcome; participants, reasons, Projects, timing, and reroutes remain expandable. A failed routing receipt lets the user retry inference or choose a Channel Agent manually without duplicating the persisted message.
+7. Parallel assignments run concurrently. In a relay, only the first Agent starts; each later Agent receives a bounded head-and-tail excerpt of the preceding peer response plus the original user message. The complete reply remains available through on-demand context.
 8. Calls to the same native session are serialized.
 9. Replies, activity, results, and attention states appear under the same Thread.
 
@@ -168,10 +168,13 @@ Agent settings provide an on-demand, read-only native capability browser for eve
 
 1. One or more explicit `@agent` mentions are authoritative.
 2. A mentioned Agent that is not already a Channel member is added immediately and invoked.
-3. When several Agents are mentioned, inference may decompose the message between those Agents but may not replace them with different Agents.
-4. Explicit Project references are authoritative for the message. Inference may assign a relevant subset to each sub-request.
+3. When several Agents are mentioned, each receives the original message; routing may not replace them with different Agents.
+4. Explicit Project references are authoritative for the message. Inference may assign a relevant subset to each participant delivery.
 
 ### 5.5 Thread continuation and peer handoff
+
+A structured handoff that starts a planned relay participant includes the original user message, bounded preceding peer reply, and peer request. Standalone peer-directed handoffs retain their sender/request delivery; they are agent coordination rather than router-authored rewrites.
+
 
 1. A human reply continues the exact native sessions already mapped to that Thread.
 2. Project references inherit from the Thread unless the new message supplies visible `@@project` tags; there is no separate Channel/Thread Project picker.
@@ -263,10 +266,10 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | ID | Target | Requirement | Acceptance condition |
 | --- | --- | --- | --- |
 | PRJ-01 | Current | Support Projects with one or more canonical local folders. | The first root becomes the primary working directory and remaining roots are delivered as additional working directories. |
-| PRJ-02 | Current | Allow messages, sub-requests, and Threads to reference zero, one, or many Projects. | Search, context, attribution, and execution recognize every reference, not only the first. |
+| PRJ-02 | Current | Allow messages, participant deliveries, and Threads to reference zero, one, or many Projects. | Search, context, attribution, and execution recognize every reference, not only the first. |
 | PRJ-03 | Current | Treat explicit Project references as authoritative. | Inference cannot silently remove or replace an explicit reference. |
 | PRJ-04 | Current | Infer Project references when none are explicit. | Every inferred reference is marked as inferred and can be corrected before or after dispatch through a new branch/reroute. |
-| PRJ-05 | Current | Assign Project references per sub-request. | A split request can give different Agents different relevant Project roots. |
+| PRJ-05 | Current | Assign Project references per participant delivery. | Selected Agents can have different relevant Project roots. |
 | PRJ-06 | Current | Let Thread references evolve prospectively. | A reply can supply `@@project` context for that turn and future defaults without a separate Project picker or rewriting earlier deliveries. |
 | PRJ-07 | Current | Keep projectless conversation genuinely projectless. | An Agent in a no-Project turn receives no Project filesystem roots and starts in a neutral configured working directory. |
 | PRJ-08 | Later | Add non-folder Project resource kinds. | New resource kinds extend the Project resource contract without turning Projects into tasks. |
@@ -277,7 +280,7 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | --- | --- | --- | --- |
 | CON-01 | Current | Allow universal/projectless Channels with explicit Agent rosters. | Channel creation does not require a Project or Agent. |
 | CON-02 | Current | Persist every accepted message before inference or execution. | A routing or harness failure cannot erase the human's request. |
-| CON-03 | Current | Create one Thread from every Channel root message. | All routed sub-requests, replies, handoffs, and activity remain navigable from that root. |
+| CON-03 | Current | Create one Thread from every Channel root message. | All participant deliveries, replies, handoffs, and activity remain navigable from that root. |
 | CON-04 | Current | Map one native session per participating Agent per Thread. | The same Agent resumes the same Thread session and uses a different session in another Thread. |
 | CON-05 | Current | Keep DMs bound to exactly one chosen Agent. | Unaddressed DM messages never trigger Agent selection. |
 | CON-06 | Current | Enforce hard `/new` DM generation boundaries. | Old context and late in-flight replies cannot enter the new generation. |
@@ -291,17 +294,19 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 
 | ID | Target | Requirement | Acceptance condition |
 | --- | --- | --- | --- |
-| INF-01 | Current | Use one configured inference provider for routing, decomposition, Project resolution, context compaction, and routing-memory compaction. | These functions do not require a visible coordinator Agent or separate provider configurations. |
+| INF-01 | Current | Configure a text provider for compaction, with optional Jev routing judgments in the same Workspace settings. | Jev chooses participants, mode, order, and Project relevance in one request; code validates the choices and dispatches the original user message without an assignment-writing call. Disabling Jev restores text-provider selection using the same metadata-only delivery contract. |
 | INF-02 | Current | Route every unaddressed Channel message through inference. | There is no deterministic/no-inference fallback that silently guesses an Agent. |
-| INF-03 | Current | Treat explicit Agent mentions as authoritative. | Inference may split work among mentioned Agents but cannot substitute unmentioned Agents. |
+| INF-03 | Current | Treat explicit Agent mentions as authoritative. | Inference may select delivery mode and Project scopes for mentioned Agents but cannot substitute unmentioned Agents or rewrite the request. |
 | INF-04 | Current | Select the smallest useful Agent set and delivery mode. | One Agent is preferred when sufficient; independent responsibilities use parallel assignments; explicit peer-conversation intent uses an ordered relay with at least two speakers. |
 | INF-05 | Current | Remove hidden product-wide Agent fan-out caps. | Explicit or inferred requests are not silently limited to two Agents; any safety ceiling is visible and user-controlled. |
-| INF-06 | Current | Generate one bounded sub-request per selected Agent. | A first or parallel native turn contains only its assignment; a later relay turn contains a bounded excerpt of the preceding peer response plus its assignment; the complete reply and deeper context remain available through bounded on-demand tools. |
-| INF-07 | Current | Make routing inspectable. | Delivery mode, selected Agents, ordered sub-requests, Project references, reason, and confidence where available are stored with the source message. |
-| INF-08 | Current | Support service-level sub-request rerouting and correction. | The service/API can redirect one assignment without resending unrelated assignments, and prior attempts remain stored. Inline conversation controls are deferred. |
+| INF-06 | Current | Deliver the original request to each selected Agent. | A first or parallel native turn contains the original user message unchanged. Separate participation metadata supplies roster responsibility and selected peers. A later relay turn includes the original message and a bounded preceding peer reply; deeper context remains available through scoped tools. |
+| INF-07 | Current | Make routing inspectable. | Delivery mode, selected Agents, ordered participant deliveries, Project references, reason, and confidence where available are stored with the source message. |
+| INF-08 | Current | Support service-level participant rerouting and correction. | The service/API can redirect one assignment without resending unrelated assignments, and prior attempts remain stored. Inline conversation controls are deferred. |
 | INF-09 | Current | Learn from explicit corrections. | Reroutes are stored as feedback and compacted into bounded routing knowledge used by later decisions. |
 | INF-10 | Current | Fail visibly when inference is unavailable or invalid. | The message remains accepted and receives a retryable needs-attention state; Commonspace does not silently broadcast it. |
 | INF-11 | Current | Target effectively immediate routing. | The routing stage targets sub-second completion where the configured provider permits and reports separately from harness execution time. |
+
+Routing retrieves bounded public conversation passages through a local, ephemeral BM25 index. Existing Thread follow-ups retrieve within that Thread; new roots can retrieve within their Channel. Channel instructions, Thread starting context and current notes, pins, prior ownership, and recent messages accompany retrieved evidence. Retrieval excludes native sessions, host files, and private traces. Jev uses a two-second request deadline with no automatic transport retry; uncertain or incompatible consumed judgments fail visibly. Initial Choice confidence and Noul thresholds are conservative policy defaults requiring domain evaluation, rather than a guarantee of correctness.
 
 ### 6.6 Shared context and compaction
 
@@ -317,6 +322,8 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | CTX-08 | Current | Preserve human-authored context. | Automatic projection marks human context stale when needed and never silently replaces it. |
 | CTX-09 | Current | Expose bounded context through scoped tools. | An Agent can read only the conversation and Project scope granted to its current native session. |
 | CTX-10 | Later | Accept Agent-suggested durable context. | No Agent response can silently promote itself into canonical memory. |
+
+Automatic Channel and Thread context refresh runs as tracked background work, coalescing repeated refreshes for one Thread. It does not hold the conversation delivery queue while awaiting inference. Idle and shutdown account for these jobs; newer human edits remain authoritative and newer messages update source coverage. Native session resumption and native compaction remain harness-owned.
 
 ### 6.7 Message versions, deletion, pins, and files
 
@@ -339,7 +346,7 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | ACT-01 | Capability-dependent | Stream and persist normalized ACP reasoning summaries, plans, tool calls/results, native context-compaction lifecycle, usage, and model information. | Activity stays expandable and collapsed by default; raw terminal output is not synthesized into it. |
 | ACT-02 | Capability-dependent | Render native permission requests with only harness-provided choices. | Selecting a choice returns that exact response to the affected harness session. |
 | ACT-03 | Capability-dependent | Support native stop and steering controls. | Unsupported controls are absent, not disabled promises. |
-| ACT-04 | Current | Bind results and evidence to the originating request and sub-request. | Replies can expose changed files, Project/root attribution, activity, and harness-emitted validation evidence. |
+| ACT-04 | Current | Bind results and evidence to the originating request and participant delivery. | Replies can expose changed files, Project/root attribution, activity, and harness-emitted validation evidence. |
 | ACT-05 | Current | Surface run outcomes without overstating inference. | Completed execution, text-inferred possible input, confirmed native permissions, failed, silent, cancelled, timed out, and interrupted states remain distinguishable; trailing punctuation alone does not claim a blocked run. |
 | ACT-06 | Current | Scope blocking to the affected native session. | A permission request or slow turn does not block the Channel or other Agent sessions. |
 
@@ -407,21 +414,21 @@ For each Channel root or newly routable follow-up, the inference layer produces 
 - Resolved explicit and inferred Project references.
 - Selected Agent IDs.
 - Delivery mode: `parallel` or `relay`.
-- One sub-request per selected Agent.
-- Project references relevant to each sub-request.
+- One delivery reference per selected Agent; no rewritten task text.
+- Project references relevant to each participant delivery.
 - A concise routing reason.
 - Confidence when the provider supplies a meaningful value.
 
-The original human message remains the source record and stays visible. Sub-requests are assignments attached to that message; they must not appear as additional human-authored messages.
+The original human message remains the source record and stays visible. Delivery references contain Agent and Project metadata, never rewritten requests. Historical wording is retained as `legacySubRequest` for inspection and is never used for execution.
 
-The routing response uses a bounded output budget sized for the visible maximum assignment count. Commonspace detects provider-reported truncation where available and may retry inference once. It validates the delivery mode and entire assignment set, including Agent IDs, count, sub-requests, and Project scopes, before dispatching any Agent work. `relay` requires at least two ordered assignments.
+The routing response uses a bounded output budget sized for the visible maximum assignment count. Commonspace detects provider-reported truncation where available and may retry inference once. It validates the delivery mode and entire assignment set, including Agent IDs, count, and Project scopes, before dispatching any Agent work. `relay` requires at least two ordered assignments.
 
 ### Reroute semantics
 
-- A service-level correction targets one sub-request.
+- A service-level correction targets one participant delivery.
 - The original assignment and any response remain retained in routing history.
-- A correction may change the Agent or sub-request wording while preserving its inferred Project references.
-- The new Agent receives the corrected sub-request plus scoped shared context.
+- A correction changes the selected Agent and explicitly supplied Project scope; it cannot replace request text.
+- The new Agent receives the original user message plus responsibility metadata and scoped shared context.
 - The correction event becomes routing feedback.
 - Feedback compaction may generalize patterns but cannot edit historical routing records.
 - Stored correction history is inspectable in expanded routing receipts; inline reroute editing remains deferred from the conversation UI.
@@ -460,7 +467,7 @@ These states explain what happened to a message or agent turn. They belong to th
 - ACP runs locally between Commonspace and supported harness processes.
 - Commonspace does not copy or manage harness credentials.
 - Connected runtimes may send messages and context to their configured model services. Their network behavior remains under the runtime's control.
-- A user-configured OpenAI-compatible inference endpoint may be remote. Commonspace must clearly disclose that routing/context data can leave the machine in this configuration.
+- Jev sends bounded routing state to TypeSafe; a user-configured OpenAI-compatible inference endpoint may also be remote. Commonspace must clearly disclose that routing/context data can leave the machine in this configuration.
 - Inference receives only the bounded message, candidate metadata, Project labels/references, and relevant shared context required for its function. Project file contents are not included by default.
 
 ### Data handling
@@ -492,13 +499,13 @@ Workspace archives are unencrypted private user data. Removing Commonspace-manag
 | ID | Scenario | Required result |
 | --- | --- | --- |
 | E2E-01 | Send a projectless unaddressed Channel message | It is persisted, routed by inference, dispatched to the smallest useful Agent set without Project filesystem access, and recorded in one Thread. |
-| E2E-02 | Ask backend and frontend work spanning two Projects | Inference creates inspectable Agent-specific sub-requests with the correct Project subset; sessions run concurrently and replies share one Thread. |
+| E2E-02 | Ask backend and frontend work spanning two Projects | Inference creates inspectable Original message + participant scope with the correct Project subset; sessions run concurrently and replies share one Thread. |
 | E2E-03 | Mention an Agent not seated in a Channel | The Agent is added and invoked immediately without replacing explicit routing intent. |
 | E2E-04 | Continue the same Agent in two Threads | Each Thread resumes its own native session and both may run concurrently. |
 | E2E-05 | Use `/new` during an active DM | The old generation is cancelled or isolated, a visible boundary appears, and no late reply crosses into the new session. |
 | E2E-06 | Reach Channel context pressure after a human edit | Context becomes stale, compaction preserves human-authored meaning, and state/source boundaries remain inspectable. |
 | E2E-07 | Edit a delivered routed message | A new visible branch is routed independently while the original branch and native results remain intact. |
-| E2E-08 | Call the service-level reroute for one bad assignment | Only that sub-request is corrected; other Agents are not restarted, and the correction enters routing memory. Inline conversation controls remain deferred. |
+| E2E-08 | Call the service-level reroute for one bad assignment | Only that participant delivery is redirected; other Agents are not restarted, and the correction enters routing memory. Inline conversation controls remain deferred. |
 | E2E-09 | Attach a normal file and receive an Agent file | Both attachments remain bound to their exact messages. Managed attachment metadata omits source host paths and credential fields; the file contents remain unchanged. |
 | E2E-10 | Receive a permission request while the client is closed | The service keeps the request pending, other sessions continue, and reopening shows an exact attention item with harness-provided choices. |
 | E2E-11 | Restart after a conversation exceeds the legacy 500-message boundary | Every accepted message and its context restore, resumable sessions continue exactly, and unrecoverable in-flight work is marked interrupted. |

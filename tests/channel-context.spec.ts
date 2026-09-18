@@ -247,6 +247,178 @@ describe("editable shared Channel context", () => {
 		});
 	});
 
+	it("delivers same-Thread follow-ups during automatic compaction and preserves a concurrent human edit", async () => {
+		const root = await mkdtemp(
+			join(tmpdir(), "commonspace-thread-background-"),
+		);
+		roots.push(root);
+		const completion = deferred<Response>();
+		const request = vi.fn(() => completion.promise);
+		vi.stubGlobal("fetch", request);
+		const delivered: string[] = [];
+		const service = new CommonspaceHostService(
+			{},
+			{ root },
+			{
+				discoverAgents: discoverTestHarnesses,
+				runAgent: async (input) => {
+					delivered.push(input.message);
+					return { text: `Large result ${"y".repeat(63_000)}` };
+				},
+			},
+		);
+		services.push(service);
+		await service.initialize();
+		await addTestHarness(service, "codex", "Review Bot");
+		const channel = mustExist(
+			(
+				await service.mutate({
+					action: "create-channel",
+					name: "background",
+					agentIds: ["codex"],
+				})
+			).channels[0],
+		);
+		const sent = await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			text: `@review-bot first pass ${"a".repeat(15_000)}`,
+		});
+		await service.whenIdle();
+		await service.updateChannelContext(channel.id, {
+			summary: "Human Channel notes.",
+		});
+		const threadId = mustExist(sent.thread).id;
+		await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			threadId,
+			targetAgentId: "codex",
+			text: `second pass ${"b".repeat(15_000)}`,
+		});
+		await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+		await service.updateThreadContext(threadId, {
+			summary: "Human edit while compaction is pending.",
+		});
+		await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			threadId,
+			targetAgentId: "codex",
+			text: "third pass without waiting",
+		});
+		await vi.waitFor(() => expect(delivered).toHaveLength(3));
+		let idle = false;
+		const waiting = service.whenIdle().then(() => {
+			idle = true;
+		});
+		expect(idle).toBe(false);
+		completion.resolve(inferenceResponse("An obsolete inferred summary."));
+		await waiting;
+		expect(
+			service.snapshot().threads.find((t) => t.id === threadId)?.context.memory,
+		).toMatchObject({
+			summary: "Human edit while compaction is pending.",
+			origin: "user",
+			status: "stale",
+			sourceMessageCount: 6,
+		});
+		expect(request).toHaveBeenCalledOnce();
+	});
+
+	it("preserves a human Thread edit made at the compacting revision before inference starts", async () => {
+		const { service } = await fixture();
+		const threadId = mustExist(service.snapshot().threads[0]).id;
+		let edit: Promise<void> | undefined;
+		const unsubscribe = service.subscribeToRevisions(() => {
+			if (
+				edit === undefined &&
+				service.snapshot().threads.find((t) => t.id === threadId)?.context
+					.memory.status === "compacting"
+			)
+				edit = service
+					.updateThreadContext(threadId, {
+						summary: "Concurrent human edit at compacting boundary.",
+					})
+					.then(() => undefined);
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => inferenceResponse("An obsolete manual result.")),
+		);
+		try {
+			await service.compactThreadContext(threadId);
+			await edit;
+			expect(
+				service.snapshot().threads.find((t) => t.id === threadId)?.context
+					.memory,
+			).toMatchObject({
+				summary: "Concurrent human edit at compacting boundary.",
+				origin: "user",
+			});
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	it("allows explicitly requested compaction of previously human-edited notes", async () => {
+		const { service, channel } = await fixture();
+		await service.updateChannelContext(channel.id, {
+			summary: "Human notes before manual compaction.",
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => inferenceResponse("Manually compacted notes.")),
+		);
+		expect((await service.compactChannelContext(channel.id)).summary).toBe(
+			"Manually compacted notes.",
+		);
+	});
+
+	it("discards a pending Channel compaction when covered source text is deleted", async () => {
+		const { service, channel } = await fixture();
+		const source = mustExist(
+			service
+				.snapshot()
+				.messages[`channel:${channel.id}`]?.find(
+					(m) => m.authorType === "user",
+				),
+		);
+		const completion = deferred<Response>();
+		const request = vi.fn(() => completion.promise);
+		vi.stubGlobal("fetch", request);
+		const pending = service.compactChannelContext(channel.id);
+		await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+		await service.deleteMessage(source.id);
+		completion.resolve(inferenceResponse("DELETED_SOURCE_FACT"));
+		await pending;
+		expect(
+			service.snapshot().channels.find((c) => c.id === channel.id)?.memory
+				.summary,
+		).not.toContain("DELETED_SOURCE_FACT");
+	});
+
+	it("discards a pending Thread compaction when covered source text is deleted", async () => {
+		const { service, channel } = await fixture();
+		const source = mustExist(
+			service
+				.snapshot()
+				.messages[`channel:${channel.id}`]?.find(
+					(m) => m.authorType === "user",
+				),
+		);
+		const threadId = mustExist(source.threadId);
+		const completion = deferred<Response>();
+		const request = vi.fn(() => completion.promise);
+		vi.stubGlobal("fetch", request);
+		const pending = service.compactThreadContext(threadId);
+		await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+		await service.deleteMessage(source.id);
+		completion.resolve(inferenceResponse("DELETED_SOURCE_FACT"));
+		await pending;
+		expect(
+			service.snapshot().threads.find((t) => t.id === threadId)?.context.memory
+				.summary,
+		).not.toContain("DELETED_SOURCE_FACT");
+	});
+
 	it("automatically compacts Thread context under token pressure", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-thread-pressure-"));
 		roots.push(root);

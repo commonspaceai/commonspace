@@ -43,6 +43,7 @@ The server reads these variables at startup. They apply to the foreground proces
 | `COMMONSPACE_OPENCODE_ACP_PATH` | Overrides the executable used with `acp`; defaults to the OpenCode executable. |
 | `COMMONSPACE_HERMES_YOLO=1` | Explicitly enables Hermes unsafe mode. |
 | `COMMONSPACE_AGENT_YOLO=1` | Explicitly enables Full access for Codex, Claude Code, Gemini CLI, and OpenCode. |
+| `TYPESAFE_API_KEY` | Jev key fallback, used only when Jev routing is enabled in Workspace settings. |
 | `OPENAI_API_KEY` | Inference key fallback for the canonical OpenAI origin only. Other endpoints require an explicit configured key when needed. |
 
 Unsafe modes change harness permission behavior. They do not authenticate a harness or repair routing configuration.
@@ -50,6 +51,8 @@ Unsafe modes change harness permission behavior. They do not authenticate a harn
 Agent Full access changes replace cached ACP processes while keeping native session references. Either effective access change also stops that agent's active work and cancels its pending permissions; queued work uses the latest setting. An operator-level unsafe environment flag still applies even when the Agent's own Full access toggle is off.
 
 Configure inference in Workspace settings using a supported harness or an OpenAI-compatible endpoint. Stored endpoint keys are not returned to the browser. Changing the endpoint's origin clears its stored key, so enter the appropriate key again after that change.
+
+Enable **Use Jev for routing** under **Fast routing with Jev**, enter a TypeSafe API key (or set `TYPESAFE_API_KEY` on the server), and keep a text provider configured for context compaction. The default model is pinned to `jev-1.13.0`. Jev sends message text, relevant conversation passages, context notes, routing corrections, and Agent/Project labels to TypeSafe. Credentials remain in private `routing.json` and are never returned in bootstrap or exports. Blank key inputs preserve saved keys; clearing removes the saved key while an environment fallback may still apply. Disabling Jev restores text-provider routing. Selected participants receive the original user message unchanged; Jev routing makes no assignment-writing call. State version 30 preserves earlier wording as read-only routing history.
 
 ## Installed macOS service
 
@@ -164,7 +167,7 @@ Authenticate through the affected native runtime installation and retry. Commons
 
 The Channel message is persisted before inference. If routing fails, the accepted message remains visible with a failed state and a durable Inbox item; Commonspace does not broadcast it to every agent.
 
-Configure a working inference harness or OpenAI-compatible endpoint in Workspace settings. Open the affected conversation or Thread from Inbox, expand the failed routing receipt, then choose **Retry AI routing** or select a Channel Agent and choose **Route**. Recovery reuses the persisted message instead of adding a duplicate. After changing an endpoint origin, enter its key again. The `OPENAI_API_KEY` fallback applies only to the canonical OpenAI origin.
+Configure a working inference harness or OpenAI-compatible endpoint in Workspace settings. If Jev is enabled, verify its key and model as well. Uncertain judgments, incompatible relay order, or a two-second Jev timeout leave the request retryable. Open the affected conversation or Thread from Inbox, expand the failed routing receipt, then choose **Retry AI routing** or select a Channel Agent and choose **Route**. Recovery reuses the persisted message instead of adding a duplicate. After changing an endpoint origin, enter its key again. The `OPENAI_API_KEY` fallback applies only to the canonical OpenAI origin.
 
 ### A Project file is marked sensitive
 
@@ -205,6 +208,6 @@ cp -R ~/.commonspace ~/commonspace-backup-YYYYMMDD
 
 Replace `YYYYMMDD` with your backup date, and adjust the source if using `COMMONSPACE_HOME`. The copy includes routing configuration and attachments; keep it private. Native harness stores remain separate and are not included.
 
-The current internal state version is 29 and migrates versions 1–28 on startup. Each write retains the previous valid primary as `state.backup.json`. If the primary is invalid and the backup is valid, startup preserves the primary as `state.corrupt.json` and recovers the backup. If both are invalid, startup stops without replacing them.
+The current internal state version is 30 and migrates versions 1–29 on startup. Each write retains the previous valid primary as `state.backup.json`. If the primary is invalid and the backup is valid, startup preserves the primary as `state.corrupt.json` and recovers the backup. If both are invalid, startup stops without replacing them.
 
 The automatic state backup protects against an invalid write; it is not a complete archive of earlier releases. Application rollback does not reverse migrations. Before starting an older build, restore a data backup compatible with that build, and keep a separate copy of the current data so the recovery attempt remains reversible.

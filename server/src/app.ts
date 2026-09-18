@@ -111,13 +111,25 @@ const applyRetentionRequestSchema = z.object({
 	conversation: conversationSchema,
 	expectedRevision: z.number(),
 }) satisfies z.ZodType<ApplyRetentionRequest>;
+const jevConfigurationSchema = z
+	.object({
+		model: z.string().min(1).max(200),
+		apiKey: z.string().max(10_000).nullable().optional(),
+	})
+	.nullable()
+	.optional();
 const routingConfigurationSchema = z.discriminatedUnion("provider", [
-	z.object({ provider: z.literal("harness"), harnessAgentId: z.string() }),
+	z.object({
+		provider: z.literal("harness"),
+		harnessAgentId: z.string(),
+		jev: jevConfigurationSchema,
+	}),
 	z.object({
 		provider: z.literal("openai-compatible"),
 		model: z.string(),
 		baseUrl: z.string().optional(),
 		apiKey: z.string().nullable().optional(),
+		jev: jevConfigurationSchema,
 	}),
 ]) satisfies z.ZodType<UpdateRoutingConfigurationRequest>;
 const workspaceSettingsSchema = z.object({
@@ -248,11 +260,10 @@ const sendMessageRequestSchema = z.object({
 	files: z.array(fileAttachmentSchema).optional(),
 	delivery: z.enum(["queue", "steer", "stop-and-send"]).optional(),
 }) satisfies z.ZodType<SendMessageRequest>;
-const rerouteAssignmentSchema = z.object({
+const rerouteAssignmentSchema = z.strictObject({
 	sourceMessageId: z.string(),
 	assignmentId: z.string(),
 	agentId: z.string(),
-	subRequest: z.string(),
 	projectIds: z.array(z.string()),
 }) satisfies z.ZodType<RerouteAssignmentRequest>;
 const retryRoutingSchema = z.discriminatedUnion("mode", [

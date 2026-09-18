@@ -622,7 +622,9 @@ function RoutingReceipt({
 									<strong className="text-foreground">
 										{routingAgentName(assignment.agentId, bootstrap)}:
 									</strong>{" "}
-									{assignment.subRequest}
+									{assignment.legacySubRequest === undefined
+										? "Original message"
+										: `Historical request: ${assignment.legacySubRequest}`}
 									{projects.length === 0 ? "" : ` · ${projects.join(", ")}`}
 								</li>
 							);

@@ -488,6 +488,45 @@ export const WorkspaceSettingsApiInference: Story = {
 	},
 };
 
+export const WorkspaceSettingsJev: Story = {
+	args: {
+		store: createStoryStore({
+			...apiRoutingBootstrap,
+			routing: {
+				provider: "openai-compatible",
+				model: "gpt-5.6-sol",
+				harnessAgentId: null,
+				baseUrl: "https://api.openai.com/v1",
+				apiKeyConfigured: true,
+				jev: { model: "jev-1.13.0", apiKeyConfigured: true },
+			},
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByRole("button", {
+				name: "Commonspace settings",
+			}),
+		);
+		const page = within(document.body);
+		await expect(
+			page.getByRole("checkbox", { name: "Use Jev for routing" }),
+		).toBeChecked();
+		await expect(page.getByLabelText("Jev model")).toHaveValue("jev-1.13.0");
+		await expect(page.getByLabelText("TypeSafe API key")).toHaveValue("");
+		await userEvent.click(
+			page.getByRole("checkbox", { name: "Clear saved TypeSafe API key" }),
+		);
+		await expect(
+			page.getByRole("checkbox", { name: "Clear saved TypeSafe API key" }),
+		).toBeChecked();
+		await userEvent.click(
+			page.getByRole("checkbox", { name: "Use Jev for routing" }),
+		);
+		await expect(page.queryByLabelText("Jev model")).not.toBeInTheDocument();
+	},
+};
+
 export const WorkspaceSettingsNotifications: Story = {
 	args: {
 		store: createStoryStore(storyBootstrap),

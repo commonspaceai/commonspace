@@ -81,7 +81,7 @@ describe("Commonspace ACP session context", () => {
 		expect(
 			running.service.snapshot().messages[`channel:${channel.id}`]?.at(-1)
 				?.text,
-		).toBe(
+		).toContain(
 			[
 				"Context: engineering; instructions: Keep changes scoped.",
 				"Echo: Review the relay.",
@@ -318,7 +318,7 @@ describe("Commonspace ACP session context", () => {
 		expect(
 			running.service.snapshot().messages[`channel:${channel.id}`]?.at(-1)
 				?.text,
-		).toBe(
+		).toContain(
 			[
 				"Context: general; instructions: Read this natively.",
 				"Echo: Only this Hermes delta.",
@@ -329,8 +329,14 @@ describe("Commonspace ACP session context", () => {
 			.split("\n")
 			.map((line) => JSON.parse(line));
 		expect(
-			frames.find((frame) => frame.method === "session/prompt")?.params.prompt,
-		).toEqual([{ type: "text", text: "Only this Hermes delta." }]);
+			frames.find((frame) => frame.method === "session/prompt")?.params
+				.prompt[0],
+		).toEqual({ type: "text", text: "Only this Hermes delta." });
+		const metadata = frames.find((frame) => frame.method === "session/prompt")
+			?.params.prompt[1];
+		expect(metadata?.type).toBe("text");
+		expect(metadata?.text).toContain("Commonspace participation context");
+		expect(metadata?.text).not.toContain("Read this natively.");
 		expect(
 			frames.find((frame) => frame.method === "session/new")?.params
 				.mcpServers[0],

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COMMONSPACE_STATE_VERSION } from "@commonspace/shared";
@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("routing state migration", () => {
-	it("adds deterministic assignments to legacy resolved routing decisions", async () => {
+	it("adds participant metadata to legacy resolved routing decisions", async () => {
 		const root = await mkdtemp(
 			join(tmpdir(), "commonspace-routing-migration-"),
 		);
@@ -144,7 +144,6 @@ describe("routing state migration", () => {
 			{
 				id: "legacy:root-1:frontend",
 				agentId: "frontend",
-				subRequest: "Fix the API.",
 				projectIds: ["project-1"],
 			},
 		]);
@@ -171,7 +170,7 @@ describe("routing state migration", () => {
 		await writeFile(
 			join(root, "state.json"),
 			JSON.stringify({
-				version: COMMONSPACE_STATE_VERSION,
+				version: 29,
 				revision: 9,
 				defaults: {
 					model: null,
@@ -264,7 +263,38 @@ describe("routing state migration", () => {
 				createdAt: "2026-08-30T00:01:00.000Z",
 			},
 		]);
+		expect(routing?.assignments[0]?.legacySubRequest).toBe("Attempt 1");
+		const persisted = JSON.parse(
+			await readFile(join(root, "state.json"), "utf8"),
+		);
+		expect(persisted.version).toBe(30);
+		expect(
+			persisted.messages["channel:general"][0].routing.assignments[0],
+		).toEqual({
+			id: "assignment-1",
+			agentId: "agent-1",
+			projectIds: [],
+			legacySubRequest: "Attempt 1",
+		});
 		await service.close();
+		const restarted = new CommonspaceHostService(
+			{},
+			{ root },
+			{ discoverAgents: async () => [] },
+		);
+		await restarted.initialize();
+		expect(
+			restarted.snapshot().messages["channel:general"]?.[0]?.routing,
+		).toEqual(routing);
+		await restarted.deleteMessage("root-1");
+		expect(
+			restarted
+				.snapshot()
+				.messages["channel:general"]?.[0]?.routing?.assignments.every(
+					(assignment) => assignment.legacySubRequest === undefined,
+				),
+		).toBe(true);
+		await restarted.close();
 	});
 
 	it("marks interrupted persisted context compactions failed on restart", async () => {
