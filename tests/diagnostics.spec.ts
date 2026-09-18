@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CommonspaceRoutingProvider } from "@commonspace/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { CommonspaceHostService } from "../server/src/service.ts";
 import { discoverTestHarnesses } from "./test-harnesses.ts";
@@ -14,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("runtime diagnostics", () => {
-	it("reports harness readiness and inference data flow without paths or secrets", async () => {
+	it("reports harness discovery, recorded history, and inference data flow without paths or secrets", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-diagnostics-"));
 		roots.push(root);
 		const service = new CommonspaceHostService(
@@ -29,7 +30,7 @@ describe("runtime diagnostics", () => {
 		await service.discoverAgents("codex");
 		await service.mutate({ action: "add-discovered-agent", agentId: "codex" });
 		await service.updateRoutingConfiguration({
-			provider: "openai-compatible",
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
 			model: "remote-router",
 			baseUrl: "https://router.example/v1",
 			apiKey: "private-routing-key",
@@ -44,7 +45,7 @@ describe("runtime diagnostics", () => {
 				projectlessWorkspace: "ready",
 			},
 			inference: {
-				provider: "openai-compatible",
+				provider: CommonspaceRoutingProvider.OpenAiCompatible,
 				location: "remote",
 				configured: true,
 				sends: [
@@ -60,14 +61,14 @@ describe("runtime diagnostics", () => {
 					adapter: "codex",
 					installed: true,
 					rostered: true,
-					runReadiness: "unknown",
+					recordedRunStatus: "no-recorded-runs",
 					recovery: expect.any(String),
 				},
 				{
 					adapter: "hermes",
 					installed: true,
 					rostered: false,
-					runReadiness: "unknown",
+					recordedRunStatus: "no-recorded-runs",
 					recovery: expect.any(String),
 				},
 			]),

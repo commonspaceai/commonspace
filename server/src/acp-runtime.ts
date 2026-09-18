@@ -730,7 +730,7 @@ export class AcpAgentProcess {
 				] !== true
 			) {
 				throw new Error(
-					`The native runtime does not support ACP ${server.type.toUpperCase()} MCP servers required for shared context.`,
+					`The native runtime does not advertise ACP ${server.type.toUpperCase()} MCP support required for shared context. Update the native runtime and restart Commonspace.`,
 				);
 			}
 		}
@@ -848,6 +848,14 @@ export class AcpAgentProcess {
 		const modeId = input.modeId;
 		if (
 			modeId !== undefined &&
+			this.#availableModeIds.get(setup.sessionId)?.has(modeId) !== true
+		) {
+			throw new Error(
+				`Unsupported native permission mode ${modeId}. Update the runtime or change the agent's access setting. No prompt was sent.`,
+			);
+		}
+		if (
+			modeId !== undefined &&
 			this.#availableModeIds.get(setup.sessionId)?.has(modeId) === true &&
 			setup.modes?.currentModeId !== modeId
 		) {
@@ -865,6 +873,10 @@ export class AcpAgentProcess {
 
 		const modelId = input.modelId;
 		const modelState = this.#modelStates.get(setup.sessionId);
+		if (modelId !== undefined && modelState === undefined)
+			throw new Error(
+				"Native runtime does not expose a model override. Clear Workspace model to use native session settings.",
+			);
 		if (
 			modelId !== undefined &&
 			modelState !== undefined &&
@@ -896,11 +908,21 @@ export class AcpAgentProcess {
 			const option = this.#availableConfigOptions
 				.get(setup.sessionId)
 				?.find((candidate) => candidate.id === configId);
-			if (option === undefined || option.currentValue === value) continue;
+			if (option === undefined)
+				throw new Error(
+					`Unsupported native setting ${configId}. Clear the workspace override to use native session settings.`,
+				);
+			if (option.currentValue === value) continue;
 			if (option.type === "boolean") {
-				if (typeof value !== "boolean") continue;
+				if (typeof value !== "boolean")
+					throw new Error(
+						`Unsupported native setting ${configId}: expected a boolean.`,
+					);
 			} else {
-				if (typeof value !== "string") continue;
+				if (typeof value !== "string")
+					throw new Error(
+						`Unsupported native setting ${configId}: expected a string.`,
+					);
 				const choices = option.options.flatMap((choice) =>
 					"options" in choice ? choice.options : [choice],
 				);
@@ -908,7 +930,9 @@ export class AcpAgentProcess {
 					option.category !== "model" &&
 					!choices.some((choice) => choice.value === value)
 				)
-					continue;
+					throw new Error(
+						`Unsupported native setting ${configId}: ${value}. Choose a supported value or native session settings.`,
+					);
 			}
 			const response = await this.#request(
 				"session/set_config_option",
@@ -922,6 +946,13 @@ export class AcpAgentProcess {
 					),
 			);
 			this.#availableConfigOptions.set(setup.sessionId, response.configOptions);
+			if (
+				response.configOptions.find((entry) => entry.id === configId)
+					?.currentValue !== value
+			)
+				throw new Error(
+					`Native runtime did not apply setting ${configId}. No prompt was sent.`,
+				);
 		}
 		this.#appliedSettings.set(setup.sessionId, fingerprint);
 	}
@@ -930,6 +961,10 @@ export class AcpAgentProcess {
 		notification: SessionNotification,
 		connection: ClientConnection["agent"],
 	): void {
+		if (notification.update.sessionUpdate === "current_mode_update") {
+			this.#appliedSettings.delete(notification.sessionId);
+			return;
+		}
 		if (notification.update.sessionUpdate === "config_option_update") {
 			this.#availableConfigOptions.set(
 				notification.sessionId,

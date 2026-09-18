@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { CommonspaceReasoning } from "@commonspace/shared";
 import {
 	inspectCommandCapabilities,
 	parseNamedJsonInventory,
@@ -95,7 +96,8 @@ export function createCodexAdapter(
 				args,
 				env: {
 					...process.env,
-					CODEX_PATH: cliPath,
+					// Let the bridge use its compatible bundled CLI by default.
+					CODEX_PATH: config.codexPath,
 					INITIAL_AGENT_MODE: fullAccess ? "agent-full-access" : "agent",
 					NO_BROWSER: "1",
 				},
@@ -104,9 +106,12 @@ export function createCodexAdapter(
 		sessionSettings({ fullAccess, model, reasoning }) {
 			const configOptions: Record<string, string> = {};
 			if (model !== undefined) configOptions.model = model;
-			if (reasoning !== undefined)
-				configOptions.reasoning_effort =
-					reasoning === "none" || reasoning === "minimal" ? "low" : reasoning;
+			if (
+				reasoning !== undefined &&
+				reasoning !== CommonspaceReasoning.Native
+			) {
+				configOptions.reasoning_effort = reasoning;
+			}
 			return {
 				modeId: fullAccess ? "agent-full-access" : "agent",
 				configOptions,

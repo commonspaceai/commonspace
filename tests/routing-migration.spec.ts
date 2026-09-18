@@ -2,7 +2,10 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COMMONSPACE_STATE_VERSION } from "@commonspace/shared";
+import {
+	COMMONSPACE_STATE_VERSION,
+	CommonspaceReasoning,
+} from "@commonspace/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { CommonspaceHostService } from "../server/src/service.ts";
 
@@ -27,7 +30,7 @@ describe("routing state migration", () => {
 				revision: 4,
 				defaults: {
 					model: null,
-					reasoning: "max",
+					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},
@@ -174,7 +177,7 @@ describe("routing state migration", () => {
 				revision: 9,
 				defaults: {
 					model: null,
-					reasoning: "max",
+					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 8,
 					memoryThreads: 12,
 				},
@@ -267,7 +270,7 @@ describe("routing state migration", () => {
 		const persisted = JSON.parse(
 			await readFile(join(root, "state.json"), "utf8"),
 		);
-		expect(persisted.version).toBe(30);
+		expect(persisted.version).toBe(31);
 		expect(
 			persisted.messages["channel:general"][0].routing.assignments[0],
 		).toEqual({
@@ -320,7 +323,7 @@ describe("routing state migration", () => {
 				revision: 2,
 				defaults: {
 					model: null,
-					reasoning: "max",
+					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},

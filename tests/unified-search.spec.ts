@@ -1,3 +1,4 @@
+import { CommonspaceReasoning } from "@commonspace/shared";
 // @vitest-environment node
 
 import type {
@@ -19,7 +20,7 @@ function bootstrap(): CommonspaceBootstrap {
 		mutedSessionIds: [],
 		defaults: {
 			model: null,
-			reasoning: "max",
+			reasoning: CommonspaceReasoning.Max,
 			maxAgentsPerTurn: 4,
 			memoryThreads: 12,
 		},

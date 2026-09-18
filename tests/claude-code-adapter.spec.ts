@@ -98,7 +98,7 @@ describe("Claude Code adapter", () => {
 			}),
 		);
 		const { service: restarted } = await createService(root);
-		expect(restarted.snapshot().version).toBe(30);
+		expect(restarted.snapshot().version).toBe(31);
 		expect(restarted.snapshot().agents).toMatchObject([
 			{ id: "claude-code", adapter: "claude-code", displayName: "Reviewer" },
 		]);
@@ -204,7 +204,7 @@ describe("Claude Code adapter", () => {
 		).toMatchObject({
 			installed: true,
 			rostered: true,
-			runReadiness: "unknown",
+			recordedRunStatus: "no-recorded-runs",
 		});
 		await service.close();
 		const { service: restarted } = await createService(root);

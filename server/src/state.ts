@@ -8,8 +8,10 @@ import {
 	AGENT_ADAPTERS,
 	agentTagName,
 	COMMONSPACE_STATE_VERSION,
+	CommonspaceReasoning,
 	DEFAULT_COMMONSPACE_NOTIFICATION_SETTINGS,
 	isAgentAdapterKind,
+	isCommonspaceReasoning as isReasoningValue,
 	uniqueAgentDisplayName,
 } from "@commonspace/shared";
 import type { JsonValue } from "./json.js";
@@ -28,20 +30,10 @@ const defaults: StateDependencies = {
 	now: () => new Date().toISOString(),
 };
 
-const COMMONSPACE_REASONING_VALUES: ReadonlySet<string> = new Set([
-	"none",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-]);
-
 export function isCommonspaceReasoning(
 	value: JsonValue | undefined,
-): value is CommonspaceState["defaults"]["reasoning"] {
-	return typeof value === "string" && COMMONSPACE_REASONING_VALUES.has(value);
+): value is CommonspaceReasoning {
+	return typeof value === "string" && isReasoningValue(value);
 }
 
 function requiredReasoning(
@@ -61,7 +53,8 @@ function optionalModel(
 	if (typeof value !== "string")
 		throw new Error("model must be a string or null");
 	const normalized = value.trim();
-	return normalized === "" ? null : normalized.slice(0, 200);
+	if (normalized.length > 200) throw new Error("model must fit 200 characters");
+	return normalized === "" ? null : normalized;
 }
 
 interface BoundedIntegerOptions {
@@ -71,17 +64,22 @@ interface BoundedIntegerOptions {
 	label: string;
 }
 
-function boundedInteger(
+function validatedIntegerSetting(
 	value: JsonValue | undefined,
 	options: BoundedIntegerOptions,
 ): number {
 	if (value === undefined) return options.current;
 	if (typeof value !== "number" || !Number.isFinite(value))
 		throw new Error(`${options.label} must be a finite number`);
-	return Math.max(
-		options.minimum,
-		Math.min(options.maximum, Math.trunc(value)),
-	);
+	if (
+		!Number.isInteger(value) ||
+		value < options.minimum ||
+		value > options.maximum
+	)
+		throw new Error(
+			`${options.label} must be an integer from ${options.minimum} to ${options.maximum}`,
+		);
+	return value;
 }
 
 export function emptyChannelMemory() {
@@ -135,7 +133,7 @@ function normalizedContextEntries(
 export function defaultCommonspaceDefaults() {
 	return {
 		model: null,
-		reasoning: "max" as const,
+		reasoning: CommonspaceReasoning.Native as const,
 		maxAgentsPerTurn: 4,
 		memoryThreads: 12,
 	};
@@ -630,13 +628,13 @@ export function applyMutation(
 				defaults: {
 					model: optionalModel(mutation.model, state.defaults.model),
 					reasoning,
-					maxAgentsPerTurn: boundedInteger(mutation.maxAgentsPerTurn, {
+					maxAgentsPerTurn: validatedIntegerSetting(mutation.maxAgentsPerTurn, {
 						current: state.defaults.maxAgentsPerTurn,
 						minimum: 1,
 						maximum: 8,
 						label: "max agents per turn",
 					}),
-					memoryThreads: boundedInteger(mutation.memoryThreads, {
+					memoryThreads: validatedIntegerSetting(mutation.memoryThreads, {
 						current: state.defaults.memoryThreads,
 						minimum: 1,
 						maximum: 50,

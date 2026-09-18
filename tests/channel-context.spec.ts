@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CommonspaceRoutingProvider } from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -68,6 +69,11 @@ async function fixture() {
 	);
 	services.push(service);
 	await service.initialize();
+	await service.updateRoutingConfiguration({
+		provider: CommonspaceRoutingProvider.OpenAiCompatible,
+		model: "synthetic-router",
+		baseUrl: "https://example.test/v1",
+	});
 	await addTestHarness(service, "codex", "Review Bot");
 	const channel = mustExist(
 		(
@@ -104,6 +110,11 @@ describe("editable shared Channel context", () => {
 		);
 		services.push(service);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addTestHarness(service, "codex", "Review Bot");
 		const channel = mustExist(
 			(
@@ -269,6 +280,11 @@ describe("editable shared Channel context", () => {
 		);
 		services.push(service);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addTestHarness(service, "codex", "Review Bot");
 		const channel = mustExist(
 			(
@@ -438,6 +454,11 @@ describe("editable shared Channel context", () => {
 		);
 		services.push(service);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addTestHarness(service, "codex", "Review Bot");
 		const channel = mustExist(
 			(
@@ -631,6 +652,11 @@ describe("editable shared Channel context", () => {
 		);
 		services.push(service);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addTestHarness(service, "codex", "Review Bot");
 		const channel = mustExist(
 			(
@@ -687,6 +713,11 @@ describe("editable shared Channel context", () => {
 		);
 		services.push(service);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addTestHarness(service, "codex", "Review Bot");
 		const channel = mustExist(
 			(
@@ -743,6 +774,11 @@ describe("editable shared Channel context", () => {
 		);
 		services.push(service);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addTestHarness(service, "codex", "Review Bot");
 		const channel = mustExist(
 			(
@@ -835,6 +871,11 @@ describe("editable shared Channel context", () => {
 		);
 		services.push(service);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addTestHarness(service, "codex", "Review Bot");
 		const channel = mustExist(
 			(

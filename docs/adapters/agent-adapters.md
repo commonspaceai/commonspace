@@ -40,7 +40,7 @@ Every configured adapter implements these members:
 | `discover()`                        | Return existing `CommonspaceAgentProfile` identities. Use bounded commands; do not authenticate, start a model turn, inspect credentials, or mutate native profiles. Throw installation failures; the host logs once and reports no candidates.                                                                                                                      |
 | `inspectCapabilities(agent)`        | Return browser-safe native inventory groups for the selected identity. Use bounded read-only sources; preserve source and scope, distinguish empty inventory from unsupported inspection and failure, and exclude native secrets, paths, endpoints, and memory contents. Never start a model turn or change native configuration.                                    |
 | `launch(agent, fullAccess, signal)` | Return executable, argument array, environment, and any `validateInitialization` compatibility check, synchronously or asynchronously. Honor cancellation during preflight checks and select the exact native identity. The optional check runs against ACP initialization before sending session references or MCP bindings. Never construct shell command strings. |
-| `sessionSettings(input)`            | Return native ACP mode, model, and config IDs. Leave unsupported settings absent. `AcpAgentProcess` applies controls only when the session advertises them. Model selection precedes model-dependent settings; finite choices are checked against refreshed options, while native model aliases remain available.                                                    |
+| `sessionSettings(input)`            | Return native ACP mode, model, and config IDs. Leave omitted/native-default settings absent; reject explicit overrides the adapter cannot express. `AcpAgentProcess` rejects requested controls that the session does not advertise, and verifies returned config values before prompting. Model selection precedes model-dependent settings; finite choices are checked against refreshed options, while native model aliases remain available.                                                    |
 
 The adapter does not implement its own message queue, subprocess pool, permission UI, transcript parser, or session persistence. `AcpAgentProcess` owns ACP framing, session setup, updates, cancellation, and process disposal. `CommonspaceHostService` owns durable acceptance, per-session serialization, independent concurrency, context scope, private session references, and recovery.
 
@@ -142,7 +142,7 @@ pnpm verify:acp:mcp
 
 The runtime checks verify native session startup and resumption; Claude Code also checks recall after service restart. The MCP check verifies scoped context and visible progress; use `verify:acp:mcp:claude-code` to focus on Claude. Record the exact CLI/bridge versions and results; a passing synthetic ACP test does not establish real bridge compatibility.
 
-Codex checks honor `COMMONSPACE_CODEX_PATH`. Use a complete CLI installation, including its Code Mode companion when enabled, and a version that supports the configured native model.
+Codex execution and live checks use the compatible CLI bundled with the pinned ACP bridge by default. Discovery and capability inspection still use the installed `codex` command. `COMMONSPACE_CODEX_PATH` explicitly overrides both; use a complete CLI installation, including its Code Mode companion when enabled, and a version that supports the configured native model.
 
 ### Account-free runtime verification
 

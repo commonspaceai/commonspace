@@ -3,9 +3,11 @@ import {
 	type AddPinRequest,
 	AGENT_ADAPTER_KINDS,
 	type ApplyRetentionRequest,
+	COMMONSPACE_REASONING_VALUES,
 	COMMONSPACE_SEARCH_KINDS,
 	type CommonspaceLiveAgentActivity,
 	type CommonspaceMutation,
+	CommonspaceRoutingProvider,
 	type CommonspaceSearchKind,
 	type ConversationRef,
 	type DiscoverAgentsRequest,
@@ -20,7 +22,6 @@ import {
 	type UpdateChannelContextRequest,
 	type UpdateRoutingConfigurationRequest,
 	type UpdateThreadContextRequest,
-	type UpdateWorkspaceSettingsRequest,
 } from "@commonspace/shared";
 import express, {
 	type ErrorRequestHandler,
@@ -56,15 +57,7 @@ const conversationSchema = z.object({
 	kind: z.enum(["channel", "dm"]),
 	id: z.string(),
 });
-const reasoningSchema = z.enum([
-	"none",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-]);
+const reasoningSchema = z.enum(COMMONSPACE_REASONING_VALUES);
 const notificationSettingsSchema = z.object({
 	enabled: z.boolean(),
 	replies: z.boolean(),
@@ -112,35 +105,26 @@ const applyRetentionRequestSchema = z.object({
 	expectedRevision: z.number(),
 }) satisfies z.ZodType<ApplyRetentionRequest>;
 const jevConfigurationSchema = z
-	.object({
+	.strictObject({
 		model: z.string().min(1).max(200),
 		apiKey: z.string().max(10_000).nullable().optional(),
 	})
 	.nullable()
 	.optional();
 const routingConfigurationSchema = z.discriminatedUnion("provider", [
-	z.object({
-		provider: z.literal("harness"),
+	z.strictObject({
+		provider: z.literal(CommonspaceRoutingProvider.Harness),
 		harnessAgentId: z.string(),
 		jev: jevConfigurationSchema,
 	}),
-	z.object({
-		provider: z.literal("openai-compatible"),
+	z.strictObject({
+		provider: z.literal(CommonspaceRoutingProvider.OpenAiCompatible),
 		model: z.string(),
 		baseUrl: z.string().optional(),
 		apiKey: z.string().nullable().optional(),
 		jev: jevConfigurationSchema,
 	}),
 ]) satisfies z.ZodType<UpdateRoutingConfigurationRequest>;
-const workspaceSettingsSchema = z.object({
-	routing: routingConfigurationSchema,
-	defaults: z.object({
-		model: z.string().nullable(),
-		reasoning: reasoningSchema,
-		maxAgentsPerTurn: z.number(),
-		memoryThreads: z.number(),
-	}),
-}) satisfies z.ZodType<UpdateWorkspaceSettingsRequest>;
 const contextRequestSchema =
 	contextRequestShape satisfies z.ZodType<UpdateChannelContextRequest>;
 const threadContextRequestSchema =
@@ -664,21 +648,6 @@ export function createCommonspaceApp({
 		}
 	});
 
-	app.put("/api/settings", requireSameOrigin, async (req, res) => {
-		try {
-			res.json(
-				await service.updateWorkspaceSettings(
-					workspaceSettingsSchema.parse(req.body),
-				),
-			);
-		} catch (error) {
-			res.status(400).json({
-				code: "workspace_settings_failed",
-				error: requestErrorMessage(error),
-			});
-		}
-	});
-
 	app.get("/api/channels/:channelId/context", requireSameOrigin, (req, res) => {
 		try {
 			const channelId = req.params.channelId;
@@ -955,10 +924,14 @@ export function createCommonspaceApp({
 		writeRevision(service.snapshot().revision);
 		writeActivity(service.liveActivities());
 		const unsubscribeRevision = service.subscribeToRevisions(writeRevision);
+		const unsubscribeRouting = service.subscribeToRoutingChanges(() => {
+			res.write("event: routing-changed\ndata: {}\n\n");
+		});
 		const unsubscribeActivity =
 			service.subscribeToLiveActivities(writeActivity);
 		req.on("close", () => {
 			unsubscribeRevision();
+			unsubscribeRouting();
 			unsubscribeActivity();
 		});
 	});

@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CommonspaceRoutingProvider } from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type AgentRunInput,
@@ -419,7 +420,7 @@ describe("routing correction", () => {
 			).channels[0],
 		);
 		await service.updateRoutingConfiguration({
-			provider: "harness",
+			provider: CommonspaceRoutingProvider.Harness,
 			harnessAgentId: "backend",
 		});
 

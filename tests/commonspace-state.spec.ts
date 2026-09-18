@@ -1,4 +1,5 @@
 import type { CommonspaceMutation } from "@commonspace/shared";
+import { CommonspaceReasoning } from "@commonspace/shared";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
 	addDiscoveredAgent,
@@ -85,13 +86,13 @@ describe("Commonspace local state", () => {
 		state = applyMutation(state, {
 			action: "set-defaults",
 			model: "openai/gpt-5.2",
-			reasoning: "high",
-			maxAgentsPerTurn: 99,
-			memoryThreads: 0,
+			reasoning: CommonspaceReasoning.High,
+			maxAgentsPerTurn: 8,
+			memoryThreads: 1,
 		});
 		expect(state.defaults).toEqual({
 			model: "openai/gpt-5.2",
-			reasoning: "high",
+			reasoning: CommonspaceReasoning.High,
 			maxAgentsPerTurn: 8,
 			memoryThreads: 1,
 		});

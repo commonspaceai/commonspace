@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { CommonspaceReasoning } from "@commonspace/shared";
 import {
 	inspectCommandCapabilities,
 	parseNamedJsonInventory,
@@ -120,14 +121,22 @@ export function createClaudeCodeAdapter(
 			};
 		},
 		sessionSettings({ fullAccess, model, reasoning }) {
+			if (
+				reasoning !== undefined &&
+				reasoning !== CommonspaceReasoning.Native &&
+				!["low", "medium", "high", "max"].includes(reasoning)
+			)
+				throw new Error(
+					"Claude Code does not support this reasoning override. Select a supported value or Use native session settings.",
+				);
 			const configOptions: Record<string, string> = {};
 			if (model !== undefined) configOptions.model = model;
 			// Only map native effort levels; unsupported workspace choices leave Claude's default intact.
 			if (
-				reasoning === "low" ||
-				reasoning === "medium" ||
-				reasoning === "high" ||
-				reasoning === "max"
+				reasoning === CommonspaceReasoning.Low ||
+				reasoning === CommonspaceReasoning.Medium ||
+				reasoning === CommonspaceReasoning.High ||
+				reasoning === CommonspaceReasoning.Max
 			)
 				configOptions.effort = reasoning;
 			return {

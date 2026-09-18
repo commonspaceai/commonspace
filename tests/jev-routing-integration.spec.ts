@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CommonspaceRoutingProvider } from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type AgentRunInput,
@@ -61,7 +62,7 @@ async function fixture() {
 		).channels[0],
 	);
 	await service.updateRoutingConfiguration({
-		provider: "harness",
+		provider: CommonspaceRoutingProvider.Harness,
 		harnessAgentId: "codex",
 		jev: { model: "jev-1.13.0", apiKey: "synthetic-secret" },
 	});
@@ -128,7 +129,7 @@ describe("Jev conversation routing", () => {
 		});
 		await service.whenIdle();
 		await service.updateRoutingConfiguration({
-			provider: "openai-compatible",
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
 			model: "writer",
 			baseUrl: "https://example.test/v1",
 		});

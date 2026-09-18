@@ -67,7 +67,6 @@ import type {
 	UpdateChannelContextRequest,
 	UpdateRoutingConfigurationRequest,
 	UpdateThreadContextRequest,
-	UpdateWorkspaceSettingsRequest,
 } from "@commonspace/shared";
 import {
 	AGENT_ADAPTER_KINDS,
@@ -75,6 +74,7 @@ import {
 	agentMentionName,
 	COMMONSPACE_EXPORT_VERSION,
 	COMMONSPACE_STATE_VERSION,
+	CommonspaceRoutingProvider,
 	conversationKey,
 	deriveCommonspaceInboxItems,
 	isAgentAdapterKind,
@@ -147,6 +147,15 @@ import {
 	rankChannelAgents,
 } from "./relay.js";
 import {
+	invalidRouting,
+	missingRouting,
+	openAiEnvironmentKey,
+	type PrivateRoutingConfiguration,
+	parseSavedRoutingConfiguration,
+	prepareRoutingConfiguration,
+	publicRoutingConfiguration,
+} from "./routing-configuration.js";
+import {
 	buildRoutingMemoryCompactionPrompt,
 	parseRoutingMemoryCompaction,
 } from "./routing-memory.js";
@@ -201,7 +210,6 @@ const MAX_MCP_SEARCH_SNIPPET_CHARS = 500;
 const MAX_RELAY_PEER_RESPONSE_CHARS = 4_000;
 const MAX_TRACE_ENTRIES = 128;
 const MAX_TRACE_CHARS = 256_000;
-const DEFAULT_ROUTING_BASE_URL = "https://api.openai.com/v1";
 const SHARED_CONTEXT_PRESSURE_TOKENS = 24_000;
 const MANAGED_AGENT_ID_PATTERN = /^codex-[\p{L}\p{N}][\p{L}\p{N}-]{0,79}$/u;
 
@@ -391,12 +399,6 @@ interface PreparedSend {
 		branchPointMessageId: string;
 		channelSnapshot: CommonspaceThread["context"]["channelSnapshot"];
 	};
-}
-
-interface PrivateRoutingConfiguration
-	extends Omit<CommonspaceRoutingConfiguration, "apiKeyConfigured" | "jev"> {
-	apiKey?: string;
-	jev?: { version: 1; model: string; apiKey?: string };
 }
 
 interface PreparedImageAttachment {
@@ -593,78 +595,6 @@ function preparedProjectRoots(
 			path,
 		})),
 	);
-}
-
-function defaultRoutingConfiguration(): PrivateRoutingConfiguration {
-	return {
-		provider: "openai-compatible",
-		model: "gpt-4.1-mini",
-		harnessAgentId: null,
-		baseUrl: DEFAULT_ROUTING_BASE_URL,
-	};
-}
-
-function normalizedRoutingBaseUrl(value: JsonValue | undefined): string {
-	const raw =
-		typeof value === "string" && value.trim() !== ""
-			? value.trim()
-			: DEFAULT_ROUTING_BASE_URL;
-	if (raw.length > 2_000) throw new Error("routing base URL is too long");
-	const parsed = new URL(raw);
-	if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
-		throw new Error("routing base URL must use HTTP or HTTPS");
-	return parsed.toString().replace(/\/$/u, "");
-}
-
-function routingUsesOpenAiOrigin(baseUrl: string): boolean {
-	return new URL(baseUrl).origin === new URL(DEFAULT_ROUTING_BASE_URL).origin;
-}
-
-function sanitizeRoutingConfiguration(
-	value: JsonValue | undefined,
-): PrivateRoutingConfiguration {
-	const record = plainRecord(value);
-	if (record === null) return defaultRoutingConfiguration();
-	if (record.provider !== "harness" && record.provider !== "openai-compatible")
-		return defaultRoutingConfiguration();
-	const provider = record.provider;
-	const model =
-		typeof record.model === "string" ? record.model.trim().slice(0, 200) : "";
-	const harnessAgentId =
-		typeof record.harnessAgentId === "string" &&
-		record.harnessAgentId.trim() !== ""
-			? record.harnessAgentId.trim().slice(0, 200)
-			: null;
-	let baseUrl = DEFAULT_ROUTING_BASE_URL;
-	try {
-		baseUrl = normalizedRoutingBaseUrl(record.baseUrl);
-	} catch {
-		// Invalid persisted URLs fall back without exposing or blocking the workspace.
-	}
-	const apiKey =
-		typeof record.apiKey === "string" && record.apiKey !== ""
-			? record.apiKey.slice(0, 10_000)
-			: undefined;
-	const configuration: PrivateRoutingConfiguration = {
-		provider,
-		model,
-		harnessAgentId,
-		baseUrl,
-	};
-	if (apiKey !== undefined) configuration.apiKey = apiKey;
-	const jev = plainRecord(record.jev);
-	if (
-		jev !== null &&
-		jev.version === 1 &&
-		typeof jev.model === "string" &&
-		jev.model.trim() !== "" &&
-		jev.model.length <= 200
-	) {
-		configuration.jev = { version: 1, model: jev.model.trim() };
-		if (typeof jev.apiKey === "string" && jev.apiKey.trim() !== "")
-			configuration.jev.apiKey = jev.apiKey.trim().slice(0, 10_000);
-	}
-	return configuration;
 }
 
 function isImageMimeType(
@@ -2399,13 +2329,13 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private readonly attachmentsRoot: string;
 	private defaultCwd: string;
 	private state: CommonspaceState = createInitialState();
-	private routingConfiguration: PrivateRoutingConfiguration =
-		defaultRoutingConfiguration();
+	private routingConfiguration: PrivateRoutingConfiguration = missingRouting;
 	private writeTail = Promise.resolve();
 	private readonly agentSessionTails = new Map<string, Promise<unknown>>();
 	private readonly channelMemoryTails = new Map<string, Promise<unknown>>();
 	private readonly threadMemoryTails = new Map<string, Promise<unknown>>();
 	private readonly revisionListeners = new Set<(revision: number) => void>();
+	private readonly routingListeners = new Set<() => void>();
 	private readonly liveActivityListeners = new Set<
 		(activities: readonly CommonspaceLiveAgentActivity[]) => void
 	>();
@@ -2497,15 +2427,16 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		}
 		this.defaultCwd = await realpath(this.defaultCwd);
 		try {
-			this.routingConfiguration = sanitizeRoutingConfiguration(
-				JSON.parse(await readFile(this.routingPath, "utf8")),
+			this.routingConfiguration = parseSavedRoutingConfiguration(
+				await readFile(this.routingPath, "utf8"),
 			);
 		} catch (error) {
 			if (errorCode(error) !== "ENOENT")
 				this.environment.logger?.warn(
-					"Commonspace ignored invalid routing configuration",
+					"Commonspace inference is unavailable: saved routing configuration could not be read",
 				);
-			this.routingConfiguration = defaultRoutingConfiguration();
+			this.routingConfiguration =
+				errorCode(error) === "ENOENT" ? missingRouting : invalidRouting;
 		}
 		try {
 			this.state = sanitizeLoadedState(
@@ -3172,17 +3103,17 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					return id === undefined ? [] : [id];
 				}),
 		);
-		const readiness = (
+		const recordedRunStatus = (
 			adapter: AgentAdapterKind,
-		): "ready" | "unknown" | "attention" => {
+		): "has-replies" | "no-recorded-runs" | "has-failures" => {
 			const roster = this.state.agents.filter(
 				(agent) => agent.adapter === adapter,
 			);
 			if (roster.some((agent) => failedAgents.has(agent.id)))
-				return "attention";
+				return "has-failures";
 			if (roster.some((agent) => successfulAgents.has(agent.id)))
-				return "ready";
-			return "unknown";
+				return "has-replies";
+			return "no-recorded-runs";
 		};
 		const storageReady = await stat(this.root)
 			.then((info) => info.isDirectory())
@@ -3202,7 +3133,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				adapter,
 				installed: installed.has(adapter),
 				rostered: this.state.agents.some((agent) => agent.adapter === adapter),
-				runReadiness: readiness(adapter),
+				recordedRunStatus: recordedRunStatus(adapter),
 				recovery: AGENT_ADAPTERS[adapter].recovery,
 			})),
 		};
@@ -3280,7 +3211,14 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			...Object.values(this.state.agentSessions).flatMap((sessions) =>
 				Object.values(sessions),
 			),
-			this.routingConfiguration.apiKey ?? "",
+			...(this.routingConfiguration.provider ===
+			CommonspaceRoutingProvider.OpenAiCompatible
+				? [this.routingConfiguration.apiKey ?? ""]
+				: []),
+			...(this.routingConfiguration.provider !==
+			CommonspaceRoutingProvider.Unconfigured
+				? [this.routingConfiguration.jev?.apiKey ?? ""]
+				: []),
 			...Array.from(this.mcpCredentials.values(), ({ token }) => token),
 		];
 		const archive: CommonspaceWorkspaceArchive = {
@@ -3724,70 +3662,12 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 
 	private prepareRoutingConfiguration(
 		request: UpdateRoutingConfigurationRequest,
-	): PrivateRoutingConfiguration {
-		if (
-			request.provider !== "harness" &&
-			request.provider !== "openai-compatible"
-		) {
-			throw new Error("unsupported routing provider");
-		}
-		const model =
-			request.provider === "openai-compatible"
-				? request.model.normalize("NFKC").trim()
-				: this.routingConfiguration.model;
-		if (model.length > 200) throw new Error("routing model is too long");
-		const harnessAgentId =
-			request.provider === "harness"
-				? request.harnessAgentId.trim() || null
-				: null;
-		if (
-			request.provider === "harness" &&
-			(harnessAgentId === null ||
-				!this.state.agents.some((agent) => agent.id === harnessAgentId))
-		) {
-			throw new Error("routing harness must be a configured agent");
-		}
-		if (request.provider === "openai-compatible" && model === "")
-			throw new Error("routing model is required");
-		const baseUrl =
-			request.provider === "openai-compatible"
-				? normalizedRoutingBaseUrl(request.baseUrl)
-				: this.routingConfiguration.baseUrl;
-		const requestedApiKey =
-			request.provider === "openai-compatible" ? request.apiKey : undefined;
-		const apiKey =
-			requestedApiKey === undefined
-				? baseUrl === this.routingConfiguration.baseUrl
-					? this.routingConfiguration.apiKey
-					: undefined
-				: requestedApiKey === null || requestedApiKey.trim() === ""
-					? undefined
-					: requestedApiKey.trim().slice(0, 10_000);
-		const next: PrivateRoutingConfiguration = {
-			provider: request.provider,
-			model,
-			harnessAgentId,
-			baseUrl,
-		};
-		if (apiKey !== undefined) next.apiKey = apiKey;
-		if (request.jev === undefined) {
-			if (this.routingConfiguration.jev !== undefined)
-				next.jev = this.routingConfiguration.jev;
-		} else if (request.jev !== null) {
-			const jevModel = request.jev.model.normalize("NFKC").trim();
-			if (jevModel === "" || jevModel.length > 200)
-				throw new Error("Jev model is required and must fit 200 characters");
-			next.jev = { version: 1, model: jevModel };
-			const jevKey =
-				request.jev.apiKey === undefined
-					? this.routingConfiguration.jev?.apiKey
-					: request.jev.apiKey?.trim();
-			if (jevKey !== undefined && jevKey !== "") {
-				if (jevKey.length > 10_000) throw new Error("Jev API key is too long");
-				next.jev.apiKey = jevKey;
-			}
-		}
-		return next;
+	) {
+		return prepareRoutingConfiguration(
+			request,
+			this.routingConfiguration,
+			this.state.agents.map((agent) => agent.id),
+		);
 	}
 
 	validateRoutingConfiguration(
@@ -3799,27 +3679,39 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private routingDiagnostics(
 		candidate: PrivateRoutingConfiguration,
 	): CommonspaceDiagnostics["inference"] {
-		const routingUrl = new URL(candidate.baseUrl);
-		const localRoutingHost =
-			routingUrl.hostname === "localhost" ||
-			routingUrl.hostname === "127.0.0.1" ||
-			routingUrl.hostname === "::1";
+		if (candidate.provider === CommonspaceRoutingProvider.Unconfigured)
+			return {
+				provider: candidate.provider,
+				location: "none",
+				configured: false,
+				sends: [],
+			};
+		const jevEnabled = candidate.jev?.enabled === true;
+		const jevReady =
+			!jevEnabled ||
+			candidate.jev?.apiKey !== undefined ||
+			Boolean(process.env.TYPESAFE_API_KEY?.trim());
+		let location: CommonspaceDiagnostics["inference"]["location"] =
+			"runtime-managed";
+		if (jevEnabled) location = "remote";
+		else if (
+			candidate.provider === CommonspaceRoutingProvider.OpenAiCompatible
+		) {
+			const host = new URL(candidate.baseUrl).hostname;
+			location = ["localhost", "127.0.0.1", "[::1]"].includes(host)
+				? "local"
+				: "remote";
+		}
 		return {
 			provider: candidate.provider,
-			location:
-				candidate.jev === undefined &&
-				(candidate.provider === "harness" || localRoutingHost)
-					? "local"
-					: "remote",
+			location,
 			configured:
-				(candidate.jev === undefined ||
-					candidate.jev.apiKey !== undefined ||
-					Boolean(process.env.TYPESAFE_API_KEY)) &&
-				(candidate.provider === "harness"
+				jevReady &&
+				(candidate.provider === CommonspaceRoutingProvider.Harness
 					? this.state.agents.some(
 							(agent) => agent.id === candidate.harnessAgentId,
 						)
-					: candidate.model !== ""),
+					: true),
 			sends: [
 				"message text",
 				"Agent labels",
@@ -3833,46 +3725,18 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	async updateRoutingConfiguration(
 		request: UpdateRoutingConfigurationRequest,
 	): Promise<CommonspaceRoutingConfiguration> {
-		const next = this.prepareRoutingConfiguration(request);
-		await this.persistRoutingConfiguration(next);
-		this.routingConfiguration = next;
-		return this.publicRoutingConfiguration();
-	}
-
-	async updateWorkspaceSettings(
-		request: UpdateWorkspaceSettingsRequest,
-	): Promise<CommonspaceBootstrap> {
 		return this.withAdmission(async () => {
-			const previousState = this.state;
-			const previousRouting = this.routingConfiguration;
-			const nextRouting = this.prepareRoutingConfiguration(request.routing);
-			const defaultsMutation: Extract<
-				CommonspaceMutation,
-				{ action: "set-defaults" }
-			> = { action: "set-defaults", ...request.defaults };
-			const normalizedDefaults = await this.normalizeMutation(defaultsMutation);
-			const nextState = applyMutation(this.state, normalizedDefaults);
-
-			await this.persistRoutingConfiguration(nextRouting);
-			this.state = nextState;
-			try {
-				await this.persist();
-			} catch (error) {
-				this.state = previousState;
+			const next = this.prepareRoutingConfiguration(request);
+			await this.persistRoutingConfiguration(next);
+			this.routingConfiguration = next;
+			for (const listener of this.routingListeners) {
 				try {
-					await this.persistRoutingConfiguration(previousRouting);
-				} catch (rollbackError) {
-					throw new AggregateError(
-						[error, rollbackError],
-						"workspace settings failed and routing rollback also failed",
-						{ cause: rollbackError },
-					);
+					listener();
+				} catch {
+					this.routingListeners.delete(listener);
 				}
-				throw error;
 			}
-			this.routingConfiguration = nextRouting;
-			this.broadcastRevision();
-			return this.bootstrap();
+			return this.publicRoutingConfiguration();
 		});
 	}
 
@@ -5604,6 +5468,13 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		};
 	}
 
+	subscribeToRoutingChanges(listener: () => void): () => void {
+		this.routingListeners.add(listener);
+		return () => {
+			this.routingListeners.delete(listener);
+		};
+	}
+
 	liveActivities(): CommonspaceLiveAgentActivity[] {
 		return structuredClone([...this.liveActivitiesById.values()]);
 	}
@@ -6380,7 +6251,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			? prepared.agentIds.length
 			: this.state.defaults.maxAgentsPerTurn;
 		const effectiveModel = this.state.defaults.model ?? undefined;
-		const effectiveReasoning = this.state.defaults.reasoning;
+		const effectiveReasoning =
+			this.state.defaults.reasoning === "native"
+				? undefined
+				: this.state.defaults.reasoning;
 		const memberIds =
 			prepared.channel?.agentIds ?? thread?.agentIds ?? prepared.agentIds;
 		const delivered = new Set<string>();
@@ -6541,11 +6415,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				projectsAreCurrent() &&
 				this.conversationIsCurrent(prepared, thread);
 			const sessionId = this.state.agentSessions[agent.id]?.[sessionName];
-			const agentModel =
-				effectiveModel ??
-				(agent.adapter === "hermes" || agent.nativeProfile !== undefined
-					? undefined
-					: (agent.model ?? undefined));
+			const agentModel = effectiveModel;
 			let agentResponse: AgentRunResult | null;
 			let runStartedAt = now();
 			let runSnapshots: Array<PreparedProjectRoot & { snapshot: RunSnapshot }> =
@@ -6651,7 +6521,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 							if (delivery.files !== undefined) runInput.files = delivery.files;
 							if (sessionId !== undefined) runInput.sessionId = sessionId;
 							if (agentModel !== undefined) runInput.model = agentModel;
-							if (agent.nativeProfile === undefined)
+							if (effectiveReasoning !== undefined)
 								runInput.reasoning = effectiveReasoning;
 							this.executingAgentRunsByScope.set(activeRun.scopeKey, activeRun);
 							try {
@@ -7764,6 +7634,16 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					profile.nativeProfile = agent.nativeProfile;
 				if (discovered.description !== undefined)
 					profile.description = discovered.description;
+				profile.permissionPolicy = {
+					source: (
+						agent.adapter === "hermes"
+							? this.hermesYolo
+							: this.externalAgentYolo
+					)
+						? "server"
+						: "agent",
+					fullAccess: this.agentFullAccess(agent),
+				};
 				return profile;
 			}
 			const profile: CommonspaceAgentProfile = {
@@ -7780,6 +7660,16 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				profile.accentColor = agent.accentColor;
 			if (agent.nativeProfile !== undefined)
 				profile.nativeProfile = agent.nativeProfile;
+			profile.permissionPolicy = {
+				source: (
+					agent.adapter === "hermes"
+						? this.hermesYolo
+						: this.externalAgentYolo
+				)
+					? "server"
+					: "agent",
+				fullAccess: this.agentFullAccess(agent),
+			};
 			return profile;
 		});
 	}
@@ -7792,12 +7682,13 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			| { kind: "channel-routing"; channelId: string }
 			| { kind: "isolated" },
 	): Promise<string> {
-		if (this.routingConfiguration.provider === "openai-compatible") {
+		if (
+			this.routingConfiguration.provider ===
+			CommonspaceRoutingProvider.OpenAiCompatible
+		) {
 			const apiKey =
 				this.routingConfiguration.apiKey ??
-				(routingUsesOpenAiOrigin(this.routingConfiguration.baseUrl)
-					? process.env.OPENAI_API_KEY
-					: undefined);
+				openAiEnvironmentKey(this.routingConfiguration.baseUrl, process.env);
 			const inferenceOptions: Parameters<
 				typeof completeWithOpenAICompatible
 			>[0] = {
@@ -7815,10 +7706,12 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				maxTokens,
 			});
 		}
-		if (this.routingConfiguration.provider === "harness") {
+		if (
+			this.routingConfiguration.provider === CommonspaceRoutingProvider.Harness
+		) {
+			const harnessAgentId = this.routingConfiguration.harnessAgentId;
 			const agent = this.configuredAgents().find(
-				(candidate) =>
-					candidate.id === this.routingConfiguration.harnessAgentId,
+				(candidate) => candidate.id === harnessAgentId,
 			);
 			if (agent === undefined)
 				throw new Error("routing harness is unavailable");
@@ -7849,7 +7742,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					sessionName,
 					message: `${system}\n\nOutput token budget: at most ${String(maxTokens)} tokens.\n\n${prompt}`,
 					maxResponseChars: Math.min(MAX_AGENT_RESPONSE_CHARS, maxTokens * 8),
-					reasoning: "minimal",
 					signal,
 				};
 				const result = await this.runAgentWithSessionRecovery(
@@ -7881,16 +7773,20 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				}
 			}
 		}
-		throw new Error("unsupported routing provider");
+		throw new Error(this.routingConfiguration.message);
 	}
 
 	private async routeAgents(
 		channelId: string,
 		input: CommonspaceRouteInput,
 	): Promise<CommonspaceRouteResult> {
-		const jev = this.routingConfiguration.jev;
-		if (jev !== undefined) {
-			const apiKey = jev.apiKey ?? process.env.TYPESAFE_API_KEY;
+		const jev =
+			this.routingConfiguration.provider ===
+			CommonspaceRoutingProvider.Unconfigured
+				? undefined
+				: this.routingConfiguration.jev;
+		if (jev?.enabled === true) {
+			const apiKey = jev.apiKey ?? process.env.TYPESAFE_API_KEY?.trim();
 			if (!apiKey)
 				throw new Error(
 					"Jev routing requires a TypeSafe API key in Settings or TYPESAFE_API_KEY",
@@ -8284,24 +8180,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	}
 
 	private publicRoutingConfiguration(): CommonspaceRoutingConfiguration {
-		const configuration: CommonspaceRoutingConfiguration = {
-			provider: this.routingConfiguration.provider,
-			model: this.routingConfiguration.model,
-			harnessAgentId: this.routingConfiguration.harnessAgentId,
-			baseUrl: this.routingConfiguration.baseUrl,
-			apiKeyConfigured:
-				this.routingConfiguration.apiKey !== undefined ||
-				(routingUsesOpenAiOrigin(this.routingConfiguration.baseUrl) &&
-					process.env.OPENAI_API_KEY !== undefined),
-		};
-		if (this.routingConfiguration.jev !== undefined)
-			configuration.jev = {
-				model: this.routingConfiguration.jev.model,
-				apiKeyConfigured:
-					this.routingConfiguration.jev.apiKey !== undefined ||
-					Boolean(process.env.TYPESAFE_API_KEY),
-			};
-		return configuration;
+		return publicRoutingConfiguration(this.routingConfiguration, process.env);
 	}
 
 	private async persistRoutingConfiguration(

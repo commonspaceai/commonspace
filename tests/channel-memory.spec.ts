@@ -1,3 +1,4 @@
+import { CommonspaceReasoning } from "@commonspace/shared";
 import { expect, it } from "vitest";
 import {
 	COMMONSPACE_STATE_VERSION,
@@ -11,7 +12,7 @@ it("projects completed thread context into inspectable channel memory", () => {
 		revision: 4,
 		defaults: {
 			model: null,
-			reasoning: "max",
+			reasoning: CommonspaceReasoning.Max,
 			maxAgentsPerTurn: 4,
 			memoryThreads: 12,
 		},
@@ -88,7 +89,7 @@ it("tracks the newest source message across included threads", () => {
 		revision: 8,
 		defaults: {
 			model: null,
-			reasoning: "max",
+			reasoning: CommonspaceReasoning.Max,
 			maxAgentsPerTurn: 4,
 			memoryThreads: 12,
 		},

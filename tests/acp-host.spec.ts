@@ -10,6 +10,10 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+	CommonspaceReasoning,
+	CommonspaceRoutingProvider,
+} from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type CommonspaceHostConfig,
@@ -731,7 +735,7 @@ describe("Commonspace ACP host path", () => {
 		await service.mutate({
 			action: "set-defaults",
 			model: "gpt-test",
-			reasoning: "high",
+			reasoning: CommonspaceReasoning.High,
 		});
 		await service.send({
 			conversation: { kind: "dm", id: "codex" },
@@ -914,7 +918,7 @@ describe("Commonspace ACP host path", () => {
 				).channels.at(-1),
 			);
 			await service.updateRoutingConfiguration({
-				provider: "harness",
+				provider: CommonspaceRoutingProvider.Harness,
 				harnessAgentId: harness.id,
 			});
 			vi.stubEnv(

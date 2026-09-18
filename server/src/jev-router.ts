@@ -121,11 +121,11 @@ export function buildJevRequest(input: AiRouteInput, model: string) {
 		for (const project of input.projects)
 			questions[`project:${agent.id}:${project.id}`] = {
 				type: "noul",
-				instructions: `Consider only the work requested from ${agent.displayName} (${agent.id}; responsibility: ${agent.description ?? "unknown"}) in message. Does that work involve Project ${project.name} (${project.id})? Use Project labels and explicit references in context. Distinguish this agent's work from work requested from other agents.`,
+				instructions: `Consider only the work requested from ${agent.displayName} (${agent.id}; responsibility: ${agent.description ?? "unknown"}) in message. Does the current request concern Project ${project.name} (${project.id})? Work includes inspecting, explaining, answering questions about, diagnosing, or changing the Project. Use context to resolve actual continuations of project work, but do not infer project scope merely because earlier messages discussed it. A standalone greeting, social reply, or general capability question requests no project work, even in a channel with project history. Distinguish this agent's work from work requested from other agents.`,
 				criteria: {
-					true: "This permitted Project is relevant to this agent's requested work.",
+					true: "The current message requests work on this Project, explicitly or as a contextual continuation.",
 					false:
-						"Its requested work does not involve this Project, including genuinely projectless work.",
+						"The current message requests no work on this Project. This includes standalone greetings, social replies, and project-independent capability questions; historical Project mentions alone do not establish scope.",
 				},
 			};
 	}

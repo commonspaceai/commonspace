@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CommonspaceState } from "@commonspace/shared";
+import { CommonspaceRoutingProvider } from "@commonspace/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { CommonspaceHostService } from "../server/src/service.ts";
@@ -346,7 +347,7 @@ describe("portable authored content and managed metadata", () => {
 		await writeFile(
 			join(root, "routing.json"),
 			JSON.stringify({
-				provider: "openai-compatible",
+				provider: CommonspaceRoutingProvider.OpenAiCompatible,
 				model: "test-model",
 				harnessAgentId: null,
 				baseUrl: "https://api.openai.com/v1",

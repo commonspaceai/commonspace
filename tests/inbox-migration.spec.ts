@@ -2,7 +2,10 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COMMONSPACE_STATE_VERSION } from "@commonspace/shared";
+import {
+	COMMONSPACE_STATE_VERSION,
+	CommonspaceReasoning,
+} from "@commonspace/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import type { JsonObject, JsonValue } from "../server/src/json.ts";
 import { CommonspaceHostService } from "../server/src/service.ts";
@@ -29,7 +32,7 @@ async function loadState(
 		revision: 7,
 		defaults: {
 			model: null,
-			reasoning: "max",
+			reasoning: CommonspaceReasoning.Max,
 			maxAgentsPerTurn: 4,
 			memoryThreads: 12,
 		},
@@ -102,7 +105,10 @@ describe("Commonspace Inbox state migration", () => {
 				threadIds: [],
 				updatedAt: null,
 			},
-			settings: { model: "legacy-channel-model", reasoning: "low" },
+			settings: {
+				model: "legacy-channel-model",
+				reasoning: CommonspaceReasoning.Low,
+			},
 			createdAt: "2026-08-27T09:00:00.000Z",
 		};
 

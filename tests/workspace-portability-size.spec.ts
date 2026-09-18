@@ -1,3 +1,4 @@
+import { CommonspaceReasoning } from "@commonspace/shared";
 import { describe, expect, it } from "vitest";
 import {
 	assertWorkspaceExportPlanSize,
@@ -61,7 +62,7 @@ describe("workspace portability size contract", () => {
 				},
 				defaults: {
 					model: null,
-					reasoning: "max" as const,
+					reasoning: CommonspaceReasoning.Max as const,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},

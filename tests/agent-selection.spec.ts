@@ -74,7 +74,11 @@ describe("Commonspace agent selection", () => {
 			fullAccess: true,
 		});
 		expect((await service.bootstrap()).agents).toEqual([
-			{ ...discoveredAgent, fullAccess: true },
+			{
+				...discoveredAgent,
+				fullAccess: true,
+				permissionPolicy: { source: "agent", fullAccess: true },
+			},
 		]);
 		expect(service.snapshot().agents[0]?.fullAccess).toBe(true);
 		await service.close();
@@ -89,10 +93,15 @@ describe("Commonspace agent selection", () => {
 				model: null,
 				fullAccess: true,
 				status: "unknown",
+				permissionPolicy: { source: "agent", fullAccess: true },
 			},
 		]);
 		expect((await restarted.discoverAgents("hermes")).agents).toEqual([
-			{ ...discoveredAgent, fullAccess: true },
+			{
+				...discoveredAgent,
+				fullAccess: true,
+				permissionPolicy: { source: "agent", fullAccess: true },
+			},
 		]);
 		await restarted.close();
 	});

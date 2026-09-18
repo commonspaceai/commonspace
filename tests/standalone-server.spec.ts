@@ -1,7 +1,11 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COMMONSPACE_STATE_VERSION } from "@commonspace/shared";
+import {
+	COMMONSPACE_STATE_VERSION,
+	CommonspaceRoutingProvider,
+	CredentialSource,
+} from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -193,7 +197,7 @@ describe("standalone Commonspace server", () => {
 			method: "PUT",
 			headers: { origin: running.url, "content-type": "application/json" },
 			body: JSON.stringify({
-				provider: "openai-compatible",
+				provider: CommonspaceRoutingProvider.OpenAiCompatible,
 				model: "local-router",
 				baseUrl: "http://127.0.0.1:11434/v1",
 				apiKey: "private-key",
@@ -201,11 +205,11 @@ describe("standalone Commonspace server", () => {
 		});
 		expect(routingResponse.status).toBe(200);
 		await expect(routingResponse.json()).resolves.toEqual({
-			provider: "openai-compatible",
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
 			model: "local-router",
-			harnessAgentId: null,
 			baseUrl: "http://127.0.0.1:11434/v1",
 			apiKeyConfigured: true,
+			apiKeySource: CredentialSource.Saved,
 		});
 		const routingReadResponse = await fetch(`${running.url}/api/routing`, {
 			headers: { origin: running.url },

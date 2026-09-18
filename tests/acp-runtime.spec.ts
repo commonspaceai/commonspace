@@ -23,6 +23,74 @@ afterEach(async () => {
 });
 
 describe("ACP agent process", () => {
+	it("restores the requested permission mode after a native mode change", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-acp-native-mode-"));
+		roots.push(root);
+		const logPath = join(root, "frames.ndjson");
+		const client = new AcpAgentProcess({
+			command: process.execPath,
+			args: [fixturePath],
+			cwd: root,
+			env: {
+				...process.env,
+				FAKE_ACP_LOG: logPath,
+				FAKE_ACP_NATIVE_MODE_UPDATE: "1",
+			},
+		});
+		try {
+			const first = await client.run({
+				cwd: root,
+				modeId: "agent",
+				message: "First turn.",
+			});
+			await client.run({
+				cwd: root,
+				modeId: "agent",
+				sessionId: first.sessionId,
+				message: "Second turn.",
+			});
+			const frames = (await readFile(logPath, "utf8"))
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line));
+			expect(
+				frames
+					.filter((frame) =>
+						["session/set_mode", "session/prompt"].includes(frame.method),
+					)
+					.map((frame) =>
+						frame.method === "session/set_mode"
+							? frame.params.modeId
+							: "prompt",
+					),
+			).toEqual(["agent", "prompt", "agent", "prompt"]);
+		} finally {
+			await client.close();
+		}
+	});
+	it("rejects an unavailable requested permission mode before delivering the prompt", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-acp-mode-"));
+		roots.push(root);
+		const logPath = join(root, "frames.ndjson");
+		const client = new AcpAgentProcess({
+			command: process.execPath,
+			args: [fixturePath],
+			cwd: root,
+			env: { ...process.env, FAKE_ACP_LOG: logPath, FAKE_ACP_SETTINGS: "1" },
+		});
+		try {
+			await expect(
+				client.run({
+					cwd: root,
+					modeId: "unavailable-mode",
+					message: "Do not deliver this prompt.",
+				}),
+			).rejects.toThrow("Unsupported native permission mode");
+			expect(await readFile(logPath, "utf8")).not.toContain("session/prompt");
+		} finally {
+			await client.close();
+		}
+	});
 	it.each([undefined, "saved-native-session"])(
 		"rejects unadvertised HTTP MCP before sending session data (%s)",
 		async (sessionId) => {
@@ -52,7 +120,7 @@ describe("ACP agent process", () => {
 				};
 				if (sessionId !== undefined) input.sessionId = sessionId;
 				await expect(client.run(input)).rejects.toThrow(
-					"does not support ACP HTTP MCP servers",
+					"does not advertise ACP HTTP MCP support",
 				);
 				const frames = await readFile(logPath, "utf8");
 				expect(frames).not.toMatch(
@@ -184,7 +252,7 @@ describe("ACP agent process", () => {
 		expect(await readFile(flushPath, "utf8")).toBe("native session saved");
 	});
 
-	it("selects the model before model-dependent settings and omits unadvertised values", async () => {
+	it("selects the model before model-dependent settings and rejects unsupported overrides", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-acp-config-"));
 		roots.push(root);
 		const logPath = join(root, "frames.ndjson");
@@ -205,19 +273,23 @@ describe("ACP agent process", () => {
 				message: "Use the selected model.",
 				configOptions: { effort: "max", model: "gpt-test" },
 			});
-			const second = await processClient.run({
-				cwd: root,
-				sessionId: first.sessionId,
-				message: "Keep supported settings.",
-				configOptions: { effort: "unsupported" },
-			});
-			expect(second.text).toBe("Echo: Keep supported settings.");
+			await expect(
+				processClient.run({
+					cwd: root,
+					sessionId: first.sessionId,
+					message: "Keep supported settings.",
+					configOptions: { effort: "unsupported" },
+				}),
+			).rejects.toThrow("Unsupported native setting");
 			await processClient.run({
 				cwd: root,
 				sessionId: first.sessionId,
 				message: "Respect the native model change.",
-				configOptions: { effort: "max" },
+				configOptions: { effort: "high" },
 			});
+			expect(await readFile(logPath, "utf8")).not.toContain(
+				"Keep supported settings.",
+			);
 			const frames = (await readFile(logPath, "utf8"))
 				.trim()
 				.split("\n")
@@ -229,6 +301,7 @@ describe("ACP agent process", () => {
 			).toEqual([
 				["model", "gpt-test"],
 				["effort", "max"],
+				["effort", "high"],
 			]);
 		} finally {
 			await processClient.close();

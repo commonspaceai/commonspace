@@ -56,6 +56,12 @@
 			}
 		}
 	},
+	"overrides": [
+		{
+			"includes": ["packages/shared/src/contracts.ts"],
+			"linter": { "rules": { "suspicious": { "noConstEnum": "off" } } }
+		}
+	],
 	"javascript": {
 		"formatter": {
 			"quoteStyle": "double"

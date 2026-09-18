@@ -2,7 +2,10 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COMMONSPACE_STATE_VERSION } from "@commonspace/shared";
+import {
+	COMMONSPACE_STATE_VERSION,
+	CommonspaceReasoning,
+} from "@commonspace/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { CommonspaceHostService } from "../server/src/service.ts";
 
@@ -39,7 +42,7 @@ async function stateRoot(messageCount: number): Promise<string> {
 			revision: 1,
 			defaults: {
 				model: null,
-				reasoning: "max",
+				reasoning: CommonspaceReasoning.Max,
 				maxAgentsPerTurn: 4,
 				memoryThreads: 12,
 			},

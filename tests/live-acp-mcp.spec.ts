@@ -34,14 +34,16 @@ describe
 				roots.push(root);
 				const workspace = join(root, "workspace");
 				await mkdir(workspace);
-				const running = await startCommonspaceServer({
+				const config: Parameters<typeof startCommonspaceServer>[0] = {
 					root,
-					codexPath: process.env.COMMONSPACE_CODEX_PATH ?? "codex",
 					claudeCodePath: process.env.COMMONSPACE_CLAUDE_CODE_PATH ?? "claude",
 					port: 0,
 					runBudgetSeconds: 120,
 					logger: { info: () => undefined, warn: () => undefined },
-				});
+				};
+				if (process.env.COMMONSPACE_CODEX_PATH !== undefined)
+					config.codexPath = process.env.COMMONSPACE_CODEX_PATH;
+				const running = await startCommonspaceServer(config);
 				servers.push(running);
 				const agent = await addTestHarness(running.service, adapter);
 				const project = mustExist(

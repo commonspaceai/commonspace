@@ -1,6 +1,7 @@
 import {
 	COMMONSPACE_STATE_VERSION,
 	type CommonspaceLiveAgentActivity,
+	CommonspaceReasoning,
 	type CommonspaceState,
 	deriveCommonspaceInboxItems,
 	deriveCommonspaceSessions,
@@ -18,7 +19,7 @@ function inboxState(): CommonspaceState {
 		mutedSessionIds: [],
 		defaults: {
 			model: null,
-			reasoning: "max",
+			reasoning: CommonspaceReasoning.Max,
 			maxAgentsPerTurn: 4,
 			memoryThreads: 12,
 		},

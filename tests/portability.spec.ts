@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CommonspaceReasoning } from "@commonspace/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { createCommonspaceApp } from "../server/src/app.ts";
 import {
@@ -220,7 +221,7 @@ describe.each(archiveShapes)("workspace portability (%s)", (shape) => {
 		await source.mutate({
 			action: "set-defaults",
 			model: "workspace-model",
-			reasoning: "high",
+			reasoning: CommonspaceReasoning.High,
 		});
 		await source.mutate({
 			action: "create-channel",
@@ -270,7 +271,10 @@ describe.each(archiveShapes)("workspace portability (%s)", (shape) => {
 					settings:
 						shape === "legacy defaults"
 							? { model: null, reasoning: null }
-							: { model: "legacy-channel-model", reasoning: "low" },
+							: {
+									model: "legacy-channel-model",
+									reasoning: CommonspaceReasoning.Low,
+								},
 				}),
 			);
 		}
@@ -319,7 +323,7 @@ describe.each(archiveShapes)("workspace portability (%s)", (shape) => {
 			importWorkspace.call(target, malformed, mappings),
 		).rejects.toThrow("workspace archive failed structural validation");
 		for (const settings of [
-			{ model: 42, reasoning: "low" },
+			{ model: 42, reasoning: CommonspaceReasoning.Low },
 			{ model: null, reasoning: "invalid" },
 			{ model: null, reasoning: null, extra: "unexpected" },
 		]) {
@@ -339,7 +343,7 @@ describe.each(archiveShapes)("workspace portability (%s)", (shape) => {
 		expect(importedNotificationCount).toBe(0);
 		expect(target.snapshot().defaults).toMatchObject({
 			model: "workspace-model",
-			reasoning: "high",
+			reasoning: CommonspaceReasoning.High,
 		});
 		expect(target.snapshot().channels[0]).toMatchObject({
 			name: "portable-room",

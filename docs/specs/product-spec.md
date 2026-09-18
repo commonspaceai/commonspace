@@ -86,7 +86,7 @@ A user can open Commonspace, talk naturally in a Channel or DM, and trust that:
 7. **Harness capabilities are authoritative.** Runtime controls come from ACP. Read-only capability browsing may also use native inventory commands or native configuration metadata, with the source and scope visible. Configured capabilities are not proof of availability in a particular session.
 8. **Parallel by default.** Different native sessions may run concurrently. Only work targeting the same native session is serialized.
 9. **Local authority.** Commonspace stores workspace data and native-session references locally. Connected runtimes control their own model-service traffic and credentials. Commonspace inference may also use an explicitly configured remote endpoint.
-10. **Outcomes are honest.** Commonspace must not hide routing failures, rewrite delivered history, invent permissions, or imply that an interrupted run completed.
+10. **Show actual outcomes.** Display routing failures, preserve delivered history, reflect granted permissions, and distinguish interrupted runs from completed runs.
 
 ## 4. Conceptual model
 
@@ -289,13 +289,13 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | CON-08 | Current | Run different native sessions concurrently and serialize only the same session. | A slow Agent does not block unrelated Agents or Threads. |
 | CON-09 | Current | Bound pathological Agent-to-Agent cycles. | One handoff is accepted per active turn; self/non-member targets are rejected; the visible workspace Agent limit and repeated directed-edge checks stop cycles with a visible outcome. |
 | CON-10 | Current | Preserve queued follow-ups while a native session is busy. | The user can inspect, reorder, remove, steer where supported, or stop-and-send queued input. A bounded tray shows delivery status and expandable message previews; compact icon actions have accessible names and tooltips in both DMs and Threads. Queue changes preserve keyboard focus, returning to the composer after the final removal. Unsupported delivery controls are absent. |
-| CON-11 | Current | Apply one workspace model and reasoning configuration to every conversation. | Channels do not expose, persist, or apply per-Channel model or reasoning overrides. |
+| CON-11 | Current | Apply one workspace model and reasoning configuration to every conversation. | Channels do not expose, persist, or apply per-Channel model or reasoning overrides. Native-session settings are the default; explicit unsupported overrides fail before the prompt is sent. Discovery metadata does not force a model override. |
 
 ### 6.5 Commonspace inference, routing, and correction
 
 | ID | Target | Requirement | Acceptance condition |
 | --- | --- | --- | --- |
-| INF-01 | Current | Configure a text provider for compaction, with optional Jev routing judgments in the same Workspace settings. | Jev chooses participants, mode, order, and Project relevance in one request; code validates the choices and dispatches the original user message without an assignment-writing call. Disabling Jev restores text-provider selection using the same metadata-only delivery contract. |
+| INF-01 | Current | Configure a text provider for compaction, with optional Jev routing judgments in the same Workspace settings. | Jev chooses participants, mode, order, and Project relevance in one request; code validates the choices and dispatches the original user message without an assignment-writing call. Disabling Jev retains its key and model and restores text-provider selection using the same metadata-only delivery contract. Missing or invalid saved configuration cannot silently select another provider. Inference and run defaults save independently; saved-field validation never claims provider connectivity or model access was verified. |
 | INF-02 | Current | Route every unaddressed Channel message through inference. | There is no deterministic/no-inference fallback that silently guesses an Agent. |
 | INF-03 | Current | Treat explicit Agent mentions as authoritative. | Inference may select delivery mode and Project scopes for mentioned Agents but cannot substitute unmentioned Agents or rewrite the request. |
 | INF-04 | Current | Select the smallest useful Agent set and delivery mode. | One Agent is preferred when sufficient; independent responsibilities use parallel assignments; explicit peer-conversation intent uses an ordered relay with at least two speakers. |

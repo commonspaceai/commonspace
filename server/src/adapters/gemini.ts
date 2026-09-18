@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { CommonspaceReasoning } from "@commonspace/shared";
 import { unavailableGroup } from "./capability-inventory.js";
 import {
 	inspectMcpMetadata,
@@ -107,7 +108,11 @@ export function createGeminiAdapter(
 				},
 			};
 		},
-		sessionSettings({ fullAccess, model }) {
+		sessionSettings({ fullAccess, model, reasoning }) {
+			if (reasoning !== undefined && reasoning !== CommonspaceReasoning.Native)
+				throw new Error(
+					"gemini does not expose a Commonspace reasoning override. Select Use native session settings in Workspace reasoning.",
+				);
 			const settings: ReturnType<NativeAgentAdapter["sessionSettings"]> = {
 				modeId: fullAccess ? "yolo" : "default",
 			};

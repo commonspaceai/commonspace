@@ -2,17 +2,36 @@ import type { AgentAdapterKind } from "./agent-adapters.js";
 
 export type { AgentAdapterKind } from "./agent-adapters.js";
 
-export const COMMONSPACE_STATE_VERSION = 30 as const;
+export const COMMONSPACE_STATE_VERSION = 31 as const;
 export const COMMONSPACE_EXPORT_VERSION = 1 as const;
 
-export type CommonspaceReasoning =
-	| "none"
-	| "minimal"
-	| "low"
-	| "medium"
-	| "high"
-	| "xhigh"
-	| "max";
+export const enum CommonspaceReasoning {
+	Native = "native",
+	None = "none",
+	Minimal = "minimal",
+	Low = "low",
+	Medium = "medium",
+	High = "high",
+	Xhigh = "xhigh",
+	Max = "max",
+}
+
+export const COMMONSPACE_REASONING_VALUES = [
+	CommonspaceReasoning.Native,
+	CommonspaceReasoning.None,
+	CommonspaceReasoning.Minimal,
+	CommonspaceReasoning.Low,
+	CommonspaceReasoning.Medium,
+	CommonspaceReasoning.High,
+	CommonspaceReasoning.Xhigh,
+	CommonspaceReasoning.Max,
+] as const;
+
+export function isCommonspaceReasoning(
+	value: string,
+): value is CommonspaceReasoning {
+	return COMMONSPACE_REASONING_VALUES.some((reasoning) => reasoning === value);
+}
 
 export interface CommonspaceDefaults {
 	model: string | null;
@@ -21,18 +40,76 @@ export interface CommonspaceDefaults {
 	memoryThreads: number;
 }
 
-export type CommonspaceRoutingProvider = "harness" | "openai-compatible";
-
-/** Public, Commonspace-wide AI routing configuration. Credentials are never included. */
-export interface CommonspaceRoutingConfiguration {
-	/** Optional Jev judgments; the text provider handles context compaction. */
-	jev?: { model: string; apiKeyConfigured: boolean };
-	provider: CommonspaceRoutingProvider;
-	model: string;
-	harnessAgentId: string | null;
-	baseUrl: string;
-	apiKeyConfigured: boolean;
+export const enum CommonspaceRoutingProvider {
+	Unconfigured = "unconfigured",
+	Harness = "harness",
+	OpenAiCompatible = "openai-compatible",
 }
+export type ConfiguredRoutingProvider = Exclude<
+	CommonspaceRoutingProvider,
+	CommonspaceRoutingProvider.Unconfigured
+>;
+
+export const enum CredentialSource {
+	None = "none",
+	Saved = "saved",
+	Environment = "environment",
+}
+export const enum RoutingConfigurationIssue {
+	Missing = "missing",
+	Invalid = "invalid",
+}
+interface MissingCredential {
+	apiKeyConfigured: false;
+	apiKeySource: CredentialSource.None;
+}
+interface ConfiguredCredential {
+	apiKeyConfigured: true;
+	apiKeySource: CredentialSource.Saved | CredentialSource.Environment;
+}
+export type CommonspaceCredentialStatus =
+	| MissingCredential
+	| ConfiguredCredential;
+
+interface JevSettings {
+	enabled: boolean;
+	model: string;
+}
+interface JevWithoutCredential extends JevSettings, MissingCredential {}
+interface JevWithCredential extends JevSettings, ConfiguredCredential {}
+export type CommonspaceJevConfiguration =
+	| JevWithoutCredential
+	| JevWithCredential;
+
+interface RoutingJudgments {
+	jev?: CommonspaceJevConfiguration;
+}
+export interface UnconfiguredRouting {
+	provider: CommonspaceRoutingProvider.Unconfigured;
+	reason: RoutingConfigurationIssue;
+	message: string;
+}
+export interface HarnessRoutingConfiguration extends RoutingJudgments {
+	provider: CommonspaceRoutingProvider.Harness;
+	harnessAgentId: string;
+}
+interface ApiRoutingSettings extends RoutingJudgments {
+	provider: CommonspaceRoutingProvider.OpenAiCompatible;
+	model: string;
+	baseUrl: string;
+}
+interface ApiRoutingWithoutCredential
+	extends ApiRoutingSettings,
+		MissingCredential {}
+interface ApiRoutingWithCredential
+	extends ApiRoutingSettings,
+		ConfiguredCredential {}
+/** Each provider exposes only its own settings. Credentials never cross this boundary. */
+export type CommonspaceRoutingConfiguration =
+	| UnconfiguredRouting
+	| HarnessRoutingConfiguration
+	| ApiRoutingWithoutCredential
+	| ApiRoutingWithCredential;
 
 export interface CommonspaceDiagnostics {
 	service: {
@@ -43,7 +120,7 @@ export interface CommonspaceDiagnostics {
 	};
 	inference: {
 		provider: CommonspaceRoutingProvider;
-		location: "local" | "remote";
+		location: "local" | "remote" | "runtime-managed" | "none";
 		configured: boolean;
 		sends: string[];
 	};
@@ -51,7 +128,7 @@ export interface CommonspaceDiagnostics {
 		adapter: AgentAdapterKind;
 		installed: boolean;
 		rostered: boolean;
-		runReadiness: "ready" | "unknown" | "attention";
+		recordedRunStatus: "has-replies" | "no-recorded-runs" | "has-failures";
 		recovery: string;
 	}>;
 }
@@ -134,27 +211,30 @@ export interface ApplyRetentionRequest {
 	expectedRevision: number;
 }
 
-export type UpdateRoutingConfigurationRequest = (
-	| { provider: "harness"; harnessAgentId: string }
-	| {
-			provider: "openai-compatible";
-			model: string;
-			baseUrl?: string | undefined;
-			/** Omit to preserve the saved key, provide a value to replace it, or null to clear it. */
-			apiKey?: string | null | undefined;
-	  }
-) & {
-	/** Omit to preserve, null to disable; an omitted key preserves the Jev credential. */
-	jev?:
-		| { model: string; apiKey?: string | null | undefined }
-		| null
-		| undefined;
-};
-
-export interface UpdateWorkspaceSettingsRequest {
-	routing: UpdateRoutingConfigurationRequest;
-	defaults: CommonspaceDefaults;
+export interface UpdateJevConfigurationRequest {
+	model: string;
+	/** Omit to preserve the saved key, provide a value to replace it, or null to clear it. */
+	apiKey?: string | null | undefined;
 }
+interface RoutingJudgmentUpdate {
+	/** Omit to preserve, null to disable; an omitted key preserves the Jev credential. */
+	jev?: UpdateJevConfigurationRequest | null | undefined;
+}
+export interface UpdateHarnessRoutingRequest extends RoutingJudgmentUpdate {
+	provider: CommonspaceRoutingProvider.Harness;
+	harnessAgentId: string;
+}
+export interface UpdateApiRoutingRequest extends RoutingJudgmentUpdate {
+	provider: CommonspaceRoutingProvider.OpenAiCompatible;
+	model: string;
+	/** Omission selects the standard OpenAI API endpoint. */
+	baseUrl?: string | undefined;
+	/** Omit to preserve the saved key, provide a value to replace it, or null to clear it. */
+	apiKey?: string | null | undefined;
+}
+export type UpdateRoutingConfigurationRequest =
+	| UpdateHarnessRoutingRequest
+	| UpdateApiRoutingRequest;
 
 export interface CommonspaceRoutingAssignment {
 	id: string;
@@ -201,6 +281,8 @@ export interface CommonspaceAgentProfile {
 	model: string | null;
 	/** Runs started by Commonspace bypass native approval prompts for this agent. */
 	fullAccess?: boolean;
+	/** Effective permission policy for a rostered agent; server overrides cannot be changed here. */
+	permissionPolicy?: { source: "server" | "agent"; fullAccess: boolean };
 	status: "running" | "stopped" | "unknown";
 	description?: string;
 }

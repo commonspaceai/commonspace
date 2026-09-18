@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { CommonspaceReasoning } from "@commonspace/shared";
 import {
 	inspectCommandCapabilities,
 	unavailableGroup,
@@ -105,7 +106,8 @@ export function createOpenCodeAdapter(
 		sessionSettings({ model, reasoning }) {
 			const configOptions: Record<string, string> = {};
 			if (model !== undefined) configOptions.model = model;
-			if (reasoning !== undefined) configOptions.effort = reasoning;
+			if (reasoning !== undefined && reasoning !== CommonspaceReasoning.Native)
+				configOptions.effort = reasoning;
 			return { configOptions };
 		},
 	};

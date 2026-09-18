@@ -20,7 +20,31 @@ async function record(frame) {
 	if (logPath) await appendFile(logPath, `${JSON.stringify(frame)}\n`);
 }
 
+const configValues = new Map();
 function sessionSettings() {
+	const settings = advertisedSessionSettings();
+	if (settings.modes === undefined)
+		settings.modes = {
+			currentModeId: "default",
+			availableModes: [
+				"default",
+				"agent",
+				"agent-full-access",
+				"accept_edits",
+				"dont_ask",
+				"bypassPermissions",
+				"yolo",
+			].map((id) => ({ id, name: id })),
+		};
+	if (settings.configOptions !== undefined)
+		settings.configOptions = settings.configOptions.map((option) =>
+			configValues.has(option.id)
+				? { ...option, currentValue: configValues.get(option.id) }
+				: option,
+		);
+	return settings;
+}
+function advertisedSessionSettings() {
 	if (process.env.FAKE_ACP_DYNAMIC_SETTINGS === "1") {
 		return {
 			configOptions: [
@@ -254,6 +278,7 @@ for await (const line of lines) {
 	}
 
 	if (frame.method === "session/set_config_option") {
+		configValues.set(frame.params.configId, frame.params.value);
 		if (process.env.FAKE_ACP_DYNAMIC_SETTINGS === "1") {
 			const option = sessionSettings().configOptions.find(
 				(candidate) => candidate.id === frame.params.configId,
@@ -284,6 +309,19 @@ for await (const line of lines) {
 	}
 
 	if (frame.method === "session/prompt") {
+		if (process.env.FAKE_ACP_NATIVE_MODE_UPDATE === "1") {
+			await writeFrame({
+				jsonrpc: "2.0",
+				method: "session/update",
+				params: {
+					sessionId: frame.params.sessionId,
+					update: {
+						sessionUpdate: "current_mode_update",
+						currentModeId: "agent-full-access",
+					},
+				},
+			});
+		}
 		if (process.env.FAKE_ACP_NATIVE_MODEL_UPDATE === "1") {
 			selectedModel = "default";
 			await writeFrame({

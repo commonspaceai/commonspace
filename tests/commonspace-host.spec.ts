@@ -13,6 +13,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	COMMONSPACE_STATE_VERSION,
+	CommonspaceReasoning,
+	CommonspaceRoutingProvider,
+	CredentialSource,
 	deriveCommonspaceInboxItems,
 	type UpdateRoutingConfigurationRequest,
 } from "@commonspace/shared";
@@ -156,7 +159,7 @@ describe("Commonspace host authority", () => {
 			inboxReadMessageIds: [],
 			defaults: {
 				model: null,
-				reasoning: "max",
+				reasoning: CommonspaceReasoning.Max,
 				maxAgentsPerTurn: 4,
 				memoryThreads: 12,
 			},
@@ -192,7 +195,7 @@ describe("Commonspace host authority", () => {
 			inboxReadMessageIds: [],
 			defaults: {
 				model: null,
-				reasoning: "max",
+				reasoning: CommonspaceReasoning.Max,
 				maxAgentsPerTurn: 4,
 				memoryThreads: 12,
 			},
@@ -435,7 +438,7 @@ describe("Commonspace host authority", () => {
 				revision: 1,
 				defaults: {
 					model: null,
-					reasoning: "max",
+					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},
@@ -530,7 +533,7 @@ describe("Commonspace host authority", () => {
 			revision: 0,
 			defaults: {
 				model: null,
-				reasoning: "max",
+				reasoning: CommonspaceReasoning.Native,
 				maxAgentsPerTurn: 8,
 				memoryThreads: 1,
 			},
@@ -550,7 +553,7 @@ describe("Commonspace host authority", () => {
 		);
 		expect(persisted).toMatchObject({
 			version: COMMONSPACE_STATE_VERSION,
-			defaults: { reasoning: "max" },
+			defaults: { reasoning: CommonspaceReasoning.Native },
 		});
 	});
 
@@ -566,7 +569,7 @@ describe("Commonspace host authority", () => {
 				revision: 5,
 				defaults: {
 					model: null,
-					reasoning: "max",
+					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},
@@ -652,7 +655,7 @@ describe("Commonspace host authority", () => {
 				revision: 2,
 				defaults: {
 					model: null,
-					reasoning: "max",
+					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},
@@ -736,7 +739,7 @@ describe("Commonspace host authority", () => {
 				revision: 4,
 				defaults: {
 					model: null,
-					reasoning: "max",
+					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},
@@ -925,6 +928,11 @@ describe("Commonspace host authority", () => {
 			{ discoverAgents: discoverTestHarnesses, runAgent },
 		);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addTestHarness(service, "codex", "Review Bot");
 		const project = mustExist(
 			(
@@ -990,6 +998,11 @@ describe("Commonspace host authority", () => {
 			},
 		);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addTestHarness(service, "hermes", "Frontend");
 		const firstProject = mustExist(
 			(
@@ -1959,6 +1972,11 @@ describe("Commonspace host authority", () => {
 			},
 		);
 		await first.initialize();
+		await first.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addDiscoveredAgents(first, "backend", "frontend");
 		const channel = mustExist(
 			(
@@ -2050,6 +2068,11 @@ describe("Commonspace host authority", () => {
 			},
 		);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addDiscoveredAgents(service, "backend", "frontend", "security");
 		const projectRoot = join(root, "billing-api");
 		await mkdir(projectRoot);
@@ -2072,7 +2095,7 @@ describe("Commonspace host authority", () => {
 			).channels[0],
 		);
 		await service.updateRoutingConfiguration({
-			provider: "harness",
+			provider: CommonspaceRoutingProvider.Harness,
 			harnessAgentId: "backend",
 		});
 
@@ -2310,17 +2333,17 @@ describe("Commonspace host authority", () => {
 
 		await expect(
 			service.updateRoutingConfiguration({
-				provider: "openai-compatible",
+				provider: CommonspaceRoutingProvider.OpenAiCompatible,
 				model: "gpt-4.1-mini",
 				baseUrl: "https://api.openai.com/v1/",
 				apiKey: "private-router-key",
 			}),
 		).resolves.toEqual({
-			provider: "openai-compatible",
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
 			model: "gpt-4.1-mini",
-			harnessAgentId: null,
 			baseUrl: "https://api.openai.com/v1",
 			apiKeyConfigured: true,
+			apiKeySource: CredentialSource.Saved,
 		});
 		expect(JSON.stringify(await service.bootstrap())).not.toContain(
 			"private-router-key",
@@ -2335,9 +2358,10 @@ describe("Commonspace host authority", () => {
 		);
 		await restarted.initialize();
 		expect(restarted.routing()).toMatchObject({
-			provider: "openai-compatible",
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
 			model: "gpt-4.1-mini",
 			apiKeyConfigured: true,
+			apiKeySource: CredentialSource.Saved,
 		});
 	});
 
@@ -2351,7 +2375,7 @@ describe("Commonspace host authority", () => {
 		);
 		await service.initialize();
 		await service.updateRoutingConfiguration({
-			provider: "openai-compatible",
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
 			model: "router-a",
 			baseUrl: "https://router-a.example/v1",
 			apiKey: "router-a-key",
@@ -2359,7 +2383,7 @@ describe("Commonspace host authority", () => {
 
 		await expect(
 			service.updateRoutingConfiguration({
-				provider: "openai-compatible",
+				provider: CommonspaceRoutingProvider.OpenAiCompatible,
 				model: "router-b",
 				baseUrl: "https://router-b.example/v1",
 			}),
@@ -2383,12 +2407,12 @@ describe("Commonspace host authority", () => {
 		await service.initialize();
 
 		await service.updateRoutingConfiguration({
-			provider: "openai-compatible",
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
 			model: "local-router",
 			baseUrl: "http://127.0.0.1:11434/v1",
 		});
 
-		expect(service.routing().apiKeyConfigured).toBe(false);
+		expect(service.routing()).toMatchObject({ apiKeyConfigured: false });
 	});
 
 	it("retries provider-reported truncation before dispatching once", async () => {
@@ -2451,7 +2475,7 @@ describe("Commonspace host authority", () => {
 			).channels[0],
 		);
 		await service.updateRoutingConfiguration({
-			provider: "openai-compatible",
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
 			model: "local-router",
 			baseUrl: "http://127.0.0.1:11434/v1",
 		});
@@ -2524,7 +2548,7 @@ describe("Commonspace host authority", () => {
 			).channels[0],
 		);
 		await service.updateRoutingConfiguration({
-			provider: "harness",
+			provider: CommonspaceRoutingProvider.Harness,
 			harnessAgentId: "backend",
 		});
 
@@ -2536,7 +2560,6 @@ describe("Commonspace host authority", () => {
 
 		expect(runAgent.mock.calls[0]?.[0]).toMatchObject({
 			agent: expect.objectContaining({ id: "backend" }),
-			reasoning: "minimal",
 		});
 		expect(runAgent.mock.calls[0]?.[0].sessionName).toMatch(
 			new RegExp(`^Commonspace Routing: ${channel.id}: `, "u"),
@@ -2610,7 +2633,7 @@ describe("Commonspace host authority", () => {
 			).channels[0],
 		);
 		await service.updateRoutingConfiguration({
-			provider: "harness",
+			provider: CommonspaceRoutingProvider.Harness,
 			harnessAgentId: "backend",
 		});
 
@@ -2671,7 +2694,7 @@ describe("Commonspace host authority", () => {
 			).channels[0],
 		);
 		await service.updateRoutingConfiguration({
-			provider: "harness",
+			provider: CommonspaceRoutingProvider.Harness,
 			harnessAgentId: "hermes",
 		});
 		let restarted: CommonspaceHostService | undefined;
@@ -2805,7 +2828,7 @@ describe("Commonspace host authority", () => {
 			).channels[0],
 		);
 		await service.updateRoutingConfiguration({
-			provider: "harness",
+			provider: CommonspaceRoutingProvider.Harness,
 			harnessAgentId: "hermes",
 		});
 
@@ -2871,7 +2894,7 @@ describe("Commonspace host authority", () => {
 			).channels[0],
 		);
 		await service.updateRoutingConfiguration({
-			provider: "harness",
+			provider: CommonspaceRoutingProvider.Harness,
 			harnessAgentId: "hermes",
 		});
 
@@ -2963,7 +2986,7 @@ describe("Commonspace host authority", () => {
 			).channels[0],
 		);
 		await service.updateRoutingConfiguration({
-			provider: "harness",
+			provider: CommonspaceRoutingProvider.Harness,
 			harnessAgentId: "backend",
 		});
 
@@ -3138,6 +3161,11 @@ describe("Commonspace host authority", () => {
 			},
 		);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addDiscoveredAgents(service, "frontend", "reviewer");
 		const channel = mustExist(
 			(
@@ -3250,6 +3278,11 @@ describe("Commonspace host authority", () => {
 			},
 		);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addDiscoveredAgents(service, ...agents.map((agent) => agent.id));
 		await service.mutate({ action: "set-defaults", maxAgentsPerTurn: 2 });
 		const general = mustExist(
@@ -3566,6 +3599,11 @@ describe("Commonspace host authority", () => {
 			},
 		);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addTestHarness(service, "hermes", "Frontend");
 
 		await expect(
@@ -3639,6 +3677,11 @@ describe("Commonspace host authority", () => {
 			},
 		);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addTestHarness(service, "hermes", "Frontend");
 		const project = mustExist(
 			(
@@ -3714,6 +3757,11 @@ describe("Commonspace host authority", () => {
 			},
 		);
 		await service.initialize();
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "synthetic-router",
+			baseUrl: "https://example.test/v1",
+		});
 		await addTestHarness(service, "hermes", "Frontend");
 		await addTestHarness(service, "codex", "Review Bot");
 
@@ -3725,6 +3773,7 @@ describe("Commonspace host authority", () => {
 				model: null,
 				status: "stopped",
 				description: "Installed Hermes harness.",
+				permissionPolicy: { source: "agent", fullAccess: false },
 			},
 			{
 				id: "codex",
@@ -3733,6 +3782,7 @@ describe("Commonspace host authority", () => {
 				model: null,
 				status: "stopped",
 				description: "Installed Codex harness.",
+				permissionPolicy: { source: "agent", fullAccess: false },
 			},
 		]);
 

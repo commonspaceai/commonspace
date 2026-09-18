@@ -75,14 +75,13 @@ describe.skipIf(!live).sequential("installed Commonspace ACP agents", () => {
 	it("starts and resumes Codex sessions", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-codex-"));
 		roots.push(root);
-		const service = new CommonspaceHostService(
-			{},
-			{
-				root,
-				codexPath: process.env.COMMONSPACE_CODEX_PATH ?? "codex",
-				runBudgetSeconds: 120,
-			},
-		);
+		const config: ConstructorParameters<typeof CommonspaceHostService>[1] = {
+			root,
+			runBudgetSeconds: 120,
+		};
+		if (process.env.COMMONSPACE_CODEX_PATH !== undefined)
+			config.codexPath = process.env.COMMONSPACE_CODEX_PATH;
+		const service = new CommonspaceHostService({}, config);
 		try {
 			await service.initialize();
 			const agent = await addTestHarness(service, "codex", "Live Codex");
