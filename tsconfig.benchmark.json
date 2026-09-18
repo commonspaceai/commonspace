@@ -1,0 +1,12 @@
+{
+	"extends": "./tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"allowImportingTsExtensions": true,
+		"types": ["node"]
+	},
+	"include": [
+		"scripts/benchmark-workspace*.ts",
+		"tests/benchmark-workspace*.spec.ts"
+	]
+}
