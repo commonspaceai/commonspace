@@ -30,7 +30,7 @@ const meta = {
 	parameters: { layout: "fullscreen" },
 	decorators: [
 		(Story) => (
-			<div className="h-screen min-h-[720px] w-full">
+			<div className="h-screen min-h-[720px] w-[260px]">
 				<Story />
 			</div>
 		),
@@ -590,5 +590,63 @@ export const WorkspaceSettingsOperations: Story = {
 export const CreateChannelRequest: Story = {
 	args: {
 		createRequest: { kind: "channel", token: 1 },
+	},
+};
+
+export const CompactCollections: Story = {
+	args: {
+		store: createStoryStore(
+			createStoryBootstrap({
+				agents: [codexAgent],
+				state: {
+					...storyBootstrap.state,
+					projects: [primaryProject],
+					channels: [buildChannel],
+					agents: storyBootstrap.state.agents.filter(
+						(agent) => agent.id === codexAgent.id,
+					),
+				},
+			}),
+		),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("button", { name: "Channels" }),
+		).toBeVisible();
+		await expect(
+			canvas.queryByText("Pinned", { exact: true }),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const ConversationDeletion: Story = {
+	args: { store: createStoryStore(storyBootstrap) },
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByRole("button", {
+				name: "Commonspace settings",
+			}),
+		);
+		const page = within(document.body);
+		await expect(
+			page.queryByRole("combobox", { name: "Conversation" }),
+		).not.toBeInTheDocument();
+		await userEvent.click(
+			page.getByRole("button", { name: "Choose conversation…" }),
+		);
+		const dialog = within(
+			page.getByRole("dialog", { name: "Delete conversation history" }),
+		);
+		await expect(
+			dialog.getByRole("button", { name: "Review deletion" }),
+		).toBeDisabled();
+		await userEvent.selectOptions(
+			dialog.getByRole("combobox", { name: "Conversation" }),
+			`channel:${buildChannel.id}`,
+		);
+		await expect(
+			dialog.getByRole("button", { name: "Review deletion" }),
+		).toBeEnabled();
 	},
 };
