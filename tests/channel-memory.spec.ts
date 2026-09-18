@@ -6,7 +6,7 @@ import {
 } from "../packages/shared/src/contracts.ts";
 import { projectChannelMemory } from "../server/src/memory.ts";
 
-it("projects completed thread context into inspectable channel memory", () => {
+it("tracks source coverage without pretending transcript snippets are a semantic brief", () => {
 	const state: CommonspaceState = {
 		version: COMMONSPACE_STATE_VERSION,
 		revision: 4,
@@ -76,10 +76,10 @@ it("projects completed thread context into inspectable channel memory", () => {
 		},
 	};
 	const memory = projectChannelMemory(state, "general");
-	expect(memory.summary).toContain("Checkout fails after payment");
-	expect(memory.summary).toContain("Frontend: Decision: reset checkout state");
-	expect(memory.decisions).toEqual(["reset checkout state after success."]);
-	expect(memory.openQuestions).toContain("Is state reset?");
+	expect(memory.summary).toBe("");
+	expect(memory.decisions).toEqual([]);
+	expect(memory.openQuestions).toEqual([]);
+	expect(memory.status).toBe("stale");
 	expect(memory.threadIds).toEqual(["thread-1"]);
 });
 

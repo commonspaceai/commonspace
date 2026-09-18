@@ -42,14 +42,24 @@ test("pins from the Channel menu, keeps Thread pins separate, and restores reada
 	await page
 		.getByRole("menuitem", { name: "Pin message", exact: true })
 		.click();
+	await root
+		.getByRole("button", { name: /^More actions for message from/ })
+		.click();
 	await expect(
-		root.getByRole("button", { name: /^Unpin message from/ }),
-	).toHaveAttribute("aria-pressed", "true");
+		page.getByRole("menuitem", { name: "Unpin message", exact: true }),
+	).toBeVisible();
+	await page.keyboard.press("Escape");
 	await root.getByRole("button", { name: /\d+ repl/ }).click();
 	const thread = page.getByRole("log", { name: "Thread messages" });
+	await thread.locator("article").first().hover();
+	await thread
+		.getByRole("button", { name: /^More actions for message from/ })
+		.first()
+		.click();
 	await expect(
-		thread.getByRole("button", { name: /^Pin message from/ }).first(),
-	).toBeAttached();
+		page.getByRole("menuitem", { name: "Pin message", exact: true }),
+	).toBeVisible();
+	await page.keyboard.press("Escape");
 	const response = await page.request.get("/api/bootstrap", {
 		headers: { origin: new URL(page.url()).origin },
 	});
@@ -82,7 +92,7 @@ test("pins from the Channel menu, keeps Thread pins separate, and restores reada
 	await expect(settings.getByLabel("Channel instructions")).toBeHidden();
 	await expect(settings.getByLabel("Channel summary")).toBeHidden();
 	await settings
-		.getByText("Advanced context", { exact: true })
+		.getByRole("region", { name: "Context brief" })
 		.scrollIntoViewIfNeeded();
 	await page.screenshot({
 		path: "artifacts/channel-pins-light.png",
@@ -94,14 +104,17 @@ test("pins from the Channel menu, keeps Thread pins separate, and restores reada
 		animations: "disabled",
 	});
 	await page.evaluate(() => document.documentElement.classList.remove("dark"));
-	await settings.getByText("Advanced context", { exact: true }).click();
-	await expect(settings.getByLabel("Channel instructions")).toBeVisible();
-	await settings.getByText("Advanced context", { exact: true }).click();
+	await settings.getByRole("button", { name: "Edit context" }).click();
+	await expect(settings.getByLabel("Channel summary")).toBeVisible();
+	await settings.getByRole("button", { name: "Cancel edit" }).click();
 	await settings.getByRole("button", { name: /^Remove channel pin/ }).click();
 	await expect(settings.getByText(/No pins yet/)).toBeVisible();
 	await page.getByRole("button", { name: "Close channel settings" }).click();
 	await root.hover();
+	await root
+		.getByRole("button", { name: /^More actions for message from/ })
+		.click();
 	await expect(
-		root.getByRole("button", { name: /^Pin message from/ }),
-	).toHaveAttribute("aria-pressed", "false");
+		page.getByRole("menuitem", { name: "Pin message", exact: true }),
+	).toBeVisible();
 });

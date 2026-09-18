@@ -137,9 +137,9 @@ describe("routing state migration", () => {
 			capturedAt: "now",
 		});
 		expect(service.snapshot().threads[0]?.context.memory).toMatchObject({
-			summary: "Ralph: Fix the API.",
+			summary: "",
 			origin: "automatic",
-			status: "current",
+			status: "stale",
 			sourceMessageCount: 1,
 			compactedThroughMessageId: "root-1",
 		});

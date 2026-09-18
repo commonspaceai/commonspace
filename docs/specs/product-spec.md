@@ -197,9 +197,9 @@ A structured handoff that starts a planned relay participant includes the origin
 Compaction summarizes context so it fits within input limits. It does not delete the conversation transcript or alter the runtime's private memory.
 
 1. The user can inspect the Project, Channel, and Thread context available to an Agent.
-2. Channel context shows its summary, decisions, open questions, the source messages it covers, estimated token pressure, who wrote it, and its compaction state. Channel settings put readable pins first and keep optional channel guidance and memory editing under collapsed **Advanced context**, preserving existing saved context without requiring setup for ordinary conversation.
+2. Channel context shows its summary, decisions, open questions, the source messages it covers, estimated token pressure, who wrote it, and its compaction state. Channel settings show readable pins and a **Context brief** with current work, decisions, and unresolved questions. There is no per-Channel instruction configuration form. **Edit context** opens an explicit correction editor; saving membership never changes context ownership.
 3. A new Thread snapshots the current Channel context and then develops its own Thread context.
-4. Automatic compaction responds to estimated context/token pressure.
+4. Channel briefs refresh automatically after completed turns when a text provider is configured; Thread compaction responds to estimated context/token pressure.
 5. The user can trigger compaction manually and edit the stored summary, decisions, and questions.
 6. User-written context remains authoritative and is not silently overwritten by automatic projection.
 7. If new source messages make edited context incomplete, Commonspace marks it stale.
@@ -307,6 +307,8 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | INF-10 | Current | Fail visibly when inference is unavailable or invalid. | The message remains accepted and receives a retryable needs-attention state; Commonspace does not silently broadcast it. |
 | INF-11 | Current | Target effectively immediate routing. | The routing stage targets sub-second completion where the configured provider permits and reports separately from harness execution time. |
 
+Routing receives every eligible Agent's current display name, public harness identity, and available responsibility description. Conversational addressing can use a distinctive shortened name or a harness identity when it identifies one recipient; a shared harness name does not establish a default Agent. Native profile references, credentials, and session details are excluded.
+
 Routing retrieves bounded public conversation passages through a local, ephemeral BM25 index. Existing Thread follow-ups retrieve within that Thread; new roots can retrieve within their Channel. Channel instructions, Thread starting context and current notes, pins, prior ownership, and recent messages accompany retrieved evidence. Retrieval excludes native sessions, host files, and private traces. Jev uses a two-second request deadline with no automatic transport retry; uncertain or incompatible consumed judgments fail visibly. Initial Choice confidence and Noul thresholds are conservative policy defaults requiring domain evaluation, rather than a guarantee of correctness.
 
 ### 6.6 Shared context and compaction
@@ -318,11 +320,15 @@ Routing retrieves bounded public conversation passages through a local, ephemera
 | CTX-03 | Current | Snapshot Channel context when a Thread begins. | Later Channel changes do not silently rewrite the Thread's inherited starting context. |
 | CTX-04 | Current | Maintain Thread-specific context after the snapshot. | A Thread can compact its own history and still inspect newer Channel context separately. |
 | CTX-05 | Current | Include recent verbatim messages alongside compacted context within bounded reads. | Agents can distinguish source conversation from inferred summaries. |
-| CTX-06 | Current | Trigger automatic compaction primarily from context/token pressure. | A fixed message count alone is not the authoritative trigger. |
+| CTX-06 | Current | Refresh Channel briefs after completed turns and compact Thread context under token pressure. | Coalesced background inference keeps the Channel brief current without blocking delivery. Raw transcript snippets and question-mark extraction never masquerade as a semantic brief. |
 | CTX-07 | Current | Allow manual compaction and direct human editing. | A user can update the canonical summary, decisions, and questions without changing private harness memory. |
 | CTX-08 | Current | Preserve human-authored context. | Automatic projection marks human context stale when needed and never silently replaces it. |
 | CTX-09 | Current | Expose bounded context through scoped tools. | An Agent can read only the conversation and Project scope granted to its current native session. |
 | CTX-10 | Later | Accept Agent-suggested durable context. | No Agent response can silently promote itself into canonical memory. |
+
+Briefs preserve current goals, constraints, accepted decisions, verified progress, and remaining work. They omit greetings and generic capability lists, reconcile superseded decisions, and remove answered or rhetorical questions. Source coverage is tracked separately from semantic content; until inference succeeds, the brief is visibly pending or failed and original messages remain available. Human corrections remain authoritative until an explicit refresh reconciles them with newer conversation.
+
+Changing pinned evidence or the public Agent roster invalidates affected generated briefs, including results still being computed. Human corrections remain visible as stale, and immutable Thread starting snapshots remain unchanged. A failed automatic update retains the last valid brief and retries after the next completed turn.
 
 Automatic Channel and Thread context refresh runs as tracked background work, coalescing repeated refreshes for one Thread. It does not hold the conversation delivery queue while awaiting inference. Idle and shutdown account for these jobs; newer human edits remain authoritative and newer messages update source coverage. Native session resumption and native compaction remain harness-owned.
 

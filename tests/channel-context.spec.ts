@@ -93,6 +93,172 @@ async function fixture() {
 }
 
 describe("editable shared Channel context", () => {
+	it.each(["inference", "user"] as const)(
+		"invalidates sibling Thread %s context when its Channel-pinned source message is deleted",
+		async (origin) => {
+			const { service, channel } = await fixture();
+			const source = mustExist(service.snapshot().threads[0]);
+			await service.addPin({
+				scope: { kind: "channel", id: channel.id },
+				kind: "message",
+				messageId: source.rootMessageId,
+			});
+			vi.stubGlobal(
+				"fetch",
+				vi.fn(async () =>
+					inferenceResponse("A fact retained only from the pinned source."),
+				),
+			);
+			await service.send({
+				conversation: { kind: "channel", id: channel.id },
+				text: "@review-bot start another work item.",
+			});
+			await service.whenIdle();
+			const sibling = mustExist(
+				service.snapshot().threads.find((thread) => thread.id !== source.id),
+			);
+			await service.compactThreadContext(sibling.id);
+			if (origin === "user")
+				await service.updateThreadContext(sibling.id, {
+					summary: "Human correction.",
+				});
+			else
+				expect(
+					service.snapshot().threads.find((thread) => thread.id === sibling.id)
+						?.context.memory.summary,
+				).toContain("pinned source");
+			await service.deleteMessage(source.rootMessageId);
+			const updated = mustExist(
+				service.snapshot().threads.find((thread) => thread.id === sibling.id),
+			);
+			expect(updated.context.memory).toMatchObject(
+				origin === "user"
+					? { summary: "Human correction.", origin: "user", status: "stale" }
+					: { summary: "", origin: "automatic", status: "stale" },
+			);
+			expect(updated.context.channelSnapshot).toEqual(
+				sibling.context.channelSnapshot,
+			);
+		},
+	);
+
+	it("discards a compaction result when its pinned evidence is removed in flight", async () => {
+		const { service, channel } = await fixture();
+		const pin = await service.addPin({
+			scope: { kind: "channel", id: channel.id },
+			kind: "note",
+			note: "PIN_ONLY_DEPLOYMENT: deploy to Mercury.",
+		});
+		const completion = deferred<Response>();
+		const request = vi.fn(() => completion.promise);
+		vi.stubGlobal("fetch", request);
+		const compacting = service.compactChannelContext(channel.id);
+		await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+		await service.removePin(pin.id);
+		completion.resolve(
+			inferenceResponse("PIN_ONLY_DEPLOYMENT: deploy to Mercury."),
+		);
+		await compacting;
+		expect(service.snapshot().channels[0]?.memory.summary).not.toContain(
+			"Mercury",
+		);
+	});
+
+	it("invalidates inferred evidence on roster and pin changes while preserving human corrections", async () => {
+		const { service, channel } = await fixture();
+		const pin = await service.addPin({
+			scope: { kind: "channel", id: channel.id },
+			kind: "note",
+			note: "Deploy to Mercury.",
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				inferenceResponse("Deploy to Mercury with Review Bot."),
+			),
+		);
+		await service.compactChannelContext(channel.id);
+		await service.removePin(pin.id);
+		expect(service.snapshot().channels[0]?.memory).toMatchObject({
+			summary: "",
+			status: "stale",
+		});
+		await service.compactChannelContext(channel.id);
+		await service.mutate({
+			action: "set-channel-agents",
+			channelId: channel.id,
+			agentIds: [],
+		});
+		expect(service.snapshot().channels[0]?.memory.summary).toBe("");
+		await service.mutate({
+			action: "set-channel-memory",
+			channelId: channel.id,
+			summary: "Human correction.",
+			decisions: [],
+			openQuestions: [],
+		});
+		await service.addPin({
+			scope: { kind: "channel", id: channel.id },
+			kind: "note",
+			note: "New evidence.",
+		});
+		expect(service.snapshot().channels[0]?.memory).toMatchObject({
+			summary: "Human correction.",
+			origin: "user",
+			status: "stale",
+		});
+	});
+
+	it("retries a failed automatic brief on the next completed turn while retaining the last valid brief", async () => {
+		const request = vi
+			.fn()
+			.mockImplementationOnce(async () =>
+				inferenceResponse("Last valid brief."),
+			)
+			.mockRejectedValueOnce(new Error("Temporary inference failure"))
+			.mockImplementationOnce(async () =>
+				inferenceResponse("Recovered brief."),
+			);
+		vi.stubGlobal("fetch", request);
+		const { service, channel } = await fixture();
+		await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			text: "@review-bot second turn",
+		});
+		await service.whenIdle();
+		expect(service.snapshot().channels[0]?.memory).toMatchObject({
+			summary: "Last valid brief.",
+			origin: "inference",
+			status: "failed",
+		});
+		expect(request).toHaveBeenCalledTimes(2);
+		await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			text: "@review-bot third turn",
+		});
+		await service.whenIdle();
+		expect(service.snapshot().channels[0]?.memory).toMatchObject({
+			summary: "Recovered brief.",
+			origin: "inference",
+			status: "current",
+		});
+		expect(request).toHaveBeenCalledTimes(3);
+	});
+	it("builds a real Channel brief after an ordinary completed turn without waiting for token pressure", async () => {
+		const request = vi.fn(async () =>
+			inferenceResponse("The implementation is ready for review."),
+		);
+		vi.stubGlobal("fetch", request);
+		const { service } = await fixture();
+		expect(service.snapshot().channels[0]?.memory).toMatchObject({
+			summary: "The implementation is ready for review.",
+			origin: "inference",
+			status: "current",
+			sourceMessageCount: 2,
+			openQuestions: [],
+		});
+		expect(request).toHaveBeenCalledOnce();
+	});
 	it("keeps the Channel snapshot captured at Thread creation separate from newer context", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-thread-snapshot-"));
 		roots.push(root);
@@ -149,7 +315,7 @@ describe("editable shared Channel context", () => {
 			capturedAt: sent.thread?.createdAt,
 		});
 		expect(thread?.context.memory).toMatchObject({
-			status: "current",
+			status: "stale",
 			sourceMessageCount: 2,
 		});
 		await expect(service.readContext(mustExist(scope))).resolves.toMatchObject({
@@ -295,14 +461,15 @@ describe("editable shared Channel context", () => {
 				})
 			).channels[0],
 		);
+		await service.updateChannelContext(channel.id, {
+			summary: "Human Channel notes.",
+		});
 		const sent = await service.send({
 			conversation: { kind: "channel", id: channel.id },
 			text: `@review-bot first pass ${"a".repeat(15_000)}`,
 		});
 		await service.whenIdle();
-		await service.updateChannelContext(channel.id, {
-			summary: "Human Channel notes.",
-		});
+
 		const threadId = mustExist(sent.thread).id;
 		await service.send({
 			conversation: { kind: "channel", id: channel.id },
@@ -469,14 +636,14 @@ describe("editable shared Channel context", () => {
 				})
 			).channels[0],
 		);
+		await service.updateChannelContext(channel.id, {
+			summary: "Human-owned Channel context.",
+		});
 		const sent = await service.send({
 			conversation: { kind: "channel", id: channel.id },
 			text: `@review-bot first pass ${"a".repeat(15_000)}`,
 		});
 		await service.whenIdle();
-		await service.updateChannelContext(channel.id, {
-			summary: "Human-owned Channel context.",
-		});
 
 		await service.send({
 			conversation: { kind: "channel", id: channel.id },
@@ -604,7 +771,12 @@ describe("editable shared Channel context", () => {
 	it("marks a manual compaction stale when a message arrives during inference", async () => {
 		const { service, channel } = await fixture();
 		const completion = deferred<Response>();
-		const request = vi.fn(async () => completion.promise);
+		const request = vi
+			.fn()
+			.mockImplementationOnce(async () => completion.promise)
+			.mockImplementation(async () =>
+				inferenceResponse("Refreshed newer message."),
+			);
 		vi.stubGlobal("fetch", request);
 
 		const compacting = service.compactChannelContext(channel.id);
@@ -628,7 +800,10 @@ describe("editable shared Channel context", () => {
 			status: "stale",
 		});
 		expect(memory.sourceMessageCount).toBeGreaterThanOrEqual(3);
-		expect(service.snapshot().channels[0]?.memory.status).toBe("stale");
+		expect(service.snapshot().channels[0]?.memory).toMatchObject({
+			status: "current",
+			summary: "Refreshed newer message.",
+		});
 	});
 
 	it("refreshes edited context as soon as a newly accepted message starts routing", async () => {
@@ -728,15 +903,16 @@ describe("editable shared Channel context", () => {
 				})
 			).channels[0],
 		);
+		await service.updateChannelContext(channel.id, {
+			summary: "Canonical human summary.",
+			decisions: ["Keep human ownership."],
+		});
 		await service.send({
 			conversation: { kind: "channel", id: channel.id },
 			text: "@review-bot establish context.",
 		});
 		await service.whenIdle();
-		await service.updateChannelContext(channel.id, {
-			summary: "Canonical human summary.",
-			decisions: ["Keep human ownership."],
-		});
+
 		reply = `Large result ${"y".repeat(63_000)}`;
 
 		for (let index = 0; index < 2; index += 1) {
@@ -769,7 +945,7 @@ describe("editable shared Channel context", () => {
 			{ root },
 			{
 				discoverAgents: discoverTestHarnesses,
-				runAgent: async () => ({ text: `Large result ${"y".repeat(63_000)}` }),
+				runAgent: async () => ({ text: "Completed the requested change." }),
 			},
 		);
 		services.push(service);
@@ -792,20 +968,14 @@ describe("editable shared Channel context", () => {
 
 		await service.send({
 			conversation: { kind: "channel", id: channel.id },
-			text: `@review-bot establish pressure ${"s".repeat(49_000)}`,
-		});
-		await service.whenIdle();
-		expect(request).not.toHaveBeenCalled();
-		await service.send({
-			conversation: { kind: "channel", id: channel.id },
-			text: `@review-bot first compaction ${"a".repeat(49_000)}`,
+			text: "@review-bot first change",
 		});
 		await vi.waitFor(() => {
 			expect(request).toHaveBeenCalledOnce();
 		});
 		await service.send({
 			conversation: { kind: "channel", id: channel.id },
-			text: `@review-bot second compaction ${"b".repeat(49_000)}`,
+			text: "@review-bot second change",
 		});
 		await vi.waitFor(() => {
 			const replies =
@@ -814,7 +984,7 @@ describe("editable shared Channel context", () => {
 					.messages[`channel:${channel.id}`]?.filter(
 						(message) => message.authorType === "agent",
 					) ?? [];
-			expect(replies).toHaveLength(3);
+			expect(replies).toHaveLength(2);
 		});
 		await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -834,7 +1004,7 @@ describe("editable shared Channel context", () => {
 			summary: "Newest compacted context.",
 			origin: "inference",
 			status: "current",
-			sourceMessageCount: 6,
+			sourceMessageCount: 4,
 		});
 	});
 
@@ -901,6 +1071,6 @@ describe("editable shared Channel context", () => {
 			status: "current",
 			sourceMessageCount: 4,
 		});
-		expect(request).toHaveBeenCalledOnce();
+		expect(request).toHaveBeenCalledTimes(2);
 	});
 });

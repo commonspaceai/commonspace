@@ -94,6 +94,7 @@ import {
 	type NativeAgentAdapter,
 } from "./adapters/index.js";
 import {
+	type AiRouteInput,
 	buildRoutingPrompt,
 	completeWithOpenAICompatible,
 	InferenceResponseTruncatedError,
@@ -110,6 +111,7 @@ import type {
 } from "./commonspace-mcp.js";
 import {
 	buildChannelContextCompactionPrompt,
+	hasChangedCompactionEvidence,
 	hasInvalidatedContextSources,
 	inferredChannelMemory,
 	parseChannelContextCompaction,
@@ -350,20 +352,7 @@ export interface CommonspaceHostDependencies {
 	beforeAcceptSend?(prepared: PreparedSend): Promise<void>;
 }
 
-export interface CommonspaceRouteInput {
-	text: string;
-	context: string[];
-	routingMemory: string;
-	candidates: Array<
-		Pick<CommonspaceAgentProfile, "id" | "displayName" | "description"> & {
-			routingScore: number;
-			matchedTerms: string[];
-		}
-	>;
-	projects: Array<{ id: string; name: string }>;
-	inferProjects: boolean;
-	maxAgents: number;
-}
+export type CommonspaceRouteInput = AiRouteInput;
 
 export interface CommonspaceRouteResult {
 	assignments?: Array<Omit<CommonspaceRoutingAssignment, "id">>;
@@ -4008,6 +3997,41 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		);
 	}
 
+	private invalidateChangedContextEvidence(
+		previousState: CommonspaceState,
+	): void {
+		const channels = this.state.channels.map((channel) => {
+			if (!hasChangedCompactionEvidence(previousState, this.state, channel.id))
+				return channel;
+			const memory =
+				channel.memory.origin === "user"
+					? { ...channel.memory, status: "stale" as const }
+					: projectChannelMemory(
+							this.state,
+							channel.id,
+							this.state.defaults.memoryThreads,
+						);
+			return { ...channel, memory };
+		});
+		const threads = this.state.threads.map((thread) => {
+			if (
+				!hasChangedCompactionEvidence(
+					previousState,
+					this.state,
+					thread.channelId,
+					thread.id,
+				)
+			)
+				return thread;
+			const memory =
+				thread.context.memory.origin === "user"
+					? { ...thread.context.memory, status: "stale" as const }
+					: projectThreadMemory(this.state, thread.id);
+			return { ...thread, context: { ...thread.context, memory } };
+		});
+		this.state = { ...this.state, channels, threads };
+	}
+
 	async addPin(request: AddPinRequest): Promise<CommonspacePin> {
 		return this.withAdmission(async () => {
 			const scope = plainRecord(request.scope);
@@ -4079,11 +4103,13 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			} else {
 				throw new Error("unsupported pin kind");
 			}
+			const previousState = this.state;
 			this.state = {
 				...this.state,
 				revision: this.state.revision + 1,
 				pins: [...this.state.pins, pin],
 			};
+			this.invalidateChangedContextEvidence(previousState);
 			await this.persist();
 			this.broadcastRevision();
 			return structuredClone(pin);
@@ -4098,6 +4124,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			if (pin === undefined) throw new Error("unknown pin");
 			if (pin.removedAt !== null) return structuredClone(pin);
 			const removed = { ...pin, removedAt: now() };
+			const previousState = this.state;
 			this.state = {
 				...this.state,
 				revision: this.state.revision + 1,
@@ -4105,6 +4132,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					candidate.id === pinId ? removed : candidate,
 				),
 			};
+			this.invalidateChangedContextEvidence(previousState);
 			await this.persist();
 			this.broadcastRevision();
 			return structuredClone(removed);
@@ -4677,6 +4705,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				const normalized = await this.normalizeMutation(mutation);
 				this.state = applyMutation(this.state, normalized);
 			}
+			this.invalidateChangedContextEvidence(previousState);
 			try {
 				await this.persist();
 			} catch (error) {
@@ -4938,6 +4967,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					),
 				},
 			};
+			this.invalidateChangedContextEvidence(previousState);
 			if (deleted.threadId !== undefined) {
 				const thread = this.state.threads.find(
 					(candidate) => candidate.id === deleted.threadId,
@@ -5830,6 +5860,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				const candidate: CommonspaceRouteInput["candidates"][number] = {
 					id: agent.id,
 					displayName: agent.displayName,
+					adapter: agent.adapter,
 					routingScore: signal.score,
 					matchedTerms: signal.matchedTerms,
 				};
@@ -7311,11 +7342,25 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			);
 			let memory = mergeChannelMemoryProjection(channel.memory, projection);
 			if (
-				(projection.estimatedTokens ?? 0) >= SHARED_CONTEXT_PRESSURE_TOKENS &&
+				(projection.sourceMessageCount ?? 0) > 0 &&
+				this.routingConfiguration.provider !==
+					CommonspaceRoutingProvider.Unconfigured &&
 				memory.origin !== "user" &&
-				(memory.origin === "automatic" || memory.status === "stale")
+				(memory.origin === "automatic" ||
+					memory.status === "stale" ||
+					memory.status === "failed")
 			) {
 				try {
+					memory = { ...memory, status: "compacting" };
+					this.state = {
+						...this.state,
+						revision: this.state.revision + 1,
+						channels: this.state.channels.map((candidate) =>
+							candidate.id === channelId ? { ...candidate, memory } : candidate,
+						),
+					};
+					await this.persist();
+					this.broadcastRevision();
 					const inferred = await this.inferChannelMemory(channelId, projection);
 					const reconciled = this.reconcileInferredChannelMemory(
 						channelId,
@@ -7341,6 +7386,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 							this.state.defaults.memoryThreads,
 						),
 					);
+					if (memory.origin !== "user")
+						memory = { ...memory, status: "failed" };
 				}
 			}
 			if (!this.state.channels.some((candidate) => candidate.id === channelId))

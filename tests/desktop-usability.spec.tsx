@@ -57,29 +57,33 @@ function Theme() {
 	return null;
 }
 
-it("preserves edited Channel settings while untouched fields follow live updates", () => {
+it("preserves an open context correction across live updates", () => {
 	const bootstrap = structuredClone(storyBootstrap);
 	const channel = bootstrap.state.channels[0];
 	if (channel === undefined) throw new Error("Missing fixture channel");
-	const store = createStoryStore(bootstrap);
-	const props = { bootstrap, id: channel.id, store, onClose: vi.fn() };
+	const props = {
+		bootstrap,
+		id: channel.id,
+		store: createStoryStore(bootstrap),
+		onClose: vi.fn(),
+	};
 	const { rerender } = render(<ChannelSettingsPane {...props} />);
-	fireEvent.change(screen.getByLabelText("Channel instructions"), {
-		target: { value: "Keep my unsaved instructions" },
+	fireEvent.click(screen.getByRole("button", { name: "Edit context" }));
+	fireEvent.change(screen.getByLabelText("Channel summary"), {
+		target: { value: "Keep my correction" },
 	});
 	const refreshed = structuredClone(bootstrap);
 	const updated = refreshed.state.channels[0];
 	if (updated === undefined) throw new Error("Missing refreshed channel");
-	updated.instructions = "Instructions from the server";
 	updated.memory.summary = "Fresh shared context";
 	rerender(<ChannelSettingsPane {...props} bootstrap={refreshed} />);
-	expect(fieldValue("Channel instructions")).toBe(
-		"Keep my unsaved instructions",
-	);
+	expect(fieldValue("Channel summary")).toBe("Keep my correction");
+	fireEvent.click(screen.getByRole("button", { name: "Cancel edit" }));
+	fireEvent.click(screen.getByRole("button", { name: "Edit context" }));
 	expect(fieldValue("Channel summary")).toBe("Fresh shared context");
 });
 
-it("starts a fresh settings draft when the selected Channel changes", () => {
+it("discards a correction draft when the selected Channel changes", () => {
 	const bootstrap = structuredClone(storyBootstrap);
 	const channel = bootstrap.state.channels[0];
 	if (channel === undefined) throw new Error("Missing fixture channel");
@@ -87,17 +91,23 @@ it("starts a fresh settings draft when the selected Channel changes", () => {
 		...structuredClone(channel),
 		id: "channel-other-settings",
 		name: "other-settings",
-		instructions: "Other Channel instructions",
 	};
 	bootstrap.state.channels.push(other);
-	const store = createStoryStore(bootstrap);
-	const props = { bootstrap, id: channel.id, store, onClose: vi.fn() };
+	const props = {
+		bootstrap,
+		id: channel.id,
+		store: createStoryStore(bootstrap),
+		onClose: vi.fn(),
+	};
 	const { rerender } = render(<ChannelSettingsPane {...props} />);
-	fireEvent.change(screen.getByLabelText("Channel instructions"), {
-		target: { value: "Draft belonging to the first Channel" },
+	fireEvent.click(screen.getByRole("button", { name: "Edit context" }));
+	fireEvent.change(screen.getByLabelText("Channel summary"), {
+		target: { value: "First Channel draft" },
 	});
 	rerender(<ChannelSettingsPane {...props} id={other.id} />);
-	expect(fieldValue("Channel instructions")).toBe("Other Channel instructions");
+	expect(screen.queryByLabelText("Channel summary")).toBeNull();
+	fireEvent.click(screen.getByRole("button", { name: "Edit context" }));
+	expect(fieldValue("Channel summary")).not.toBe("First Channel draft");
 });
 
 it("preserves Agent profile edits across native discovery and live refresh", async () => {

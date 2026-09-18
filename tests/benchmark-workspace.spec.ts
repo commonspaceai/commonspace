@@ -21,7 +21,7 @@ afterEach(async () => {
 	);
 });
 
-it("restores a new Thread after capturing a clipped Channel projection", async () => {
+it("restores a new Thread after capturing legacy whitespace in saved context", async () => {
 	const root = await mkdtemp(join(tmpdir(), "commonspace-benchmark-context-"));
 	const targetRoot = await mkdtemp(
 		join(tmpdir(), "commonspace-benchmark-context-target-"),
@@ -32,6 +32,13 @@ it("restores a new Thread after capturing a clipped Channel projection", async (
 		530,
 		root,
 	);
+	const channel = fixture.state.channels[0];
+	if (channel === undefined) throw new Error("Missing benchmark channel");
+	channel.memory = {
+		...channel.memory,
+		origin: "inference",
+		summary: ` ${"x".repeat(7_999)}`,
+	};
 	await writeBenchmarkFixture(root, fixture);
 	const source = new CommonspaceHostService(
 		{},
@@ -45,7 +52,7 @@ it("restores a new Thread after capturing a clipped Channel projection", async (
 	);
 	services.push(source, target);
 	await source.initialize();
-	// This size clips the first Channel summary immediately before a space.
+	// Legacy saved summaries can begin with whitespace; snapshots normalize it.
 	const summary = source.snapshot().channels[0]?.memory.summary;
 	expect(summary).toHaveLength(8_000);
 	expect(summary?.startsWith(" ")).toBe(true);
@@ -134,7 +141,7 @@ it.each([BenchmarkWorkspaceShape.Dm, BenchmarkWorkspaceShape.MultiChannel])(
 			}
 			expect(
 				loaded.threads.some(
-					(thread) => thread.context.channelSnapshot.summary !== "",
+					(thread) => thread.context.channelSnapshot.sourceMessageCount > 0,
 				),
 			).toBe(true);
 		}

@@ -98,7 +98,7 @@ Server-sent events carry durable state revisions, routing configuration invalida
 `server/src/service.ts` coordinates the workspace's durable behavior:
 
 - It validates and persists messages, versions, branches, deletion markers, pins, permissions, and conversation outcomes.
-- It maintains Channel context, immutable starting snapshots for Threads, independently editable Thread context, and pressure-triggered or manual compaction.
+- It maintains Channel context, immutable starting snapshots for Threads, independently editable Thread context, and automatic Channel briefs after completed turns, pressure-triggered Thread compaction, and explicit refresh. Source projections track coverage only; inference produces semantic summaries, decisions, and unresolved questions.
 - It resolves zero, one, or many Project references per message and Thread. Canonical roots stay private; browser responses use folder labels and root indexes.
 - It stores native-session mappings, resumes exact sessions, and recovers sessions only when a harness explicitly reports them missing.
 - It accepts work immediately, coordinates independent sessions concurrently, and serializes work targeting the same native session.

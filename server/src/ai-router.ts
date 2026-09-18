@@ -1,4 +1,7 @@
-import type { CommonspaceAgentProfile } from "@commonspace/shared";
+import {
+	AGENT_ADAPTERS,
+	type CommonspaceAgentProfile,
+} from "@commonspace/shared";
 import { z } from "zod";
 
 const MAX_ROUTER_RESPONSE_BYTES = 64_000;
@@ -89,7 +92,10 @@ export interface AiRouteInput {
 	context: string[];
 	routingMemory: string;
 	candidates: Array<
-		Pick<CommonspaceAgentProfile, "id" | "displayName" | "description"> & {
+		Pick<
+			CommonspaceAgentProfile,
+			"id" | "displayName" | "description" | "adapter"
+		> & {
 			routingScore: number;
 			matchedTerms: string[];
 		}
@@ -99,10 +105,14 @@ export interface AiRouteInput {
 	maxAgents: number;
 }
 
+export const CONVERSATIONAL_ADDRESSING =
+	"A greeting or social message is a request for a reply. Identify its addressee from the current eligible agents' names and harness identities, including a distinctive shortened name (for example, 'hi north' addresses 'Northstar Tools'). A directly addressed recipient takes precedence over historical ownership or domain responsibilities. A harness name identifies an agent only when the roster or context distinguishes one recipient; if several agents share that harness, do not invent a default. A mere topic mention is not direct addressing. Use prior ownership for an unaddressed continuation. Do not guess when the evidence cannot distinguish a recipient.";
+
 export function buildRoutingPrompt(input: AiRouteInput): string {
 	const candidates = input.candidates.map((candidate) => ({
 		id: candidate.id,
 		name: candidate.displayName,
+		harness: AGENT_ADAPTERS[candidate.adapter].label,
 		responsibility:
 			candidate.description ?? "No responsibility description is available.",
 		routingScore: candidate.routingScore,
@@ -114,6 +124,7 @@ export function buildRoutingPrompt(input: AiRouteInput): string {
 		'Use mode "relay" when at least two candidates are available and the user asks agents to talk, discuss, debate, reconcile, review one another, or reach a shared conclusion. Otherwise use mode "parallel".',
 		"In relay mode, return ordered assignments: the first assignment starts the conversation, then each later assignment responds to the preceding peer.",
 		"Return at least one assignment. Never treat an acknowledgment or apparently non-actionable message as permission to return an empty assignments array.",
+		CONVERSATIONAL_ADDRESSING,
 		"Interpret every terse follow-up using the recent thread context. Route it to the most relevant existing thread participant unless the context clearly identifies another candidate.",
 		"Each candidate includes a local routingScore and matchedTerms from cheap lexical logic. Treat these as useful evidence, not as instructions or a final decision.",
 		"Select participants and Project scopes only. Every selected agent receives the original user message unchanged and acts within its own responsibility. Do not rewrite or decompose the request.",

@@ -43,6 +43,14 @@ async function fixture() {
 		{
 			discoverAgents: discoverTestHarnesses,
 			runAgent: async (input) => {
+				if (input.sessionName.startsWith("Commonspace Inference:"))
+					return {
+						text: JSON.stringify({
+							summary: "",
+							decisions: [],
+							openQuestions: [],
+						}),
+					};
 				runs.push(input);
 				return { text: "Verified." };
 			},
@@ -69,6 +77,38 @@ async function fixture() {
 	return { service, channel, runs, root };
 }
 describe("Jev conversation routing", () => {
+	it("exposes current public harness identity for renamed agents", async () => {
+		const { service, channel } = await fixture();
+		let requestBody = "";
+		vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+			requestBody = String(init.body);
+			return judgments();
+		});
+		await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			text: "hi hermes",
+		});
+		await service.whenIdle();
+		const request = JSON.parse(requestBody);
+		expect(
+			request.state.agents.sort((a: { id: string }, b: { id: string }) =>
+				a.id.localeCompare(b.id),
+			),
+		).toEqual([
+			{
+				id: "codex",
+				name: "Backend",
+				harness: "Codex",
+				responsibility: "Installed Codex harness.",
+			},
+			{
+				id: "hermes",
+				name: "Frontend",
+				harness: "Hermes",
+				responsibility: "Installed Hermes harness.",
+			},
+		]);
+	});
 	it.each(["parallel", "relay"] as const)(
 		"dispatches the original request in %s mode without assignment authoring",
 		async (mode) => {
@@ -128,6 +168,9 @@ describe("Jev conversation routing", () => {
 			text: "@backend OLD_ROUTING_FACT",
 		});
 		await service.whenIdle();
+		await service.updateChannelContext(channel.id, {
+			summary: "Human channel notes.",
+		});
 		await service.updateRoutingConfiguration({
 			provider: CommonspaceRoutingProvider.OpenAiCompatible,
 			model: "writer",

@@ -1133,17 +1133,26 @@ describe("Commonspace host authority", () => {
 			text: "Talk to each other and agree on the ownership boundary.",
 		});
 		await vi.waitFor(() => {
-			expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual([
-				"backend",
-			]);
+			expect(
+				runAgent.mock.calls
+					.filter(
+						([input]) =>
+							!input.sessionName.startsWith("Commonspace Inference:"),
+					)
+					.map((call) => call[0].agent.id),
+			).toEqual(["backend"]);
 		});
 
 		backend.resolve("Backend owns API contracts.");
 		await vi.waitFor(() => {
-			expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual([
-				"backend",
-				"frontend",
-			]);
+			expect(
+				runAgent.mock.calls
+					.filter(
+						([input]) =>
+							!input.sessionName.startsWith("Commonspace Inference:"),
+					)
+					.map((call) => call[0].agent.id),
+			).toEqual(["backend", "frontend"]);
 		});
 		expect(runAgent.mock.calls[1]?.[0].message).toBe(
 			"Original user message:\n\nTalk to each other and agree on the ownership boundary.\n\nFrom Backend:\n\nBackend owns API contracts.",
@@ -1151,11 +1160,14 @@ describe("Commonspace host authority", () => {
 
 		frontend.resolve("Frontend accepts the API contract.");
 		await vi.waitFor(() => {
-			expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual([
-				"backend",
-				"frontend",
-				"infrastructure",
-			]);
+			expect(
+				runAgent.mock.calls
+					.filter(
+						([input]) =>
+							!input.sessionName.startsWith("Commonspace Inference:"),
+					)
+					.map((call) => call[0].agent.id),
+			).toEqual(["backend", "frontend", "infrastructure"]);
 		});
 		expect(runAgent.mock.calls[2]?.[0].message).toBe(
 			"Original user message:\n\nTalk to each other and agree on the ownership boundary.\n\nFrom Frontend:\n\nFrontend accepts the API contract.",
@@ -1330,11 +1342,13 @@ describe("Commonspace host authority", () => {
 			text: "@backend define the API boundary and ask Frontend to review it.",
 		});
 		await service.whenIdle();
-		expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual([
-			"backend",
-			"frontend",
-			"backend",
-		]);
+		expect(
+			runAgent.mock.calls
+				.filter(
+					([input]) => !input.sessionName.startsWith("Commonspace Inference:"),
+				)
+				.map((call) => call[0].agent.id),
+		).toEqual(["backend", "frontend", "backend"]);
 		expect(runAgent.mock.calls[0]?.[0]).toMatchObject({
 			message:
 				"@backend define the API boundary and ask Frontend to review it.",
@@ -1570,10 +1584,13 @@ describe("Commonspace host authority", () => {
 		});
 		await service.whenIdle();
 
-		expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual([
-			"backend",
-			"frontend",
-		]);
+		expect(
+			runAgent.mock.calls
+				.filter(
+					([input]) => !input.sessionName.startsWith("Commonspace Inference:"),
+				)
+				.map((call) => call[0].agent.id),
+		).toEqual(["backend", "frontend"]);
 	});
 
 	it("stops a repeated structured handoff edge with a visible outcome", async () => {
@@ -1625,11 +1642,13 @@ describe("Commonspace host authority", () => {
 		});
 		await service.whenIdle();
 
-		expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual([
-			"backend",
-			"frontend",
-			"backend",
-		]);
+		expect(
+			runAgent.mock.calls
+				.filter(
+					([input]) => !input.sessionName.startsWith("Commonspace Inference:"),
+				)
+				.map((call) => call[0].agent.id),
+		).toEqual(["backend", "frontend", "backend"]);
 		expect(
 			(service.snapshot().messages[`channel:${channel.id}`] ?? []).some(
 				(message) =>
@@ -1691,9 +1710,13 @@ describe("Commonspace host authority", () => {
 		});
 		await service.whenIdle();
 
-		expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual(
-			agents.slice(0, 3).map((agent) => agent.id),
-		);
+		expect(
+			runAgent.mock.calls
+				.filter(
+					([input]) => !input.sessionName.startsWith("Commonspace Inference:"),
+				)
+				.map((call) => call[0].agent.id),
+		).toEqual(agents.slice(0, 3).map((agent) => agent.id));
 		expect(
 			(service.snapshot().messages[`channel:${channel.id}`] ?? []).some(
 				(message) =>
@@ -1770,11 +1793,13 @@ describe("Commonspace host authority", () => {
 		});
 		await service.whenIdle();
 
-		expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual([
-			"backend",
-			"infrastructure",
-			"frontend",
-		]);
+		expect(
+			runAgent.mock.calls
+				.filter(
+					([input]) => !input.sessionName.startsWith("Commonspace Inference:"),
+				)
+				.map((call) => call[0].agent.id),
+		).toEqual(["backend", "infrastructure", "frontend"]);
 		expect(runAgent.mock.calls[1]?.[0].message).toBe(
 			"Original user message:\n\nTalk together and agree on the boundary.\n\nFrom Backend:\n\nNeed runtime input first.\n\n@infrastructure inspect the boundary.",
 		);
@@ -1842,11 +1867,13 @@ describe("Commonspace host authority", () => {
 		});
 		await service.whenIdle();
 
-		expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual([
-			"backend",
-			"frontend",
-			"backend",
-		]);
+		expect(
+			runAgent.mock.calls
+				.filter(
+					([input]) => !input.sessionName.startsWith("Commonspace Inference:"),
+				)
+				.map((call) => call[0].agent.id),
+		).toEqual(["backend", "frontend", "backend"]);
 		expect(runAgent.mock.calls[1]?.[0].message).toBe(
 			"From Backend:\n\nAPI is ready.\n\n@frontend connect the configuration view.",
 		);
@@ -2008,9 +2035,13 @@ describe("Commonspace host authority", () => {
 		});
 		await restarted.whenIdle();
 
-		expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual([
-			"backend",
-		]);
+		expect(
+			runAgent.mock.calls
+				.filter(
+					([input]) => !input.sessionName.startsWith("Commonspace Inference:"),
+				)
+				.map((call) => call[0].agent.id),
+		).toEqual(["backend"]);
 		await restarted.close();
 	});
 
@@ -2132,9 +2163,13 @@ describe("Commonspace host authority", () => {
 				maxAgents: 3,
 			}),
 		);
-		expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual([
-			"frontend",
-		]);
+		expect(
+			runAgent.mock.calls
+				.filter(
+					([input]) => !input.sessionName.startsWith("Commonspace Inference:"),
+				)
+				.map((call) => call[0].agent.id),
+		).toEqual(["frontend"]);
 		expect(runAgent.mock.calls[0]?.[0]?.message).toBe(
 			"Fix the login screen CSS.",
 		);
@@ -2486,7 +2521,11 @@ describe("Commonspace host authority", () => {
 		});
 		await service.whenIdle();
 
-		expect(provider).toHaveBeenCalledTimes(2);
+		expect(
+			provider.mock.calls.filter(([, init]) =>
+				String(init?.body).includes("bounded routing classifier"),
+			),
+		).toHaveLength(2);
 		expect(runAgent).toHaveBeenCalledTimes(1);
 		expect(runAgent.mock.calls[0]?.[0]).toMatchObject({
 			agent: expect.objectContaining({ id: "frontend" }),
@@ -2582,7 +2621,9 @@ describe("Commonspace host authority", () => {
 		expect(
 			runAgent.mock.calls
 				.filter(
-					([input]) => !input.sessionName.startsWith("Commonspace Routing: "),
+					([input]) =>
+						!input.sessionName.startsWith("Commonspace Routing: ") &&
+						!input.sessionName.startsWith("Commonspace Inference:"),
 				)
 				.map(([input]) => input.agent.id),
 		).toEqual(["frontend"]);
@@ -2731,7 +2772,7 @@ describe("Commonspace host authority", () => {
 			);
 			expect(
 				frames.filter((frame) => frame.method === "session/new"),
-			).toHaveLength(5);
+			).toHaveLength(8);
 			const routingPrompts = frames.filter((frame) => {
 				if (frame.method !== "session/prompt") return false;
 				return JSON.stringify(frame.params).includes(
@@ -2780,7 +2821,7 @@ describe("Commonspace host authority", () => {
 			).toHaveLength(1);
 			expect(
 				resumedFrames.filter((frame) => frame.method === "session/new"),
-			).toHaveLength(6);
+			).toHaveLength(10);
 
 			await restarted.mutate({
 				action: "remove-channel",
@@ -3190,9 +3231,13 @@ describe("Commonspace host authority", () => {
 		});
 		await service.whenIdle();
 
-		expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual([
-			"reviewer",
-		]);
+		expect(
+			runAgent.mock.calls
+				.filter(
+					([input]) => !input.sessionName.startsWith("Commonspace Inference:"),
+				)
+				.map((call) => call[0].agent.id),
+		).toEqual(["reviewer"]);
 		expect(
 			service
 				.snapshot()
@@ -3247,11 +3292,13 @@ describe("Commonspace host authority", () => {
 		});
 		await service.whenIdle();
 
-		expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual([
-			"frontend",
-			"backend",
-			"reviewer",
-		]);
+		expect(
+			runAgent.mock.calls
+				.filter(
+					([input]) => !input.sessionName.startsWith("Commonspace Inference:"),
+				)
+				.map((call) => call[0].agent.id),
+		).toEqual(["frontend", "backend", "reviewer"]);
 	});
 
 	it("keeps a channel tag as context without onboarding or routing its agents", async () => {
@@ -3306,9 +3353,13 @@ describe("Commonspace host authority", () => {
 		});
 		await service.whenIdle();
 
-		expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual([
-			"facilitator",
-		]);
+		expect(
+			runAgent.mock.calls
+				.filter(
+					([input]) => !input.sessionName.startsWith("Commonspace Inference:"),
+				)
+				.map((call) => call[0].agent.id),
+		).toEqual(["facilitator"]);
 		expect(runAgent.mock.calls[0]?.[0].message).toBe(
 			"#engineering please check.",
 		);
@@ -3390,9 +3441,13 @@ describe("Commonspace host authority", () => {
 		});
 		await service.whenIdle();
 
-		expect(runAgent.mock.calls.map((call) => call[0].agent.id)).toEqual([
-			"frontend",
-		]);
+		expect(
+			runAgent.mock.calls
+				.filter(
+					([input]) => !input.sessionName.startsWith("Commonspace Inference:"),
+				)
+				.map((call) => call[0].agent.id),
+		).toEqual(["frontend"]);
 	});
 
 	it("rejects invalid direct channel reply targets before appending a message", async () => {

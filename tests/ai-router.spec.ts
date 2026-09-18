@@ -16,6 +16,7 @@ const input = {
 			id: "frontend",
 			displayName: "Frontend",
 			description: "Owns React UI and CSS.",
+			adapter: "hermes" as const,
 			routingScore: 1,
 			matchedTerms: ["css"],
 		},
@@ -23,6 +24,7 @@ const input = {
 			id: "backend",
 			displayName: "Backend",
 			description: "Owns APIs and persistence.",
+			adapter: "codex" as const,
 			routingScore: 0,
 			matchedTerms: [],
 		},
@@ -93,6 +95,7 @@ describe("Commonspace AI router", () => {
 		const prompt = buildRoutingPrompt(input);
 		expect(prompt).toContain("Select one owner by default");
 		expect(prompt).toContain('"id":"frontend"');
+		expect(prompt).toContain('"harness":"Hermes"');
 		expect(prompt).toContain('"routingScore":1');
 		expect(prompt).toContain('"matchedTerms":["css"]');
 		expect(prompt).toContain('"id":"web"');

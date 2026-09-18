@@ -12,6 +12,8 @@ import {
 	type CommonspacePermissionRequest,
 	type CommonspaceProject,
 	type CommonspaceQueuedFollowup,
+	CommonspaceReasoning,
+	CommonspaceRoutingProvider,
 	type CommonspaceRunAttribution,
 	type CommonspaceSearchResponse,
 	type CommonspaceSearchResult,
@@ -348,7 +350,7 @@ export function createStoryState(
 		notifications: { ...DEFAULT_COMMONSPACE_NOTIFICATION_SETTINGS },
 		defaults: {
 			model: "gpt-5.6-sol",
-			reasoning: "high",
+			reasoning: CommonspaceReasoning.High,
 			maxAgentsPerTurn: 2,
 			memoryThreads: 3,
 		},
@@ -381,11 +383,8 @@ export function createStoryBootstrap(
 		liveActivities: [],
 		queuedFollowups: [],
 		routing: {
-			provider: "harness",
-			model: "gpt-5.6-sol",
+			provider: CommonspaceRoutingProvider.Harness,
 			harnessAgentId: hermesAgent.id,
-			baseUrl: "",
-			apiKeyConfigured: false,
 		},
 		...overrides,
 	};
@@ -638,6 +637,8 @@ export function createStoryStore(
 		pendingSubmissions?: CommonspaceClientSnapshot["pendingSubmissions"];
 		send?: CommonspaceStore["send"];
 		retryRouting?: CommonspaceStore["retryRouting"];
+		mutate?: CommonspaceStore["mutate"];
+		compactChannelContext?: CommonspaceStore["compactChannelContext"];
 		addPin?: CommonspaceStore["addPin"];
 		removePin?: CommonspaceStore["removePin"];
 		discoverAgents?: CommonspaceStore["discoverAgents"];
@@ -665,6 +666,13 @@ export function createStoryStore(
 			if (property === "getSnapshot") return () => snapshot;
 			if (property === "send" && options.send !== undefined)
 				return options.send;
+			if (property === "mutate" && options.mutate !== undefined)
+				return options.mutate;
+			if (
+				property === "compactChannelContext" &&
+				options.compactChannelContext !== undefined
+			)
+				return options.compactChannelContext;
 			if (property === "retryRouting" && options.retryRouting !== undefined)
 				return options.retryRouting;
 			if (property === "addPin" && options.addPin !== undefined)

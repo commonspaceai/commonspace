@@ -24,6 +24,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ConfirmActionDialog } from "@/design-system/ConfirmActionDialog";
 import { cn } from "@/lib/utils";
+import { ChannelContextBrief } from "./ChannelContextBrief.tsx";
 import type { CommonspaceStore } from "./commonspace-store.ts";
 
 interface SettingsPaneProps {
@@ -221,21 +222,10 @@ function ChannelSettingsEditor({
 	const [agentIds, setAgentIds] = useSettingsDraftValue(channel.agentIds);
 	const [query, setQuery] = useState("");
 	const [filter, setFilter] = useState<"all" | "included" | "available">("all");
-	const [instructions, setInstructions] = useSettingsDraftValue(
-		channel.instructions,
-	);
-	const [summary, setSummary] = useSettingsDraftValue(channel.memory.summary);
-	const [decisions, setDecisions] = useSettingsDraftValue(
-		channel.memory.decisions.join("\n"),
-	);
-	const [questions, setQuestions] = useSettingsDraftValue(
-		channel.memory.openQuestions.join("\n"),
-	);
 	const [pinNote, setPinNote] = useState("");
 	const [pinning, setPinning] = useState(false);
 	const [pinError, setPinError] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
-	const [compacting, setCompacting] = useState(false);
 	const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
 
 	const visibleAgents = useMemo(() => {
@@ -275,19 +265,9 @@ function ChannelSettingsEditor({
 		setSaving(true);
 		try {
 			await store.mutate({
-				action: "set-channel-configuration",
+				action: "set-channel-agents",
 				channelId: id,
 				agentIds,
-				instructions,
-				summary,
-				decisions: decisions
-					.split("\n")
-					.map((value) => value.trim())
-					.filter(Boolean),
-				openQuestions: questions
-					.split("\n")
-					.map((value) => value.trim())
-					.filter(Boolean),
 			});
 			onClose();
 		} finally {
@@ -600,71 +580,7 @@ function ChannelSettingsEditor({
 						</div>
 					</section>
 
-					<details className="mt-7 border-t pt-6" aria-label="Advanced context">
-						<summary className="cursor-pointer font-heading text-sm font-bold">
-							Advanced context
-						</summary>
-						<p className="mt-2 text-xs text-muted-foreground">
-							Review or edit the context agents can read. Ordinary conversation
-							needs no setup here.
-						</p>
-						<div className="mt-4 grid gap-3 [&_input]:min-h-11 [&_input]:rounded-sm [&_input]:border [&_input]:px-3 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-xs [&_label]:font-semibold [&_select]:min-h-11 [&_select]:rounded-sm [&_select]:border [&_select]:bg-background [&_select]:px-3 [&_textarea]:min-h-20 [&_textarea]:rounded-sm [&_textarea]:border [&_textarea]:p-3">
-							<label>
-								Channel guidance (optional)
-								<textarea
-									aria-label="Channel instructions"
-									placeholder="Optional guidance shared across this channel"
-									value={instructions}
-									onChange={(event) => {
-										setInstructions(event.target.value);
-									}}
-								/>
-							</label>
-							<label>
-								Summary
-								<textarea
-									aria-label="Channel summary"
-									value={summary}
-									onChange={(event) => {
-										setSummary(event.target.value);
-									}}
-								/>
-							</label>
-							<label>
-								Decisions
-								<textarea
-									aria-label="Channel decisions"
-									value={decisions}
-									onChange={(event) => {
-										setDecisions(event.target.value);
-									}}
-								/>
-							</label>
-							<label>
-								Open questions
-								<textarea
-									aria-label="Channel open questions"
-									value={questions}
-									onChange={(event) => {
-										setQuestions(event.target.value);
-									}}
-								/>
-							</label>
-							<Button
-								type="button"
-								variant="outline"
-								disabled={compacting}
-								onClick={() => {
-									setCompacting(true);
-									void store.compactChannelContext(id).finally(() => {
-										setCompacting(false);
-									});
-								}}
-							>
-								{compacting ? "Compacting…" : "Compact context"}
-							</Button>
-						</div>
-					</details>
+					<ChannelContextBrief channel={channel} store={store} />
 
 					<section className="mt-7 border-t pt-6">
 						<Button
