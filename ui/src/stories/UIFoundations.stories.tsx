@@ -8,8 +8,10 @@ import {
 	EmptyMedia,
 	EmptyTitle,
 } from "@/components/ui/empty";
+import { NativeSelect } from "@/components/ui/native-select";
 import { Toggle as SingleToggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { UnreadCount } from "@/design-system/UnreadCount";
 
 const meta = {
 	title: "Foundations/UI Primitives",
@@ -30,6 +32,36 @@ export const ControlsAndStates: Story = {
 					<Button variant="destructive">Destructive</Button>
 					<Badge>Running</Badge>
 					<Badge variant="secondary">2 agents</Badge>
+				</div>
+			</section>
+			<section className="grid gap-3">
+				<strong>Fields and unread activity</strong>
+				<div className="grid grid-cols-2 gap-4">
+					<label
+						htmlFor="foundation-folder"
+						className="grid gap-2 text-xs font-medium"
+					>
+						Project folder
+						<NativeSelect id="foundation-folder" defaultValue="working">
+							<option value="working">Working folder</option>
+							<option value="reference">Reference folder</option>
+						</NativeSelect>
+					</label>
+					<label
+						htmlFor="foundation-disabled"
+						className="grid gap-2 text-xs font-medium"
+					>
+						Unavailable
+						<NativeSelect id="foundation-disabled" disabled>
+							<option>No folders available</option>
+						</NativeSelect>
+					</label>
+				</div>
+				<div className="flex items-center gap-3 text-xs text-muted-foreground">
+					<span>Unread</span>
+					<UnreadCount count={5} />
+					<UnreadCount count={17} />
+					<UnreadCount count={128} />
 				</div>
 			</section>
 			<section className="grid gap-3">

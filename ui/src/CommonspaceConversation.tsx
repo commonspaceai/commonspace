@@ -38,6 +38,7 @@ import {
 	useSyncExternalStore,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
 import {
 	type PendingAdmissionItem,
 	PendingAdmissions,
@@ -675,9 +676,9 @@ function RoutingReceipt({
 						>
 							{retrying === "ai" ? "Retrying…" : "Retry AI routing"}
 						</Button>
-						<select
+						<NativeSelect
 							aria-label="Manual routing agent"
-							className="h-8 rounded-sm border bg-background px-2 text-xs text-foreground"
+							className="h-8 text-xs"
 							value={manualAgentId}
 							disabled={retrying !== null}
 							onChange={(event) => {
@@ -690,7 +691,7 @@ function RoutingReceipt({
 									{agent.displayName}
 								</option>
 							))}
-						</select>
+						</NativeSelect>
 						<Button
 							type="button"
 							size="sm"

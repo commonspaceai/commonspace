@@ -2,12 +2,12 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-/* Theme source: https://tweakcn.com/r/themes/darkmatter.json */
+/* Commonspace: neutral working surfaces, restrained accents, explicit status. */
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
 	--font-heading: var(--font-display);
-	--font-sans: Geist Mono, ui-monospace, monospace;
+	--font-sans: var(--font-body);
 	--font-mono: JetBrains Mono, monospace;
 	--color-sidebar-ring: var(--sidebar-ring);
 	--color-sidebar-deep: var(--sidebar-deep);
@@ -90,6 +90,11 @@
 		letter-spacing: var(--tracking-normal);
 	}
 
+	:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+	}
+
 	html {
 		@apply min-h-full min-w-0;
 		font-family: var(--font-body);
@@ -119,8 +124,8 @@
 	--popover-foreground: oklch(0.2101 0.0318 264.6645);
 	--primary: oklch(0.5 0.1368 48.513);
 	--primary-foreground: oklch(1 0 0);
-	--secondary: oklch(0.536 0.0398 196.028);
-	--secondary-foreground: oklch(1 0 0);
+	--secondary: #eef0f3;
+	--secondary-foreground: var(--foreground);
 	--muted: oklch(0.967 0.0029 264.5419);
 	--muted-foreground: #3f4a5a;
 	--accent: oklch(0.9491 0 0);
@@ -128,8 +133,8 @@
 	--destructive: #b42318;
 	--destructive-foreground: oklch(0.9851 0 0);
 	--border: oklch(0.9276 0.0058 264.5313);
-	--input: oklch(0.9276 0.0058 264.5313);
-	--ring: oklch(0.6716 0.1368 48.513);
+	--input: #cdd1d8;
+	--ring: #596b83;
 	--chart-1: oklch(0.594 0.0443 196.0233);
 	--chart-2: oklch(0.7214 0.1337 49.9802);
 	--chart-3: oklch(0.8721 0.0864 68.5474);
@@ -143,8 +148,8 @@
 	--sidebar-accent: oklch(1 0 0);
 	--sidebar-accent-foreground: oklch(0.2101 0.0318 264.6645);
 	--sidebar-border: oklch(0.9276 0.0058 264.5313);
-	--sidebar-ring: oklch(0.6716 0.1368 48.513);
-	--font-sans: Geist Mono, ui-monospace, monospace;
+	--sidebar-ring: var(--ring);
+	--font-sans: var(--font-body);
 	--font-serif: serif;
 	--font-mono: JetBrains Mono, monospace;
 	--shadow-color: #000000;
@@ -180,17 +185,17 @@
 	--popover-foreground: oklch(0.8109 0 0);
 	--primary: oklch(0.7214 0.1337 49.9802);
 	--primary-foreground: oklch(0.1797 0.0043 308.1928);
-	--secondary: oklch(0.594 0.0443 196.0233);
-	--secondary-foreground: oklch(0.1797 0.0043 308.1928);
+	--secondary: #2b2d33;
+	--secondary-foreground: var(--foreground);
 	--muted: oklch(0.252 0 0);
-	--muted-foreground: oklch(0.6268 0 0);
+	--muted-foreground: #a1a1aa;
 	--accent: oklch(0.3211 0 0);
 	--accent-foreground: oklch(0.8109 0 0);
-	--destructive: oklch(0.594 0.0443 196.0233);
+	--destructive: #f28b82;
 	--destructive-foreground: oklch(0.1797 0.0043 308.1928);
 	--border: oklch(0.252 0 0);
-	--input: oklch(0.252 0 0);
-	--ring: oklch(0.7214 0.1337 49.9802);
+	--input: #45454d;
+	--ring: #a5b5cc;
 	--chart-1: oklch(0.594 0.0443 196.0233);
 	--chart-2: oklch(0.7214 0.1337 49.9802);
 	--chart-3: oklch(0.8721 0.0864 68.5474);
@@ -204,8 +209,8 @@
 	--sidebar-accent: oklch(0.3211 0 0);
 	--sidebar-accent-foreground: oklch(0.8109 0 0);
 	--sidebar-border: oklch(0.252 0 0);
-	--sidebar-ring: oklch(0.7214 0.1337 49.9802);
-	--font-sans: Geist Mono, ui-monospace, monospace;
+	--sidebar-ring: var(--ring);
+	--font-sans: var(--font-body);
 	--font-serif: serif;
 	--font-mono: JetBrains Mono, monospace;
 	--shadow-color: #000000;
@@ -231,7 +236,7 @@
 	--shadow-2xl: 0px 1px 4px 0px hsl(0 0% 0% / 0.13);
 }
 
-/* Stable aliases keep Commonspace UI portable across Tweakcn theme swaps. */
+/* Shared roles keep component density and appearance consistent. */
 :root {
 	--font-display:
 		ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -245,7 +250,7 @@
 	--radius-control: max(0px, calc(var(--radius) - 0.5rem));
 	--radius-field: max(0px, calc(var(--radius) - 0.25rem));
 	--radius-panel: var(--radius);
-	--control: 2.75rem;
+	--control: 2.25rem;
 	--shadow-soft: var(--shadow-sm);
 	--shadow-high: var(--shadow-lg);
 	--motion-fast: 150ms;

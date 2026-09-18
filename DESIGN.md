@@ -32,7 +32,9 @@ Runtime outcomes belong to Inbox and the conversation or Thread that produced th
 
 ## Collections and context
 
-Projects, Channels, Agents, Inbox, and Threads use clear titles, compact rows, and visible selection. Projects, Channels, and Agents expose sorting through a compact heading menu with checked choices. Custom order preserves identity, status, pinned/unpinned grouping, drag behavior, and keyboard focus.
+Projects, Channels, Agents, Inbox, and Threads use clear titles, compact rows, and visible selection. Do not show collection totals in the navigation rail. Show pinned/unpinned labels only when both groups are visible. Unread counts use a small neutral badge in a consistent right-hand column; unread Channel names use semibold text. Red is reserved for errors and destructive actions, not ordinary unread activity.
+
+Projects, Channels, and Agents expose sorting through a compact heading menu with checked choices. Custom order preserves identity, status, pinned/unpinned grouping, drag behavior, and keyboard focus.
 
 Project files and Git changes provide context for conversation. Channel and Thread context remains inspectable without exposing native session identifiers or absolute host paths. Use visible `@@project` references in composers; do not add separate Project-scope pickers for roots, Threads, branches, or reroutes.
 
@@ -86,6 +88,10 @@ Search keeps its query, filters, result count, and keyboard hints fixed. Only re
 A search error offers retry without clearing the query or filters. Search progress and result counts are announced, and retry returns focus to the query.
 
 ## Controls and states
+
+Ordinary desktop fields and buttons are 36px high, with 13–14px text, a thin neutral border, and 4px corners. Use 28px controls for dense toolbars and 44px only for deliberately prominent actions. Selects reserve space for a 14px chevron, inset 12px from the edge; display the selected value once. Use a 2px slate focus outline for keyboard navigation, never a permanent accent outline.
+
+Destructive settings begin as a quiet description and secondary action. Conversation-history deletion opens a dialog with a picker, exact impact preview, and a clearly named final destructive action. Selection changes invalidate the preview; pending requests disable selection and submission; failures require a fresh preview.
 
 Controls must look interactive before they are clicked. Related filters should read as one group, with a clear selected state. Menus and suggestions should stay near their trigger, remain within the viewport, and close predictably.
 

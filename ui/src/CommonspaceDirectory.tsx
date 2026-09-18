@@ -8,6 +8,7 @@ import {
 import { ArrowRightIcon, PinIcon, SearchIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
 import {
 	CollectionActionMenu,
 	type CollectionActionMenuProps,
@@ -299,7 +300,7 @@ export function CommonspaceDirectory({
 				</Button>
 			</header>
 			<div className="grid shrink-0 grid-cols-[minmax(220px,1fr)_auto] items-center gap-3 border-b bg-muted px-8 py-3 max-[780px]:px-5 max-[480px]:grid-cols-[minmax(0,1fr)] max-[480px]:px-3">
-				<label className="flex min-h-11 min-w-0 items-center gap-2 rounded-sm border bg-background px-3 text-muted-foreground focus-within:border-primary focus-within:ring-3 focus-within:ring-primary/10">
+				<label className="flex min-h-9 min-w-0 items-center gap-2 rounded-sm border bg-background px-3 text-muted-foreground focus-within:border-ring">
 					<SearchIcon className="size-4" aria-hidden="true" />
 					<span className="sr-only">{config.filter}</span>
 					<input
@@ -314,10 +315,11 @@ export function CommonspaceDirectory({
 						}}
 					/>
 				</label>
-				<label>
+				<label htmlFor="directory-sort">
 					<span className="sr-only">Sort directory</span>
-					<select
-						className="min-h-11 rounded-sm border bg-background px-3 text-[13px] max-[480px]:w-full"
+					<NativeSelect
+						className="max-[480px]:w-full"
+						id="directory-sort"
 						aria-label="Sort directory"
 						value={direction}
 						onChange={(event) => {
@@ -331,7 +333,7 @@ export function CommonspaceDirectory({
 					>
 						<option value="name-asc">Name A–Z</option>
 						<option value="name-desc">Name Z–A</option>
-					</select>
+					</NativeSelect>
 				</label>
 			</div>
 			<div className="min-h-0 flex-1 overflow-y-auto px-8 pb-8 max-[780px]:px-5 max-[480px]:px-3 max-[480px]:pb-6">

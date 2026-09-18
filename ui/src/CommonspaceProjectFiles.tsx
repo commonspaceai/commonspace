@@ -19,6 +19,7 @@ import {
 	EmptyMedia,
 	EmptyTitle,
 } from "@/components/ui/empty";
+import { NativeSelect } from "@/components/ui/native-select";
 import { ResourceActionMenu } from "@/design-system/ResourceActionMenu";
 import {
 	fetchProjectJson,
@@ -156,17 +157,17 @@ export function CommonspaceProjectFiles({
 
 	return (
 		<section
-			className="grid h-full min-h-0 min-w-0 grid-cols-[330px_minmax(0,1fr)] max-[780px]:grid-cols-1 max-[780px]:grid-rows-[minmax(300px,42dvh)_minmax(360px,1fr)]"
+			className="grid h-full min-h-0 min-w-0 text-foreground grid-cols-[330px_minmax(0,1fr)] max-[780px]:grid-cols-1 max-[780px]:grid-rows-[minmax(300px,42dvh)_minmax(360px,1fr)]"
 			aria-label="Project files"
 		>
 			<aside className="min-h-0 min-w-0 overflow-y-auto border-r bg-[color-mix(in_oklch,var(--background)_55%,var(--muted))] max-[780px]:border-r-0 max-[780px]:border-b">
-				<header className="grid min-h-[66px] grid-cols-[76px_minmax(0,1fr)] items-center gap-2 border-b px-3 py-2">
+				<header className="grid min-h-[58px] grid-cols-[48px_minmax(0,1fr)] items-center gap-2 border-b px-3 py-2">
 					<div>
 						<strong className="block text-[13px]">Files</strong>
 						<small className="hidden">Read-only project browser</small>
 					</div>
-					<select
-						className="min-h-11 min-w-0 rounded-md border bg-background px-3"
+					<NativeSelect
+						className="min-w-0"
 						aria-label="Project folder"
 						title="Choose a project folder"
 						value={rootIndex}
@@ -177,10 +178,10 @@ export function CommonspaceProjectFiles({
 					>
 						{roots.map((root, index) => (
 							<option key={root} value={index}>
-								{index === 0 ? "Working" : "Reference"} · {folderName(root)}
+								{folderName(root)}
 							</option>
 						))}
-					</select>
+					</NativeSelect>
 				</header>
 
 				<nav

@@ -68,3 +68,18 @@ export const NoProjectFolder: Story = {
 export const RequestFailed: Story = {
 	args: { fetcher: errorProjectFetcher },
 };
+
+export const PublicFolderLabels: Story = {
+	args: { roots: ["Working folder", "Reference folder 1"] },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const picker = canvas.getByRole("combobox", { name: "Project folder" });
+		await expect(
+			within(picker).getByRole("option", {
+				name: "Working folder",
+			}),
+		).toBeInTheDocument();
+		await userEvent.selectOptions(picker, "1");
+		await expect(picker).toHaveValue("1");
+	},
+};

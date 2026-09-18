@@ -43,6 +43,15 @@ pnpm --filter @commonspace/ui exec shadcn add "<theme-url>" --yes
 
 Review the resulting diff, preserve the stable aliases, and inspect every affected component in Light and Dark modes. A theme update must not change screen structure or behavior.
 
+## Shared controls
+
+- `NativeSelect` owns compact native pickers, neutral borders, chevron spacing, disabled/error states, and keyboard focus. Pass native select props and children; keep labels at the call site. Folder pickers display the public folder label once, without adding a duplicate Working/Reference prefix.
+- `Button` uses 36px by default, 28px for small actions, and 44px for large actions. Secondary buttons use neutral colors.
+- `UnreadCount` owns quiet 18px-high navigation counters, tabular numerals, and the `99+` cap. The parent supplies the accessible unread label.
+- `ConversationRetention` owns its dialog and the choose/review/delete lifecycle. The sidebar supplies conversations and the existing retention API; it does not own dialog form state.
+
+Use the focus and density tokens rather than adding per-screen orange rings or large minimum heights. Strong status color belongs to errors and final destructive actions. Inspect `Foundations/UI Primitives`, `Pages/CommonspaceSidebar`, and `Pages/CommonspaceProjectFiles` in Storybook when changing these rules.
+
 ## Component behavior
 
 The same visual treatment should mean the same thing across screens. Selected rows need a clear state, primary actions need clear labels, and secondary actions should remain discoverable without competing with conversation text.
