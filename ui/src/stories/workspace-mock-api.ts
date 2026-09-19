@@ -103,7 +103,7 @@ export function createWorkspaceMockApi(
 		...agent,
 		createdAt: now(),
 	}));
-	root.text = "Gatdam, you there?";
+	root.text = "Are you available to review the agent workflow?";
 	root.replyStatus = "complete";
 	root.routing.reason =
 		"Agentops handles Hermes and local agent infrastructure in this channel.";
@@ -111,7 +111,7 @@ export function createWorkspaceMockApi(
 	delete plainRoot.routing;
 	reply.authorName = "Agentops";
 	reply.text =
-		"I’m here. Gatdam Games AgentOps online and ready to handle Hermes, OpenAgents/A2A, and local agent workflow infrastructure—without touching Roblox product source or Studio.";
+		"I’m here and ready to help with agent workflows, local tooling, and session infrastructure.";
 	delete reply.runAttribution;
 	reply.trace.entries = reply.trace.entries.filter(
 		(entry) => entry.type === "reasoning" || entry.type === "usage",
