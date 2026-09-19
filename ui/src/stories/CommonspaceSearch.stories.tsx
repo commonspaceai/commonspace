@@ -176,6 +176,17 @@ export const DenseResults: Story = {
 			);
 		},
 	},
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		const recent = await body.findByRole("group", { name: /^Recent/u });
+		await expect(within(recent).getAllByRole("option")).toHaveLength(4);
+		const channels = body.getByRole("group", { name: /^Channels/u });
+		await expect(within(channels).getAllByRole("option")).toHaveLength(4);
+		const messages = body.getByRole("group", { name: /^Messages/u });
+		await expect(within(messages).getAllByRole("option")).toHaveLength(8);
+		const files = body.getByRole("group", { name: /^Files/u });
+		await expect(within(files).getAllByRole("option")).toHaveLength(8);
+	},
 };
 
 export const NormalizedQuery: Story = {

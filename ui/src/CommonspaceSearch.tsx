@@ -23,7 +23,14 @@ import {
 	SearchIcon,
 	XIcon,
 } from "lucide-react";
-import { useDeferredValue, useEffect, useId, useRef, useState } from "react";
+import {
+	Fragment,
+	useDeferredValue,
+	useEffect,
+	useId,
+	useRef,
+	useState,
+} from "react";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -317,17 +324,6 @@ function kindLabel(kind: CommonspaceSearchKind): string {
 	return `${kind.slice(0, 1).toLocaleUpperCase()}${kind.slice(1)}`;
 }
 
-function resultGlyph(kind: CommonspaceSearchKind): string {
-	if (kind === "channel") return "#";
-	if (kind === "agent") return "@";
-	if (kind === "file") return "⌁";
-	if (kind === "decision") return "✓";
-	if (kind === "trace") return "⋯";
-	if (kind === "run") return "▶";
-	if (kind === "brief") return "≡";
-	return "↳";
-}
-
 function resultReceiptLabel(result: CommonspaceSearchResult): string {
 	const receiptLocation = result.receipt.split(" · ")[0]?.trim();
 	const location =
@@ -349,6 +345,114 @@ function resultReceiptLabel(result: CommonspaceSearchResult): string {
 	return [location, time]
 		.filter((value): value is string => value !== undefined)
 		.join(" · ");
+}
+
+interface IndexedSearchResult {
+	index: number;
+	result: CommonspaceSearchResult;
+}
+
+interface SearchResultSection {
+	id: string;
+	label: string;
+	results: IndexedSearchResult[];
+	mixedKinds?: boolean;
+}
+
+function browseResultSections(
+	results: readonly CommonspaceSearchResult[],
+): SearchResultSection[] {
+	const indexed = results.map((result, index) => ({ result, index }));
+	const recent = indexed.slice(0, 4);
+	const remaining = indexed.slice(recent.length);
+	const sections: SearchResultSection[] = [];
+	if (recent.length > 0)
+		sections.push({
+			id: "recent",
+			label: "Recent",
+			results: recent,
+			mixedKinds: true,
+		});
+	for (const kind of COMMONSPACE_SEARCH_KINDS) {
+		const grouped = remaining.filter((item) => item.result.kind === kind);
+		if (grouped.length > 0)
+			sections.push({
+				id: kind,
+				label: searchTypes[kind].label,
+				results: grouped,
+			});
+	}
+	return sections;
+}
+
+function SearchResultOption({
+	result,
+	index,
+	active,
+	showKind,
+	resultsId,
+	onActivate,
+	onSelect,
+}: {
+	result: CommonspaceSearchResult;
+	index: number;
+	active: boolean;
+	showKind: boolean;
+	resultsId: string;
+	onActivate: (index: number) => void;
+	onSelect: (result: CommonspaceSearchResult) => void;
+}) {
+	const Icon = searchTypes[result.kind].icon;
+	return (
+		<button
+			id={`${resultsId}-${String(index)}`}
+			type="button"
+			role="option"
+			aria-label={`Open ${kindLabel(result.kind)}: ${result.title}`}
+			aria-selected={active}
+			className="grid min-h-[68px] w-full grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-hover aria-selected:bg-selection aria-selected:outline-1 aria-selected:-outline-offset-1 aria-selected:outline-border"
+			onMouseEnter={() => {
+				onActivate(index);
+			}}
+			onClick={() => {
+				onSelect(result);
+			}}
+		>
+			<span
+				className="grid size-8 place-items-center rounded-md bg-background text-muted-foreground [&_svg]:size-4"
+				aria-hidden="true"
+			>
+				<Icon />
+			</span>
+			<span className="min-w-0">
+				<strong className="block truncate text-sm font-medium">
+					<HighlightedText
+						text={result.title}
+						field="title"
+						highlights={result.highlights}
+					/>
+				</strong>
+				<small className="block truncate text-xs text-muted-foreground">
+					<HighlightedText
+						text={result.detail}
+						field="detail"
+						highlights={result.highlights}
+					/>
+				</small>
+				<small
+					className="block truncate text-xs text-muted-foreground"
+					title={result.receipt}
+				>
+					{resultReceiptLabel(result)}
+				</small>
+			</span>
+			{showKind && result.detail.trim() !== kindLabel(result.kind) ? (
+				<span className="max-w-32 truncate text-xs text-muted-foreground">
+					{kindLabel(result.kind)}
+				</span>
+			) : null}
+		</button>
+	);
 }
 
 export function CommonspaceSearchDialog({
@@ -384,6 +488,17 @@ export function CommonspaceSearchDialog({
 		currentOutcome?.kind === "error" ? currentOutcome.message : null;
 	const pending = currentOutcome === null;
 	const results = response?.results ?? [];
+	const browsing = query.trim() === "";
+	const resultSections = browsing
+		? browseResultSections(results)
+		: [
+				{
+					id: "matches",
+					label: "Results",
+					results: results.map((result, index) => ({ result, index })),
+					mixedKinds: true,
+				},
+			];
 	const boundedActiveIndex =
 		results.length === 0 ? 0 : Math.min(activeIndex, results.length - 1);
 	const activeResult = results[boundedActiveIndex];
@@ -583,61 +698,39 @@ export function CommonspaceSearchDialog({
 							role="listbox"
 							aria-label="Commonspace search results"
 						>
-							{results.map((result, index) => (
-								<button
-									id={`${resultsId}-${String(index)}`}
-									key={result.id}
-									type="button"
-									role="option"
-									aria-label={`Open ${kindLabel(result.kind)}: ${result.title}`}
-									aria-selected={index === boundedActiveIndex}
-									className="grid min-h-[72px] w-full grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-3 text-left hover:bg-hover aria-selected:bg-selection aria-selected:outline-1 aria-selected:-outline-offset-1 aria-selected:outline-border"
-									onMouseEnter={() => {
-										setActiveIndex(index);
-									}}
-									onClick={() => {
-										selectResult(result);
-									}}
-								>
-									<span
-										className="grid size-8 place-items-center rounded-md bg-background font-semibold text-muted-foreground"
-										aria-hidden="true"
-									>
-										{result.kind === "project" ? (
-											<FolderIcon className="size-4" aria-hidden="true" />
-										) : (
-											resultGlyph(result.kind)
+							{resultSections.map((section) => {
+								const headingId = `${resultsId}-${section.id}-heading`;
+								return (
+									<Fragment key={section.id}>
+										{browsing && (
+											<div
+												id={headingId}
+												className="flex items-center justify-between px-3 pt-3 pb-1 text-[11px] font-semibold tracking-[0.04em] text-muted-foreground uppercase"
+											>
+												<span>{section.label}</span>
+												<span>{String(section.results.length)}</span>
+											</div>
 										)}
-									</span>
-									<span className="min-w-0">
-										<strong className="block truncate text-sm font-medium">
-											<HighlightedText
-												text={result.title}
-												field="title"
-												highlights={result.highlights}
-											/>
-										</strong>
-										<small className="block truncate text-xs text-muted-foreground">
-											<HighlightedText
-												text={result.detail}
-												field="detail"
-												highlights={result.highlights}
-											/>
-										</small>
-										<small
-											className="block truncate text-xs text-muted-foreground"
-											title={result.receipt}
+										<fieldset
+											className="m-0 min-w-0 border-0 p-0"
+											aria-labelledby={browsing ? headingId : undefined}
 										>
-											{resultReceiptLabel(result)}
-										</small>
-									</span>
-									{result.detail.trim() === kindLabel(result.kind) ? null : (
-										<span className="max-w-32 truncate text-xs text-muted-foreground">
-											{kindLabel(result.kind)}
-										</span>
-									)}
-								</button>
-							))}
+											{section.results.map(({ result, index }) => (
+												<SearchResultOption
+													key={result.id}
+													result={result}
+													index={index}
+													active={index === boundedActiveIndex}
+													showKind={section.mixedKinds === true}
+													resultsId={resultsId}
+													onActivate={setActiveIndex}
+													onSelect={selectResult}
+												/>
+											))}
+										</fieldset>
+									</Fragment>
+								);
+							})}
 						</div>
 					)}
 				</div>
