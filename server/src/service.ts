@@ -339,6 +339,22 @@ export interface AgentPermissionOutcome {
 	optionId?: string;
 }
 
+export const enum CommonspaceHostPerformancePhase {
+	AcceptanceRequestPreparation = "acceptance.request-preparation",
+	AcceptanceStateMutation = "acceptance.state-mutation",
+	AcceptancePersistenceSerialization = "acceptance.persistence-serialization",
+	AcceptancePersistenceQueue = "acceptance.persistence-queue",
+	AcceptancePersistenceWrite = "acceptance.persistence-write",
+	AcceptanceResponseSnapshot = "acceptance.response-snapshot",
+	BootstrapStateSnapshot = "bootstrap.state-snapshot",
+	BootstrapAssembly = "bootstrap.assembly",
+}
+
+export interface CommonspaceHostPerformanceMeasurement {
+	phase: CommonspaceHostPerformancePhase;
+	durationMs: number;
+}
+
 export interface CommonspaceHostDependencies {
 	historyEmbeddings: HistoryEmbedder;
 	discoverAgents(adapter: AgentAdapterKind): Promise<CommonspaceAgentProfile[]>;
@@ -349,6 +365,9 @@ export interface CommonspaceHostDependencies {
 	beforePersistRoutingConfiguration?(
 		configuration: CommonspaceRoutingConfiguration,
 	): Promise<void>;
+	onPerformanceMeasurement?(
+		measurement: CommonspaceHostPerformanceMeasurement,
+	): void | Promise<void>;
 }
 
 export type CommonspaceRouteInput = AiRouteInput;
@@ -2591,6 +2610,28 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		return structuredClone(this.state);
 	}
 
+	private performancePhaseStartedAt(): number | undefined {
+		return this.overrides.onPerformanceMeasurement === undefined
+			? undefined
+			: performance.now();
+	}
+
+	private recordPerformanceMeasurement(
+		phase: CommonspaceHostPerformancePhase,
+		startedAt: number | undefined,
+	): void {
+		if (startedAt === undefined) return;
+		try {
+			const observation = this.overrides.onPerformanceMeasurement?.({
+				phase,
+				durationMs: performance.now() - startedAt,
+			});
+			if (observation !== undefined) void observation.catch(() => undefined);
+		} catch {
+			// Benchmark instrumentation must never change service behavior.
+		}
+	}
+
 	private publicSnapshot(): CommonspaceState {
 		const snapshot = this.snapshot();
 		return {
@@ -3046,14 +3087,26 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	}
 
 	async bootstrap(): Promise<CommonspaceBootstrap> {
-		return {
+		const snapshotStartedAt = this.performancePhaseStartedAt();
+		const state = this.publicSnapshot();
+		this.recordPerformanceMeasurement(
+			CommonspaceHostPerformancePhase.BootstrapStateSnapshot,
+			snapshotStartedAt,
+		);
+		const assemblyStartedAt = this.performancePhaseStartedAt();
+		const bootstrap = {
 			agents: this.configuredAgents(),
 			discoveredAgents: this.discoveredAgentCandidates,
-			state: this.publicSnapshot(),
+			state,
 			liveActivities: this.liveActivities(),
 			queuedFollowups: this.queuedFollowups(),
 			routing: this.publicRoutingConfiguration(),
 		};
+		this.recordPerformanceMeasurement(
+			CommonspaceHostPerformancePhase.BootstrapAssembly,
+			assemblyStartedAt,
+		);
+		return bootstrap;
 	}
 
 	async verifyDesktopNotifications(): Promise<CommonspaceNotificationVerification> {
@@ -4863,7 +4916,12 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			) {
 				throw new Error("invalid follow-up delivery mode");
 			}
+			const preparationStartedAt = this.performancePhaseStartedAt();
 			const prepared = await this.prepareSend(request);
+			this.recordPerformanceMeasurement(
+				CommonspaceHostPerformancePhase.AcceptanceRequestPreparation,
+				preparationStartedAt,
+			);
 			return this.acceptPreparedSend(prepared);
 		});
 	}
@@ -6142,6 +6200,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			);
 			throw error;
 		}
+		const mutationStartedAt = this.performancePhaseStartedAt();
 		const createdAt = now();
 		const acceptedId = messageId();
 		let thread = prepared.thread;
@@ -6287,8 +6346,12 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				};
 			}
 		}
+		this.recordPerformanceMeasurement(
+			CommonspaceHostPerformancePhase.AcceptanceStateMutation,
+			mutationStartedAt,
+		);
 		try {
-			await this.persist();
+			await this.persist("acceptance");
 		} catch (error) {
 			this.state = previousState;
 			await this.removeImageAttachments(
@@ -6300,9 +6363,15 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			throw error;
 		}
 		this.broadcastRevision();
+		const snapshotStartedAt = this.performancePhaseStartedAt();
+		const state = this.publicSnapshot();
+		this.recordPerformanceMeasurement(
+			CommonspaceHostPerformancePhase.AcceptanceResponseSnapshot,
+			snapshotStartedAt,
+		);
 		const sendResponse: SendMessageResponse = {
 			accepted,
-			state: this.publicSnapshot(),
+			state,
 		};
 		if (thread !== undefined) sendResponse.thread = thread;
 		return sendResponse;
@@ -8256,11 +8325,33 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		}
 	}
 
-	private persist(): Promise<void> {
+	private persist(measurementScope?: "acceptance"): Promise<void> {
+		const serializationStartedAt =
+			measurementScope === undefined
+				? undefined
+				: this.performancePhaseStartedAt();
 		const snapshot = JSON.stringify(this.state, null, 2);
+		if (measurementScope !== undefined)
+			this.recordPerformanceMeasurement(
+				CommonspaceHostPerformancePhase.AcceptancePersistenceSerialization,
+				serializationStartedAt,
+			);
+		const queuedAt =
+			measurementScope === undefined
+				? undefined
+				: this.performancePhaseStartedAt();
 		const task = this.writeTail
 			.catch(() => undefined)
 			.then(async () => {
+				if (measurementScope !== undefined)
+					this.recordPerformanceMeasurement(
+						CommonspaceHostPerformancePhase.AcceptancePersistenceQueue,
+						queuedAt,
+					);
+				const writeStartedAt =
+					measurementScope === undefined
+						? undefined
+						: this.performancePhaseStartedAt();
 				const temporary = join(
 					this.root,
 					`state-${process.pid}-${crypto.randomUUID()}.tmp`,
@@ -8290,6 +8381,11 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 						rm(temporary, { force: true }),
 						rm(backupTemporary, { force: true }),
 					]);
+					if (measurementScope !== undefined)
+						this.recordPerformanceMeasurement(
+							CommonspaceHostPerformancePhase.AcceptancePersistenceWrite,
+							writeStartedAt,
+						);
 				}
 			});
 		this.writeTail = task.catch(() => undefined);

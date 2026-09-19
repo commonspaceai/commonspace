@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { z } from "zod";
 import {
 	BenchmarkWorkspaceShape,
 	benchmarkDependencies,
@@ -13,6 +14,9 @@ import { CommonspaceHostService } from "../server/src/service.ts";
 
 const roots: string[] = [];
 const services: CommonspaceHostService[] = [];
+const persistedMessageListsSchema = z.object({
+	messages: z.record(z.string(), z.array(z.unknown())),
+});
 
 afterEach(async () => {
 	await Promise.all(services.splice(0).map((service) => service.close()));
@@ -179,3 +183,40 @@ it.each([BenchmarkWorkspaceShape.Dm, BenchmarkWorkspaceShape.MultiChannel])(
 		}
 	},
 );
+
+it("keeps benchmark observers from changing accepted durable state", async () => {
+	const root = await mkdtemp(join(tmpdir(), "commonspace-benchmark-observer-"));
+	roots.push(root);
+	const fixture = createBenchmarkFixture(BenchmarkWorkspaceShape.Dm, 120, root);
+	await writeBenchmarkFixture(root, fixture);
+	let firstObservation = true;
+	const service = new CommonspaceHostService(
+		{},
+		{ root },
+		{
+			...benchmarkDependencies,
+			onPerformanceMeasurement: () => {
+				if (firstObservation) {
+					firstObservation = false;
+					throw new Error("observer failed synchronously");
+				}
+				return Promise.reject(new Error("observer failed asynchronously"));
+			},
+		},
+	);
+	services.push(service);
+	await service.initialize();
+	await expect(
+		service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "Synthetic benchmark acceptance turn.",
+		}),
+	).resolves.toBeDefined();
+	await service.whenIdle();
+	await expect(service.bootstrap()).resolves.toBeDefined();
+	const memoryMessages = service.snapshot().messages;
+	const diskState = persistedMessageListsSchema.parse(
+		JSON.parse(await readFile(join(root, "state.json"), "utf8")),
+	);
+	expect(diskState.messages).toEqual(memoryMessages);
+});

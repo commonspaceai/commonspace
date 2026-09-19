@@ -4,11 +4,18 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { cpus, release, tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CommonspaceSearchRequest } from "@commonspace/shared";
+import type {
+	CommonspaceSearchRequest,
+	SendMessageRequest,
+} from "@commonspace/shared";
 import { buildChannelContextCompactionPrompt } from "../server/src/context.ts";
 import { projectChannelMemory } from "../server/src/memory.ts";
 import { searchCommonspace } from "../server/src/search.ts";
-import { CommonspaceHostService } from "../server/src/service.ts";
+import {
+	type CommonspaceHostPerformanceMeasurement,
+	CommonspaceHostPerformancePhase,
+	CommonspaceHostService,
+} from "../server/src/service.ts";
 import {
 	buildThreadContextCompactionPrompt,
 	projectThreadMemory,
@@ -26,6 +33,83 @@ interface Measurement<T> {
 	durationMs: number;
 	heapDeltaBytes: number;
 	rssDeltaBytes: number;
+}
+
+const acceptancePhaseNames = {
+	requestPreparation:
+		CommonspaceHostPerformancePhase.AcceptanceRequestPreparation,
+	stateMutation: CommonspaceHostPerformancePhase.AcceptanceStateMutation,
+	persistenceSerialization:
+		CommonspaceHostPerformancePhase.AcceptancePersistenceSerialization,
+	persistenceQueue: CommonspaceHostPerformancePhase.AcceptancePersistenceQueue,
+	persistenceWrite: CommonspaceHostPerformancePhase.AcceptancePersistenceWrite,
+	responseSnapshot: CommonspaceHostPerformancePhase.AcceptanceResponseSnapshot,
+} satisfies Record<string, CommonspaceHostPerformancePhase>;
+
+const bootstrapPhaseNames = {
+	stateSnapshot: CommonspaceHostPerformancePhase.BootstrapStateSnapshot,
+	assembly: CommonspaceHostPerformancePhase.BootstrapAssembly,
+} satisfies Record<string, CommonspaceHostPerformancePhase>;
+
+function phaseDuration(
+	measurements: readonly CommonspaceHostPerformanceMeasurement[],
+	phase: CommonspaceHostPerformancePhase,
+) {
+	const matches = measurements.filter(
+		(measurement) => measurement.phase === phase,
+	);
+	if (matches.length !== 1)
+		throw new Error(
+			`Expected one ${phase} measurement, received ${String(matches.length)}`,
+		);
+	const match = matches[0];
+	if (match === undefined) throw new Error(`Missing ${phase} measurement`);
+	return match.durationMs;
+}
+
+function percentOf(durationMs: number, parentDurationMs: number) {
+	if (parentDurationMs <= 0) return 0;
+	return (durationMs / parentDurationMs) * 100;
+}
+
+function acceptancePhaseMetrics(
+	measurements: readonly CommonspaceHostPerformanceMeasurement[],
+	parentDurationMs: number,
+) {
+	const metric = (phase: CommonspaceHostPerformancePhase) => {
+		const durationMs = phaseDuration(measurements, phase);
+		return {
+			durationMs,
+			percentOfAcceptance: percentOf(durationMs, parentDurationMs),
+		};
+	};
+	return {
+		requestPreparation: metric(acceptancePhaseNames.requestPreparation),
+		stateMutation: metric(acceptancePhaseNames.stateMutation),
+		persistenceSerialization: metric(
+			acceptancePhaseNames.persistenceSerialization,
+		),
+		persistenceQueue: metric(acceptancePhaseNames.persistenceQueue),
+		persistenceWrite: metric(acceptancePhaseNames.persistenceWrite),
+		responseSnapshot: metric(acceptancePhaseNames.responseSnapshot),
+	};
+}
+
+function bootstrapPhaseMetrics(
+	measurements: readonly CommonspaceHostPerformanceMeasurement[],
+	parentDurationMs: number,
+) {
+	const metric = (phase: CommonspaceHostPerformancePhase) => {
+		const durationMs = phaseDuration(measurements, phase);
+		return {
+			durationMs,
+			percentOfBootstrap: percentOf(durationMs, parentDurationMs),
+		};
+	};
+	return {
+		stateSnapshot: metric(bootstrapPhaseNames.stateSnapshot),
+		assembly: metric(bootstrapPhaseNames.assembly),
+	};
 }
 
 async function measure<T>(
@@ -158,6 +242,62 @@ async function seedWorkspace(
 	return benchmarkWorkspaceCounts(fixture.state);
 }
 
+function createMeasuredService(
+	root: string,
+	measurements: CommonspaceHostPerformanceMeasurement[],
+) {
+	return new CommonspaceHostService(
+		{},
+		{ root },
+		{
+			...benchmarkDependencies,
+			onPerformanceMeasurement: (measurement) => {
+				measurements.push(measurement);
+			},
+		},
+	);
+}
+
+function acceptanceRequest(
+	workspaceShape: BenchmarkWorkspaceShape,
+): SendMessageRequest {
+	if (workspaceShape === BenchmarkWorkspaceShape.Dm) {
+		return {
+			conversation: { kind: "dm", id: "codex" },
+			text: "Synthetic benchmark acceptance turn.",
+		};
+	}
+	return {
+		conversation: { kind: "channel", id: "benchmark-channel-0" },
+		text: "@benchmark-agent Synthetic benchmark acceptance turn.",
+	};
+}
+
+async function measureBootstrap(
+	service: CommonspaceHostService,
+	phaseMeasurements: CommonspaceHostPerformanceMeasurement[],
+) {
+	phaseMeasurements.length = 0;
+	const bootstrap = await measure(() => service.bootstrap());
+	const bootstrapPhases = bootstrapPhaseMetrics(
+		phaseMeasurements,
+		bootstrap.durationMs,
+	);
+	const serialized = await measure(() => JSON.stringify(bootstrap.result));
+	return {
+		bootstrap,
+		bootstrapPhases,
+		bootstrapBytes: Buffer.byteLength(serialized.result, "utf8"),
+		bootstrapPayloadSerialization: {
+			...metrics(serialized),
+			percentOfBootstrapProcessing: percentOf(
+				serialized.durationMs,
+				bootstrap.durationMs,
+			),
+		},
+	};
+}
+
 async function runSize(
 	messageCount: number,
 	workspaceShape: BenchmarkWorkspaceShape,
@@ -177,27 +317,25 @@ async function runSize(
 			workspaceShape,
 			messageCount,
 		);
-		service = new CommonspaceHostService({}, { root }, benchmarkDependencies);
+		const phaseMeasurements: CommonspaceHostPerformanceMeasurement[] = [];
+		service = createMeasuredService(root, phaseMeasurements);
 		const source = service;
 		const initialization = await measure(() => source.initialize());
+		phaseMeasurements.length = 0;
 		const acceptance = await measure(() =>
-			source.send({
-				conversation:
-					workspaceShape === BenchmarkWorkspaceShape.Dm
-						? { kind: "dm", id: "codex" }
-						: { kind: "channel", id: "benchmark-channel-0" },
-				text:
-					workspaceShape === BenchmarkWorkspaceShape.Dm
-						? "Synthetic benchmark acceptance turn."
-						: "@benchmark-agent Synthetic benchmark acceptance turn.",
-			}),
+			source.send(acceptanceRequest(workspaceShape)),
+		);
+		const acceptancePhases = acceptancePhaseMetrics(
+			phaseMeasurements,
+			acceptance.durationMs,
 		);
 		await source.whenIdle();
-		const bootstrap = await measure(() => source.bootstrap());
-		const bootstrapBytes = Buffer.byteLength(
-			JSON.stringify(bootstrap.result),
-			"utf8",
-		);
+		const {
+			bootstrap,
+			bootstrapBytes,
+			bootstrapPayloadSerialization,
+			bootstrapPhases,
+		} = await measureBootstrap(source, phaseMeasurements);
 		const search = await measure(() =>
 			searchCommonspace(bootstrap.result, {
 				query: "benchmark needle",
@@ -246,7 +384,10 @@ async function runSize(
 			restoredCounts,
 			initialization,
 			acceptance: metrics(acceptance),
+			acceptancePhases,
 			bootstrap: { ...metrics(bootstrap), payloadBytes: bootstrapBytes },
+			bootstrapPhases,
+			bootstrapPayloadSerialization,
 			search: { ...metrics(search), resultCount: search.result.results.length },
 			export: { ...metrics(exported), archiveBytes },
 			import: metrics(importMeasurement),
@@ -287,7 +428,39 @@ function distribution(values: number[]) {
 	return { min, median: (lower + upper) / 2, max };
 }
 
-function summarize(samples: Awaited<ReturnType<typeof runSize>>[]) {
+type WorkspaceBenchmarkSample = Awaited<ReturnType<typeof runSize>>;
+
+function summarizeAcceptancePhase(
+	samples: WorkspaceBenchmarkSample[],
+	phase: keyof WorkspaceBenchmarkSample["acceptancePhases"],
+) {
+	return {
+		durationMs: distribution(
+			samples.map((sample) => sample.acceptancePhases[phase].durationMs),
+		),
+		percentOfAcceptance: distribution(
+			samples.map(
+				(sample) => sample.acceptancePhases[phase].percentOfAcceptance,
+			),
+		),
+	};
+}
+
+function summarizeBootstrapPhase(
+	samples: WorkspaceBenchmarkSample[],
+	phase: keyof WorkspaceBenchmarkSample["bootstrapPhases"],
+) {
+	return {
+		durationMs: distribution(
+			samples.map((sample) => sample.bootstrapPhases[phase].durationMs),
+		),
+		percentOfBootstrap: distribution(
+			samples.map((sample) => sample.bootstrapPhases[phase].percentOfBootstrap),
+		),
+	};
+}
+
+function summarize(samples: WorkspaceBenchmarkSample[]) {
 	const operations = [
 		"initialization",
 		"acceptance",
@@ -301,7 +474,7 @@ function summarize(samples: Awaited<ReturnType<typeof runSize>>[]) {
 		"threadProjection",
 		"threadCompactionPreparation",
 	] as const;
-	return Object.fromEntries(
+	const operationSummary = Object.fromEntries(
 		operations.flatMap((operation) => {
 			const measurements = samples.flatMap((sample) =>
 				sample[operation] === undefined ? [] : [sample[operation]],
@@ -325,6 +498,50 @@ function summarize(samples: Awaited<ReturnType<typeof runSize>>[]) {
 			];
 		}),
 	);
+	return {
+		...operationSummary,
+		acceptancePhases: {
+			requestPreparation: summarizeAcceptancePhase(
+				samples,
+				"requestPreparation",
+			),
+			stateMutation: summarizeAcceptancePhase(samples, "stateMutation"),
+			persistenceSerialization: summarizeAcceptancePhase(
+				samples,
+				"persistenceSerialization",
+			),
+			persistenceQueue: summarizeAcceptancePhase(samples, "persistenceQueue"),
+			persistenceWrite: summarizeAcceptancePhase(samples, "persistenceWrite"),
+			responseSnapshot: summarizeAcceptancePhase(samples, "responseSnapshot"),
+		},
+		bootstrapPhases: {
+			stateSnapshot: summarizeBootstrapPhase(samples, "stateSnapshot"),
+			assembly: summarizeBootstrapPhase(samples, "assembly"),
+		},
+		bootstrapPayloadSerialization: {
+			durationMs: distribution(
+				samples.map(
+					(sample) => sample.bootstrapPayloadSerialization.durationMs,
+				),
+			),
+			heapDeltaBytes: distribution(
+				samples.map(
+					(sample) => sample.bootstrapPayloadSerialization.heapDeltaBytes,
+				),
+			),
+			rssDeltaBytes: distribution(
+				samples.map(
+					(sample) => sample.bootstrapPayloadSerialization.rssDeltaBytes,
+				),
+			),
+			percentOfBootstrapProcessing: distribution(
+				samples.map(
+					(sample) =>
+						sample.bootstrapPayloadSerialization.percentOfBootstrapProcessing,
+				),
+			),
+		},
+	};
 }
 
 async function sourceProvenance() {
@@ -332,6 +549,7 @@ async function sourceProvenance() {
 	const files = [
 		"scripts/benchmark-workspace.ts",
 		"scripts/benchmark-workspace-fixtures.ts",
+		"server/src/service.ts",
 		"server/src/thread-context.ts",
 		"package.json",
 	];
@@ -405,9 +623,9 @@ process.stdout.write(
 				messageShape:
 					"dm: original alternating request/reply pairs; multi-channel: 4 Channels, 3 agents, 3 Projects, cyclic 1/3/8/16-pair Threads, two Projects per Thread, routing receipts, tool activity, corrections/pins/4 KiB attachments every fifth Thread",
 				acceptance:
-					"one service.send call through atomic JSON persistence; DM or new Channel root with explicit @benchmark-agent; stub reply finishes outside acceptance timing",
+					"one service.send call through atomic JSON persistence; DM or new Channel root with explicit @benchmark-agent; optional service instrumentation separates request preparation, state mutation, JSON serialization, persistence queue wait, atomic file work, and response snapshot/redaction; stub reply finishes outside acceptance timing",
 				bootstrap:
-					"service bootstrap processing; serialized UTF-8 payload size calculated outside timing",
+					"service bootstrap processing split into public state snapshot/redaction and remaining assembly; serialized UTF-8 payload time and size measured separately outside service processing, with its duration also reported as a comparison percentage of service bootstrap processing and therefore allowed to exceed 100%",
 				search:
 					"original broad two-term query, limit 24; synthetic Project directories are empty",
 				filteredSearch:
