@@ -42,6 +42,9 @@ The current captured journey includes search hover/focus/open/query/keyboard sta
 
 ## Storybook visual lab
 
+The connected workshop is **Workspace / Conversation** (`?path=/story/workspace--conversation`). It renders `CommonspaceApp` and `CommonspaceClientStore`, exactly as the live app does. `workspace-mock-api.ts` supplies disposable MSW responses; navigation, sends, unread/saved state, creation forms, and settings use the real components. Edit those shared components and inspect hot reload. Reload the story to reset the mock workspace. Unsupported native operations return a visible preview error instead of reaching a local service. There is no separate prototype UI to port or maintain.
+
+
 Use Storybook for isolated component and screen states:
 
 ```bash
@@ -55,9 +58,37 @@ Run these as separate steps according to the check you need. The Storybook devel
 
 Stories under `ui/src/stories` use production tokens with local fixture stores and fetchers. They do not require the Commonspace API. Storybook `play` functions test interactions and accessibility in Chromium. The separate `tests/storybook-visual.spec.ts` suite compares selected canvases with approved PNG baselines under `tests/storybook-visual.spec.ts-snapshots`.
 
-The development server also exposes the Components Manifest and an MCP endpoint at `http://localhost:6006/mcp`. These help an agent inspect component APIs, stories, and test feedback. They do not establish visual acceptance.
+The development server also exposes the Components Manifest and an MCP endpoint at `http://127.0.0.1:6006/mcp`. The addon is already installed and registered in `ui/.storybook/main.ts`; do not reinstall it during normal iteration. `.codex/config.toml` supplies the project-scoped Codex connection. MCP runs only in the development server, not the static Storybook build or isolated CLI test configuration.
+
+### Storybook MCP workflow
+
+Use this loop for UI work:
+
+1. Start or reuse `pnpm storybook`. Connect to `http://127.0.0.1:6006/mcp` and discover its available tools. After adding a client connection, reload that client's MCP configuration if the tools are not yet exposed.
+2. Call `docs-list` with `withStoryIds: true`. Use `docs-show` for the relevant component and `docs-show-story` for specific states. Reuse existing production components and patterns; inspect source to confirm ownership and implementation before editing.
+3. Before adding or changing stories, call `get-storybook-story-instructions`. Keep fixtures synthetic and exercise observable user behavior.
+4. While exploring visual composition, use the running canvas and hot reload; do not run tests or rebuild after each visual edit. Once an interaction is settled, call `test-run` for its affected story IDs. Full suites belong to production integration, not the visual sketch loop.
+5. Call `stories-preview` for the changed screens. Open the returned URLs, inspect their actual pixels, and exercise the affected flow. Establish the desktop composition at 1440 × 960 first, including meaningful hover/focus and Light/Dark states. Mobile/tablet and responsive redesign belong to a separately requested pass after the desktop design is settled. Return useful preview links with the result.
+
+MCP supplies component contracts, story discovery, previews, interaction results, and accessibility feedback. It does not judge composition or certify visual quality. Follow the pixel review protocol below as a separate required step.
+
+If MCP tools are not exposed by the current client, the same local endpoint can be called through a standard MCP SDK client. If the endpoint or an individual tool fails, record the actual failure and continue with `pnpm test:storybook -- <story-file-filter>` and browser inspection. Do not claim those fallback checks ran through MCP. Keep Storybook's manager open when using tools that depend on its testing channel.
 
 Do not use `--update-snapshots` as an ordinary verification step. Inspect the affected state, decide whether the change is correct, and update only an accepted baseline.
+
+### Shared-component review
+
+Start at **Review / Component System / Shared patterns**. It renders production buttons, filters, agent identities, and counters together, then links to real screens. This is the entry point for comparing the same pattern across contexts, not a substitute for checking those contexts.
+
+With the Storybook development server running, capture the declared review catalog:
+
+```bash
+pnpm review:ui
+```
+
+This captures the current source served at `http://127.0.0.1:6006` in Light and Dark at `1440 × 960` and `1180 × 820`. It writes PNGs and `review.json` under `artifacts/ui-review/<run>/`. Readiness selectors identify the intended state; page and console errors fail the capture. The manifest marks every visual inspection **pending**, even when capture succeeds. It does not run or certify the separate interaction test suite, compare approved baselines, or certify release readiness.
+
+Open the images and record concrete findings using the protocol below. Check the same identity, control, and grouping across screens before approving a shared change. The catalog is a representative desktop set, not complete state coverage; separately exercise hover, keyboard focus, menus, empty states, and narrow-pane behavior affected by the change. In particular, the thread must be checked at the width where it changes from side by side to a right-side overlay.
 
 Dedicated stories cover primitives, workspace startup, routing, sorting, follow-up delivery, search, permissions, and runtime activity. Use Storybook for isolated states; use the live verifier for assembled UI/API behavior.
 

@@ -69,6 +69,8 @@ pnpm storybook
 
 Open `http://127.0.0.1:6006`. The development server is loopback-only, and fails instead of silently selecting another port. Stories use local fixtures, so they do not need the Commonspace API. The testing panel can rerun the selected story's interactions and accessibility checks after an edit.
 
+For agent-assisted UI work, use the installed Storybook MCP addon at `http://127.0.0.1:6006/mcp`. The project connection lives in `.codex/config.toml`. Follow the required [MCP discovery, test, preview, and pixel-review loop](../design/visual-verification.md#storybook-mcp-workflow); terminal tests below remain useful for CI and as an explicit fallback when MCP is unavailable.
+
 For a focused terminal loop, pass a story-file filter:
 
 ```bash

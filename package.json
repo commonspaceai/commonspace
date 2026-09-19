@@ -40,6 +40,7 @@
 		"test:storybook:smoke": "pnpm --filter @commonspace/ui test-storybook:smoke",
 		"test:storybook:watch": "pnpm --filter @commonspace/ui test-storybook:watch",
 		"test:visual": "node scripts/run-visual-tests.mjs",
+		"review:ui": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/capture-ui-review.mjs",
 		"e2e:server": "node server/node_modules/tsx/dist/cli.mjs scripts/e2e-server.mjs",
 		"test:e2e": "pnpm build && pnpm test:e2e:built",
 		"test:e2e:built": "playwright test --config tests/e2e/playwright.config.ts",
