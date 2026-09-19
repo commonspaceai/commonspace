@@ -638,12 +638,13 @@ function MessageRow({
 	return (
 		<article
 			id={elementId}
+			tabIndex={highlighted ? -1 : undefined}
 			className={cn(
-				"group/message relative mx-auto mb-0 grid w-full max-w-[920px] grid-cols-[32px_minmax(0,1fr)] gap-[11px] rounded-md px-1.5 py-2.5",
+				"group/message relative mx-auto mb-0 grid w-full max-w-[920px] scroll-mt-16 grid-cols-[32px_minmax(0,1fr)] gap-[11px] rounded-md px-1.5 py-2.5 transition-[background-color,box-shadow] focus-visible:outline-none",
 				flush && "px-0 py-2.5",
 				quotedSource &&
 					"max-w-none grid-cols-[24px_minmax(0,1fr)] gap-2.5 rounded-none border-y border-border/70 bg-muted/20 px-4 py-3",
-				highlighted && "bg-muted/40",
+				highlighted && "bg-primary/[0.06] ring-1 ring-inset ring-primary/30",
 			)}
 			data-author={message.authorType}
 			aria-current={highlighted ? "true" : undefined}
@@ -679,7 +680,7 @@ function MessageRow({
 					)}
 				>
 					<strong>{message.authorName}</strong>
-					<time className="whitespace-nowrap text-muted-foreground text-[11px]">
+					<time className="whitespace-nowrap text-xs text-muted-foreground">
 						{new Date(message.createdAt).toLocaleTimeString([], {
 							hour: "2-digit",
 							minute: "2-digit",
@@ -1241,6 +1242,7 @@ export function CommonspaceConversation({
 		string | null
 	>(targetMessageId ?? null);
 	const previousFocusScopeKey = useRef(activeFocusScopeKey);
+	const pendingTargetFocusId = useRef<string | null>(targetMessageId);
 	const [contextSettingsOpen, setContextSettingsOpen] = useState(false);
 	const conversationLayout = useRef<HTMLDivElement>(null);
 	const {
@@ -1267,6 +1269,35 @@ export function CommonspaceConversation({
 		if (previousThreadId.current !== null && snapshot.activeThreadId === null)
 			composer.current?.focus();
 		previousThreadId.current = snapshot.activeThreadId;
+	}, [snapshot.activeThreadId]);
+	useEffect(() => {
+		if (snapshot.activeThreadId === null) return;
+		const switchComposer = (event: KeyboardEvent) => {
+			if (
+				event.key !== "F6" ||
+				event.altKey ||
+				event.ctrlKey ||
+				event.metaKey ||
+				event.defaultPrevented
+			)
+				return;
+			const layout = conversationLayout.current;
+			const active = document.activeElement;
+			if (
+				layout === null ||
+				!(active instanceof Node) ||
+				!layout.contains(active)
+			)
+				return;
+			event.preventDefault();
+			if (threadPanel.current?.contains(active) === true)
+				composer.current?.focus();
+			else threadComposer.current?.focus();
+		};
+		document.addEventListener("keydown", switchComposer);
+		return () => {
+			document.removeEventListener("keydown", switchComposer);
+		};
 	}, [snapshot.activeThreadId]);
 	const rootInputOccupied = useRef(false);
 	const threadInputOccupied = useRef(false);
@@ -1589,13 +1620,15 @@ export function CommonspaceConversation({
 		(focusedComposer === null && threadComposerHasContent);
 	const rootComposerReceded =
 		activeThread !== undefined &&
-		!rootComposerHasContent &&
 		(focusedComposer === "thread" ||
-			(focusedComposer === null && threadComposerHasContent));
+			(focusedComposer === null &&
+				!rootComposerHasContent &&
+				threadComposerHasContent));
 	const threadComposerReceded =
-		!threadComposerHasContent &&
-		(focusedComposer === "channel" ||
-			(focusedComposer === null && rootComposerHasContent));
+		focusedComposer === "channel" ||
+		(focusedComposer === null &&
+			!threadComposerHasContent &&
+			rootComposerHasContent);
 	const rootIsCommand =
 		pendingImages.length === 0 &&
 		pendingFiles.length === 0 &&
@@ -1620,27 +1653,6 @@ export function CommonspaceConversation({
 		bottom.current?.scrollIntoView({ block: "end" });
 	}, [messages.length, snapshot.sending, directMessagePhase]);
 	useEffect(() => {
-		void snapshot.activeThreadId;
-		if (targetMessageId == null) return;
-		const targetMessage = messages.find(
-			(message) => message.id === targetMessageId,
-		);
-		setFocusedMessageId(targetMessageId);
-		setFocusedRootMessageId(targetMessage?.parentMessageId ?? targetMessageId);
-		const target = document.getElementById(
-			`commonspace-message-${targetMessageId}`,
-		);
-		if (target === null) return;
-		suppressThreadAutoScroll.current = true;
-		target.scrollIntoView({ block: "center", behavior: "smooth" });
-		onTargetMessageHandled?.();
-	}, [
-		messages,
-		onTargetMessageHandled,
-		snapshot.activeThreadId,
-		targetMessageId,
-	]);
-	useEffect(() => {
 		composer.current?.focus();
 		setCommandFeedback(null);
 		setPendingImages([]);
@@ -1654,6 +1666,38 @@ export function CommonspaceConversation({
 			setContextSettingsOpen(false);
 		}
 	}, [settingsRequest, snapshot.activeConversation]);
+	useEffect(() => {
+		void snapshot.activeThreadId;
+		if (targetMessageId == null) return;
+		const targetMessage = messages.find(
+			(message) => message.id === targetMessageId,
+		);
+		setFocusedMessageId(targetMessageId);
+		setFocusedRootMessageId(targetMessage?.parentMessageId ?? targetMessageId);
+		pendingTargetFocusId.current = targetMessageId;
+		onTargetMessageHandled?.();
+	}, [
+		messages,
+		onTargetMessageHandled,
+		snapshot.activeThreadId,
+		targetMessageId,
+	]);
+	useEffect(() => {
+		const pendingId = pendingTargetFocusId.current;
+		if (pendingId === null) return;
+		const focusFrame = requestAnimationFrame(() => {
+			if (pendingTargetFocusId.current !== pendingId) return;
+			const target = document.getElementById(
+				`commonspace-message-${pendingId}`,
+			);
+			if (target === null) return;
+			suppressThreadAutoScroll.current = true;
+			target.scrollIntoView({ block: "center", behavior: "smooth" });
+			target.focus({ preventScroll: true });
+			pendingTargetFocusId.current = null;
+		});
+		return () => cancelAnimationFrame(focusFrame);
+	});
 	useEffect(() => {
 		const previous = previousFocusScopeKey.current;
 		previousFocusScopeKey.current = activeFocusScopeKey;
@@ -1840,12 +1884,22 @@ export function CommonspaceConversation({
 
 		if (resolved.command.id === "help") {
 			const commands = slashCommandSuggestions("/", conversation.kind);
+			const shortcuts = [
+				"Command/Control+K — Search Commonspace",
+				...(snapshot.activeThreadId === null
+					? []
+					: ["F6 — Switch between Channel and Thread writing"]),
+				"Escape — Close the active panel",
+			];
 			setCommandFeedback({
 				tone: "info",
 				title: "Commonspace commands",
-				body: commands
-					.map((command) => `${command.name} — ${command.description}`)
-					.join("\n"),
+				body: [
+					...commands.map(
+						(command) => `${command.name} — ${command.description}`,
+					),
+					...shortcuts,
+				].join("\n"),
 			});
 			return;
 		}
@@ -2593,8 +2647,9 @@ export function CommonspaceConversation({
 													)}
 												<article
 													id={`commonspace-message-${root.id}`}
+													tabIndex={threadIsFocused ? -1 : undefined}
 													className={cn(
-														"relative mx-auto mb-2 w-full max-w-[920px] px-1.5 py-1",
+														"relative mx-auto mb-2 w-full max-w-[920px] px-1.5 py-1 focus-visible:outline-none",
 														threadIsFocused &&
 															"before:absolute before:inset-y-3 before:left-0 before:w-0.5 before:rounded-full before:bg-border",
 													)}
@@ -2835,9 +2890,9 @@ export function CommonspaceConversation({
 							}
 							className={cn(
 								"mx-auto mb-[22px] w-[calc(100%-44px)] max-w-[920px] shrink-0 transition-[opacity,background-color,border-color,box-shadow]",
-								rootComposerEmphasized && "border-primary/35 bg-card shadow-sm",
+								rootComposerEmphasized && "border-primary/50 bg-card shadow-sm",
 								rootComposerReceded &&
-									"border-transparent bg-muted/30 opacity-80",
+									"border-transparent bg-muted/30 opacity-70",
 							)}
 							onFocusCapture={() => {
 								setFocusedComposer("channel");
@@ -2871,6 +2926,9 @@ export function CommonspaceConversation({
 										isChannel
 											? `Post in ${heading.title}`
 											: `Message ${heading.title}`
+									}
+									aria-keyshortcuts={
+										activeThread === undefined ? undefined : "F6"
 									}
 									aria-autocomplete="list"
 									aria-controls={
@@ -3003,6 +3061,11 @@ export function CommonspaceConversation({
 										Enter to send · files · / commands
 									</span>
 								) : null}
+								{isChannel && rootComposerHasContent && (
+									<span className="min-w-0 truncate text-xs font-medium text-foreground">
+										#{heading.title} · New Thread
+									</span>
+								)}
 								{(directMessageActivities.length === 0 || isChannel) && (
 									<button
 										type="submit"
@@ -3072,7 +3135,7 @@ export function CommonspaceConversation({
 						>
 							<header className="grid min-h-[88px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b px-5 py-3">
 								<div className="min-w-0">
-									<div className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
+									<div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
 										<span>Thread in</span>
 										<button
 											type="button"
@@ -3130,7 +3193,7 @@ export function CommonspaceConversation({
 										<XIcon className="size-4" aria-hidden="true" />
 									</button>
 								</div>
-								<div className="col-span-2 flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+								<div className="col-span-2 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
 									<span
 										className="inline-flex min-w-0 items-center gap-1.5"
 										title="Replies continue the saved native agent session for this Thread."
@@ -3510,9 +3573,9 @@ export function CommonspaceConversation({
 									className={cn(
 										"mx-auto mb-[22px] w-[calc(100%-44px)] max-w-[920px] shrink-0 transition-[opacity,background-color,border-color,box-shadow]",
 										threadComposerEmphasized &&
-											"border-primary/35 bg-card shadow-sm",
+											"border-primary/50 bg-card shadow-sm",
 										threadComposerReceded &&
-											"border-transparent bg-muted/30 opacity-80",
+											"border-transparent bg-muted/30 opacity-70",
 									)}
 									onFocusCapture={() => {
 										setFocusedComposer("thread");
@@ -3570,6 +3633,7 @@ export function CommonspaceConversation({
 										<MessageComposerInput
 											ref={threadComposer}
 											aria-label="Reply in thread"
+											aria-keyshortcuts="F6"
 											aria-autocomplete="list"
 											aria-controls={
 												threadSuggestionCount > 0
@@ -3703,6 +3767,11 @@ export function CommonspaceConversation({
 												}}
 											/>
 										</label>
+										{threadComposerHasContent && (
+											<span className="min-w-0 truncate text-xs font-medium text-foreground">
+												Thread · Reply
+											</span>
+										)}
 										{(activeThreadActivities.length === 0 ||
 											threadReplyTarget !== null) && (
 											<button

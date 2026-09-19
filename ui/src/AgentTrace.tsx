@@ -281,8 +281,9 @@ export function AgentTrace({ authorName, trace }: AgentTraceProps) {
 	return (
 		<Popover>
 			<PopoverTrigger
-				className="ml-auto inline-flex min-h-6 items-center gap-1 text-[11px] font-normal text-muted-foreground hover:text-foreground"
-				aria-label={`Show ${runtime} activity for ${authorName}`}
+				className="ml-auto inline-flex min-h-6 items-center gap-1 text-xs font-normal text-muted-foreground hover:text-foreground"
+				aria-label={`Show activity for ${authorName}`}
+				title={`${runtime} activity`}
 			>
 				<Clock3Icon className="size-3" aria-hidden="true" /> Activity{" "}
 				<ChevronDownIcon className="size-3" aria-hidden="true" />
@@ -300,7 +301,7 @@ export function AgentTrace({ authorName, trace }: AgentTraceProps) {
 						<XIcon className="size-4" />
 					</PopoverClose>
 				</div>
-				<p className="mb-2 text-[11px] text-muted-foreground">
+				<p className="mb-2 text-xs text-muted-foreground">
 					{runtime} · {durationLabel(trace.startedAt, trace.completedAt)}
 				</p>
 				<AgentTraceTimeline entries={trace.entries} />

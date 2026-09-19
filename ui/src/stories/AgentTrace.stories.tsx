@@ -27,7 +27,7 @@ export const Expanded: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const trigger = canvas.getByRole("button", {
-			name: "Show Hermes activity for Review Bot",
+			name: "Show activity for Review Bot",
 		});
 		await userEvent.click(trigger);
 		await expect(trigger).toHaveAttribute("aria-expanded", "true");

@@ -623,7 +623,7 @@ export const SearchOpensConversation: Story = {
 		await userEvent.keyboard("{Control>}k{/Control}");
 		await userEvent.click(
 			await page.findByRole("option", {
-				name: /Open Channel: #design-review/iu,
+				name: /Open Message: Review the visual baseline/iu,
 			}),
 		);
 		await expect(
@@ -632,6 +632,12 @@ export const SearchOpensConversation: Story = {
 		await expect(
 			page.queryByRole("dialog", { name: "Search Commonspace" }),
 		).not.toBeInTheDocument();
+		const target = canvasElement.querySelector<HTMLElement>(
+			"#commonspace-message-message-root",
+		);
+		if (target === null) throw new Error("Expected the recovered message.");
+		await waitFor(() => expect(target).toHaveFocus());
+		await expect(target).toHaveAttribute("aria-current", "true");
 	},
 };
 

@@ -229,9 +229,15 @@ export const ThreadIdentityAndScope: Story = {
 			"data-composer-emphasis",
 			"receded",
 		);
-		await userEvent.click(
-			thread.getByRole("textbox", { name: "Reply in thread" }),
-		);
+		const channelInput = canvas.getByRole("textbox", {
+			name: "Post in design-review",
+		});
+		const threadInput = thread.getByRole("textbox", {
+			name: "Reply in thread",
+		});
+		await userEvent.click(threadInput);
+		await userEvent.type(threadInput, "Keep this reply scoped");
+		await expect(thread.getByText("Thread · Reply")).toBeVisible();
 		await expect(channelComposer).toHaveAttribute(
 			"data-composer-emphasis",
 			"receded",
@@ -240,6 +246,12 @@ export const ThreadIdentityAndScope: Story = {
 			"data-composer-emphasis",
 			"active",
 		);
+		await userEvent.keyboard("{F6}");
+		await expect(channelInput).toHaveFocus();
+		await userEvent.type(channelInput, "Keep this post scoped");
+		await expect(canvas.getByText("#design-review · New Thread")).toBeVisible();
+		await userEvent.keyboard("{F6}");
+		await expect(threadInput).toHaveFocus();
 
 		await userEvent.click(
 			thread.getByRole("button", { name: "Open thread context" }),
@@ -724,9 +736,23 @@ export const FocusedReply: Story = {
 		store: createStoryStore(storyBootstrap, {
 			activeConversation: channel,
 			activeProjectId: primaryProject.id,
+			activeThreadId: "thread-review",
 		}),
 		targetMessageId: "message-reply",
 		onTargetMessageHandled: fn(),
+	},
+	play: async ({ canvasElement }) => {
+		await waitFor(() =>
+			expect(
+				canvasElement.querySelector("#commonspace-message-message-reply"),
+			).not.toBeNull(),
+		);
+		const target = canvasElement.querySelector<HTMLElement>(
+			"#commonspace-message-message-reply",
+		);
+		if (target === null) throw new Error("Expected the focused reply message.");
+		await waitFor(() => expect(target).toHaveFocus());
+		await expect(target).toHaveAttribute("aria-current", "true");
 	},
 };
 
