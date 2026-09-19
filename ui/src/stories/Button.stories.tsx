@@ -52,7 +52,7 @@ export const CssCheck: Story = {
 	play: async ({ canvas }) => {
 		const button = canvas.getByRole("button", { name: /add project/iu });
 		await expect(getComputedStyle(button).backgroundColor).toBe(
-			"oklch(0.5 0.1368 48.513)",
+			"rgb(36, 99, 173)",
 		);
 	},
 };

@@ -1,3 +1,8 @@
+import {
+	CommonspaceRoutingProvider,
+	CredentialSource,
+	RoutingConfigurationIssue,
+} from "@commonspace/shared";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { CommonspaceSidebar } from "../CommonspaceSidebar";
@@ -16,11 +21,11 @@ import {
 
 const apiRoutingBootstrap = createStoryBootstrap({
 	routing: {
-		provider: "openai-compatible",
+		provider: CommonspaceRoutingProvider.OpenAiCompatible,
 		model: "gpt-5.6-sol",
-		harnessAgentId: "",
 		baseUrl: "https://api.openai.com/v1",
 		apiKeyConfigured: true,
+		apiKeySource: CredentialSource.Saved,
 	},
 });
 
@@ -166,7 +171,7 @@ async function prepareChannelSorting(canvasElement: HTMLElement) {
 
 export const Expanded: Story = {};
 
-export const AgentModelsVisible: Story = {
+export const AgentModelsAccessible: Story = {
 	args: {
 		...meta.args,
 		store: createStoryStore(configuredModelBootstrap),
@@ -180,12 +185,8 @@ export const AgentModelsVisible: Story = {
 			name: "Message agent Build Smith",
 		});
 
-		await expect(
-			within(configuredAgent).getByText("gpt-5.6-sol"),
-		).toBeVisible();
-		await expect(
-			within(defaultAgent).getByText("Profile default"),
-		).toBeVisible();
+		await expect(configuredAgent).toHaveAccessibleDescription("gpt-5.6-sol");
+		await expect(defaultAgent).toHaveAccessibleDescription("Profile default");
 	},
 };
 
@@ -433,7 +434,7 @@ export const WorkspaceSettings: Story = {
 		);
 
 		await expect(
-			within(document.body).getByRole("form", { name: "Workspace settings" }),
+			within(document.body).getByRole("region", { name: "Workspace settings" }),
 		).toBeVisible();
 	},
 };
@@ -448,7 +449,7 @@ export const WorkspaceSettingsChannelTransition: Story = {
 		await userEvent.click(
 			canvas.getByRole("button", { name: "Commonspace settings" }),
 		);
-		const settings = within(document.body).getByRole("form", {
+		const settings = within(document.body).getByRole("region", {
 			name: "Workspace settings",
 		});
 		await expect(settings).toBeVisible();
@@ -473,6 +474,7 @@ export const WorkspaceSettingsApiInference: Story = {
 		);
 
 		const page = within(document.body);
+		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
 		const connectionHeading = page.getByRole("heading", { name: "Connection" });
 		connectionHeading.scrollIntoView({ block: "start" });
 
@@ -488,17 +490,79 @@ export const WorkspaceSettingsApiInference: Story = {
 	},
 };
 
+export const WorkspaceSettingsJevSetup: Story = {
+	args: {
+		store: createStoryStore(apiRoutingBootstrap, {
+			diagnostics: async () => ({
+				service: {
+					status: "ready",
+					stateVersion: 30,
+					storage: "ready",
+					projectlessWorkspace: "ready",
+				},
+				inference: {
+					provider: CommonspaceRoutingProvider.OpenAiCompatible,
+					location: "remote",
+					configured: true,
+					sends: [],
+				},
+				harnesses: [],
+			}),
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByRole("button", {
+				name: "Commonspace settings",
+			}),
+		);
+		const page = within(document.body);
+		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
+		await expect(
+			page.queryByText("Configured", { exact: true }),
+		).not.toBeInTheDocument();
+		await expect(
+			page.getByText("Saved router: OpenAI-compatible API"),
+		).toBeVisible();
+		await expect(page.getByLabelText("TypeSafe API key")).toBeDisabled();
+		await expect(page.getByLabelText("TypeSafe API key")).not.toBeVisible();
+		await userEvent.click(
+			page.getByRole("checkbox", { name: "Use Jev for routing" }),
+		);
+		await expect(page.getByLabelText("TypeSafe API key")).toBeEnabled();
+		await expect(page.getByLabelText("TypeSafe API key")).toBeVisible();
+		await expect(
+			page.getByRole("heading", { name: "Context compaction provider" }),
+		).toBeVisible();
+		// Unsaved edits must not claim that the active router has changed.
+		await expect(
+			page.getByText("Saved router: OpenAI-compatible API"),
+		).toBeVisible();
+		await userEvent.click(
+			page.getByRole("button", { name: "Check saved configuration" }),
+		);
+		await expect(
+			page.getByLabelText("Inference configuration status"),
+		).toHaveTextContent("Provider connectivity has not been tested");
+	},
+};
+
 export const WorkspaceSettingsJev: Story = {
 	args: {
 		store: createStoryStore({
 			...apiRoutingBootstrap,
 			routing: {
-				provider: "openai-compatible",
+				provider: CommonspaceRoutingProvider.OpenAiCompatible,
 				model: "gpt-5.6-sol",
-				harnessAgentId: null,
 				baseUrl: "https://api.openai.com/v1",
 				apiKeyConfigured: true,
-				jev: { model: "jev-1.13.0", apiKeyConfigured: true },
+				apiKeySource: CredentialSource.Saved,
+				jev: {
+					enabled: true,
+					model: "jev-1.13.0",
+					apiKeyConfigured: true,
+					apiKeySource: CredentialSource.Saved,
+				},
 			},
 		}),
 	},
@@ -509,6 +573,7 @@ export const WorkspaceSettingsJev: Story = {
 			}),
 		);
 		const page = within(document.body);
+		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
 		await expect(
 			page.getByRole("checkbox", { name: "Use Jev for routing" }),
 		).toBeChecked();
@@ -523,7 +588,9 @@ export const WorkspaceSettingsJev: Story = {
 		await userEvent.click(
 			page.getByRole("checkbox", { name: "Use Jev for routing" }),
 		);
-		await expect(page.queryByLabelText("Jev model")).not.toBeInTheDocument();
+		await expect(page.getByLabelText("Jev model")).toBeDisabled();
+		await expect(page.getByLabelText("TypeSafe API key")).toBeDisabled();
+		await expect(page.getByLabelText("TypeSafe API key")).not.toBeVisible();
 	},
 };
 
@@ -538,6 +605,7 @@ export const WorkspaceSettingsNotifications: Story = {
 		);
 
 		const page = within(document.body);
+		await userEvent.click(page.getByRole("tab", { name: "Notifications" }));
 		const notificationsHeading = page.getByRole("heading", {
 			name: "OS notifications",
 		});
@@ -591,6 +659,7 @@ export const WorkspaceSettingsNotificationFallback: Story = {
 			canvas.getByRole("button", { name: "Commonspace settings" }),
 		);
 		const page = within(document.body);
+		await userEvent.click(page.getByRole("tab", { name: "Notifications" }));
 		await userEvent.click(
 			page.getByRole("button", { name: "Send test notification" }),
 		);
@@ -611,12 +680,14 @@ export const WorkspaceSettingsOperations: Story = {
 		);
 
 		const page = within(document.body);
+		await userEvent.click(page.getByRole("tab", { name: "Diagnostics" }));
 		const diagnostics = page.getByRole("region", {
 			name: "Runtime diagnostics",
 		});
 		diagnostics.scrollIntoView({ block: "start" });
 
 		await expect(diagnostics).toBeVisible();
+		await userEvent.click(page.getByRole("tab", { name: "Data" }));
 		await expect(
 			page.getByRole("region", { name: "Workspace data management" }),
 		).toBeVisible();
@@ -668,6 +739,7 @@ export const ConversationDeletion: Story = {
 			}),
 		);
 		const page = within(document.body);
+		await userEvent.click(page.getByRole("tab", { name: "Data" }));
 		await expect(
 			page.queryByRole("combobox", { name: "Conversation" }),
 		).not.toBeInTheDocument();
@@ -687,5 +759,215 @@ export const ConversationDeletion: Story = {
 		await expect(
 			dialog.getByRole("button", { name: "Review deletion" }),
 		).toBeEnabled();
+	},
+};
+
+const saveRunDefaults = fn(async () => undefined);
+const saveInference = fn(async () => undefined);
+export const IndependentSettingsSaves: Story = {
+	args: {
+		store: createStoryStore(
+			createStoryBootstrap({
+				routing: {
+					provider: CommonspaceRoutingProvider.Unconfigured,
+					reason: RoutingConfigurationIssue.Invalid,
+					message: "Saved inference configuration is invalid.",
+				},
+			}),
+			{ mutate: saveRunDefaults, updateRoutingConfiguration: saveInference },
+		),
+	},
+	play: async ({ canvasElement }) => {
+		saveRunDefaults.mockClear();
+		saveInference.mockClear();
+		await userEvent.click(
+			within(canvasElement).getByRole("button", {
+				name: "Commonspace settings",
+			}),
+		);
+		const page = within(document.body);
+		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
+		await expect(page.getByRole("alert")).toHaveTextContent(
+			"Saved inference configuration is invalid",
+		);
+		await userEvent.click(page.getByRole("tab", { name: "Agent runs" }));
+		await userEvent.selectOptions(
+			page.getByLabelText("Workspace reasoning"),
+			"native",
+		);
+		await userEvent.click(
+			page.getByRole("button", { name: "Save agent run settings" }),
+		);
+		await waitFor(() => expect(saveRunDefaults).toHaveBeenCalledOnce());
+		await expect(saveInference).not.toHaveBeenCalled();
+		await expect(page.getByText("Agent run settings saved.")).toBeVisible();
+		await userEvent.clear(page.getByLabelText("Default max agents"));
+		await userEvent.type(page.getByLabelText("Default max agents"), "9");
+		await expect(
+			page.queryByText("Agent run settings saved."),
+		).not.toBeInTheDocument();
+		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
+		await userEvent.type(
+			page.getByLabelText("Routing model"),
+			"synthetic-router",
+		);
+		await userEvent.click(
+			page.getByRole("button", { name: "Save inference settings" }),
+		);
+		await waitFor(() => expect(saveInference).toHaveBeenCalledOnce());
+		await expect(saveRunDefaults).toHaveBeenCalledOnce();
+	},
+};
+export const EnvironmentCredentials: Story = {
+	args: {
+		store: createStoryStore(
+			createStoryBootstrap({
+				routing: {
+					provider: CommonspaceRoutingProvider.OpenAiCompatible,
+					model: "router",
+					baseUrl: "https://api.openai.com/v1",
+					apiKeyConfigured: true,
+					apiKeySource: CredentialSource.Environment,
+					jev: {
+						enabled: true,
+						model: "jev-1.13.0",
+						apiKeyConfigured: true,
+						apiKeySource: CredentialSource.Environment,
+					},
+				},
+			}),
+		),
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByRole("button", {
+				name: "Commonspace settings",
+			}),
+		);
+		const page = within(document.body);
+		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
+		await expect(page.getByLabelText("TypeSafe API key")).toHaveAttribute(
+			"placeholder",
+			"Using TYPESAFE_API_KEY from the server",
+		);
+		await expect(page.getByLabelText("Routing API key")).toHaveAttribute(
+			"placeholder",
+			"Using OPENAI_API_KEY from the server",
+		);
+		await userEvent.clear(page.getByLabelText("Routing API base URL"));
+		await userEvent.type(
+			page.getByLabelText("Routing API base URL"),
+			"https://another-provider.test/v1",
+		);
+		await expect(page.getByLabelText("Routing API key")).toHaveAttribute(
+			"placeholder",
+			"Optional for providers without authentication",
+		);
+		await expect(
+			page.queryByRole("checkbox", { name: "Clear saved TypeSafe API key" }),
+		).not.toBeInTheDocument();
+		await expect(
+			page.queryByRole("checkbox", { name: "Clear routing API key" }),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const SettingsCategoriesPreserveDrafts: Story = {
+	args: { store: createStoryStore(apiRoutingBootstrap) },
+	play: async ({ canvasElement }) => {
+		const page = within(document.body);
+		await userEvent.click(
+			within(canvasElement).getByRole("button", {
+				name: "Commonspace settings",
+			}),
+		);
+		await expect(page.getByRole("tab", { name: "Appearance" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+		await waitFor(() =>
+			expect(
+				page.queryByRole("button", { name: "Save inference settings" }),
+			).not.toBeInTheDocument(),
+		);
+		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
+		await userEvent.clear(page.getByLabelText("Routing model"));
+		await userEvent.type(page.getByLabelText("Routing model"), "draft-router");
+		await userEvent.click(page.getByRole("tab", { name: "Agent runs" }));
+		await expect(
+			page.getByRole("button", { name: "Save agent run settings" }),
+		).toBeVisible();
+		await waitFor(() =>
+			expect(
+				page.queryByRole("button", { name: "Save inference settings" }),
+			).not.toBeInTheDocument(),
+		);
+		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
+		await expect(page.getByLabelText("Routing model")).toHaveValue(
+			"draft-router",
+		);
+		await userEvent.click(page.getByRole("tab", { name: "Data" }));
+		await expect(
+			page.getByRole("button", { name: "Export workspace data" }),
+		).toBeVisible();
+	},
+};
+
+const pendingNotificationSave = fn(async (): Promise<void> => undefined);
+export const PendingNotificationSave: Story = {
+	args: {
+		store: createStoryStore(storyBootstrap, {
+			mutate: pendingNotificationSave,
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		let finishSave: (() => void) | undefined;
+		const pending = new Promise<void>((resolve) => {
+			finishSave = resolve;
+		});
+		if (finishSave === undefined)
+			throw new Error("Save resolver was not initialized");
+		pendingNotificationSave.mockImplementation(() => pending);
+		const canvas = within(canvasElement);
+		const page = within(document.body);
+		try {
+			await userEvent.click(
+				canvas.getByRole("button", { name: "Commonspace settings" }),
+			);
+			await userEvent.click(page.getByRole("tab", { name: "Notifications" }));
+			await userEvent.click(
+				page.getByRole("switch", { name: "Allow native notifications" }),
+			);
+			await userEvent.click(
+				page.getByRole("button", { name: "Save notification settings" }),
+			);
+			await expect(
+				page.getByRole("switch", { name: "Allow native notifications" }),
+			).toBeDisabled();
+			await expect(
+				page.getByRole("switch", { name: "Notification sound" }),
+			).toBeDisabled();
+			await userEvent.click(
+				page.getByRole("button", { name: "Close settings" }),
+			);
+			await userEvent.click(
+				canvas.getByRole("button", { name: "Commonspace settings" }),
+			);
+			await userEvent.click(page.getByRole("tab", { name: "Notifications" }));
+			await expect(
+				page.getByRole("button", { name: "Save notification settings" }),
+			).toBeDisabled();
+			await expect(
+				page.getByRole("switch", { name: "Allow native notifications" }),
+			).toBeChecked();
+		} finally {
+			finishSave();
+		}
+		await waitFor(() =>
+			expect(
+				page.getByRole("button", { name: "Save notification settings" }),
+			).toBeEnabled(),
+		);
+		await expect(page.getByText("Notification settings saved.")).toBeVisible();
 	},
 };

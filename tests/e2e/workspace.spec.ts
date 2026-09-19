@@ -23,9 +23,15 @@ const bootstrapSchema = z.object({
 
 test("persists Jev settings without returning its credential and can disable routing judgments", async ({
 	page,
+	context,
 }) => {
 	await page.goto("/");
+	const observer = await context.newPage();
+	await observer.goto("/");
+	await observer.getByRole("button", { name: "Commonspace settings" }).click();
+	await observer.getByRole("tab", { name: "Intelligence" }).click();
 	await page.getByRole("button", { name: "Commonspace settings" }).click();
+	await page.getByRole("tab", { name: "Intelligence" }).click();
 	await page.getByRole("checkbox", { name: "Use Jev for routing" }).focus();
 	await page.keyboard.press("Space");
 	await expect(
@@ -34,22 +40,33 @@ test("persists Jev settings without returning its credential and can disable rou
 	await page
 		.getByLabel("TypeSafe API key", { exact: true })
 		.fill("synthetic-typesafe-key");
+	await page.getByRole("radio", { name: /^OpenAI-compatible API/ }).check();
+	await page
+		.getByLabel("Routing model", { exact: true })
+		.fill("synthetic-router");
+	await page
+		.getByLabel("Routing API base URL", { exact: true })
+		.fill("https://example.test/v1");
 	await page.screenshot({
 		path: "artifacts/jev-settings-light.png",
 		animations: "disabled",
 	});
+	await page.getByRole("tab", { name: "Appearance" }).click();
 	await page.getByRole("radio", { name: /^Dark/ }).focus();
 	await page.keyboard.press("Space");
+	await page.getByRole("tab", { name: "Intelligence" }).click();
 	await page.getByLabel("Jev model").scrollIntoViewIfNeeded();
 	await page.screenshot({
 		path: "artifacts/jev-settings-dark.png",
 		animations: "disabled",
 	});
+	await page.getByRole("tab", { name: "Appearance" }).click();
 	await page.getByRole("radio", { name: /^Light/ }).focus();
 	await page.keyboard.press("Space");
+	await page.getByRole("tab", { name: "Intelligence" }).click();
 	await page.getByRole("button", { name: "Save inference settings" }).click();
 	await expect(
-		page.getByRole("form", { name: "Workspace settings" }),
+		page.getByRole("region", { name: "Workspace settings" }),
 	).toHaveCount(0);
 	const configuration = await page.request.get("/api/bootstrap", {
 		headers: { origin: new URL(page.url()).origin },
@@ -57,8 +74,12 @@ test("persists Jev settings without returning its credential and can disable rou
 	const body = await configuration.text();
 	expect(body).toContain("jev-1.13.0");
 	expect(body).not.toContain("synthetic-typesafe-key");
+	await expect(
+		observer.getByText("Saved router: Jev", { exact: true }),
+	).toBeVisible();
 	await page.reload();
 	await page.getByRole("button", { name: "Commonspace settings" }).click();
+	await page.getByRole("tab", { name: "Intelligence" }).click();
 	await expect(
 		page.getByRole("checkbox", { name: "Use Jev for routing" }),
 	).toBeChecked();
@@ -67,10 +88,15 @@ test("persists Jev settings without returning its credential and can disable rou
 	).toHaveValue("");
 	await page.getByRole("checkbox", { name: "Use Jev for routing" }).focus();
 	await page.keyboard.press("Space");
+	await page.getByRole("tab", { name: "Intelligence" }).click();
 	await page.getByRole("button", { name: "Save inference settings" }).click();
 	await expect(
-		page.getByRole("form", { name: "Workspace settings" }),
+		page.getByRole("region", { name: "Workspace settings" }),
 	).toHaveCount(0);
+	await expect(
+		observer.getByText("Saved router: Jev", { exact: true }),
+	).toHaveCount(0);
+	await observer.close();
 });
 
 test("keeps Workspace settings keyboard focus above the covered conversation", async ({
@@ -80,13 +106,15 @@ test("keeps Workspace settings keyboard focus above the covered conversation", a
 	const trigger = page.getByRole("button", { name: "Commonspace settings" });
 	await trigger.focus();
 	await page.keyboard.press("Enter");
-	const settings = page.getByRole("form", { name: "Workspace settings" });
+	const settings = page.getByRole("region", { name: "Workspace settings" });
 	await expect(
 		settings.getByRole("button", { name: "Close settings" }).first(),
 	).toBeFocused();
 	await expect(
 		page.getByRole("textbox", { name: "Post in verification" }),
 	).toHaveCount(0);
+	await page.keyboard.press("Tab");
+	await expect(settings.getByRole("tab", { name: "Appearance" })).toBeFocused();
 	await page.keyboard.press("Tab");
 	await expect(settings.getByRole("radio", { name: /^Light/ })).toBeFocused();
 	await page.keyboard.press("Control+k");
@@ -139,9 +167,19 @@ test("keeps failed inference settings editable and allows retry without page err
 	page.on("pageerror", (error) => pageErrors.push(error.message));
 	await page.goto("/");
 	await page.getByRole("button", { name: "Commonspace settings" }).click();
+	await page.getByRole("tab", { name: "Intelligence" }).click();
+	await page.getByRole("radio", { name: /^OpenAI-compatible API/ }).check();
+	await page
+		.getByLabel("Routing model", { exact: true })
+		.fill("synthetic-router");
+	await page
+		.getByLabel("Routing API base URL", { exact: true })
+		.fill("https://example.test/v1");
+	await page.getByRole("tab", { name: "Agent runs" }).click();
 	await page.getByRole("spinbutton", { name: "Default max agents" }).fill("3");
+	await page.getByRole("tab", { name: "Intelligence" }).click();
 	await page.route(
-		"**/api/settings",
+		"**/api/routing",
 		(route) =>
 			route.fulfill({
 				status: 503,
@@ -150,13 +188,18 @@ test("keeps failed inference settings editable and allows retry without page err
 		{ times: 1 },
 	);
 	await page.getByRole("button", { name: "Save inference settings" }).click();
-	const settings = page.getByRole("form", { name: "Workspace settings" });
-	await expect(settings.getByRole("alert")).toHaveText(
-		"Settings temporarily unavailable",
-	);
+	const settings = page.getByRole("region", { name: "Workspace settings" });
+	await expect(
+		settings
+			.getByRole("form", { name: "Inference settings" })
+			.getByRole("alert")
+			.filter({ hasText: "Settings temporarily unavailable" }),
+	).toHaveText("Settings temporarily unavailable");
+	await page.getByRole("tab", { name: "Agent runs" }).click();
 	await expect(
 		settings.getByRole("spinbutton", { name: "Default max agents" }),
 	).toHaveValue("3");
+	await page.getByRole("tab", { name: "Intelligence" }).click();
 	await settings
 		.getByRole("button", { name: "Save inference settings" })
 		.click();
@@ -171,12 +214,16 @@ test("keeps failed inference settings editable and allows retry without page err
 			}),
 		{ times: 1 },
 	);
+	await page.getByRole("tab", { name: "Notifications" }).click();
 	await settings
 		.getByRole("button", { name: "Save notification settings" })
 		.click();
-	await expect(settings.getByRole("alert")).toHaveText(
-		"Notification settings temporarily unavailable",
-	);
+	await expect(
+		settings
+			.getByRole("alert")
+			.filter({ hasText: /^Notification settings temporarily unavailable$/ }),
+	).toHaveText("Notification settings temporarily unavailable");
+	await page.getByRole("button", { name: "Dismiss workspace error" }).click();
 	await settings
 		.getByRole("button", { name: "Save notification settings" })
 		.click();
@@ -321,6 +368,11 @@ async function postVerificationMessage(
 	const messageRow = postRowByText(page, text);
 	await expect(messageRow).toBeVisible();
 	await expect(composer).toHaveValue("");
+	await expect(
+		page.getByRole("button", { name: "Close thread", exact: true }),
+	).toBeVisible();
+	await page.getByRole("button", { name: "Close thread", exact: true }).click();
+	await expect(page.getByLabel("Thread replies")).toBeHidden();
 	return messageRow;
 }
 
@@ -383,7 +435,7 @@ test("routes Settings transitions and restores detail deep links", async ({
 }) => {
 	await page.goto("/");
 	await page.getByRole("button", { name: "Commonspace settings" }).click();
-	const workspaceSettings = page.getByRole("form", {
+	const workspaceSettings = page.getByRole("region", {
 		name: "Workspace settings",
 	});
 	await expect(workspaceSettings).toBeVisible();
@@ -598,7 +650,8 @@ test("refreshes the Inbox, captures native delivery, and opens the exact notific
 		join(tmpdir(), `commonspace-e2e-notification-${e2ePort}.json`);
 	await page.goto("/");
 	await page.getByRole("button", { name: "Commonspace settings" }).click();
-	const settings = page.getByRole("form", { name: "Workspace settings" });
+	const settings = page.getByRole("region", { name: "Workspace settings" });
+	await page.getByRole("tab", { name: "Notifications" }).click();
 	const masterSwitch = settings.getByRole("switch", {
 		name: "Allow native notifications",
 	});
@@ -734,7 +787,12 @@ test("edits a user message and creates an edited branch", async ({ page }) => {
 	const messageRow = await postVerificationMessage(page, original);
 
 	await messageRow.hover();
-	await messageRow.getByRole("button", { name: /^Edit message from / }).click();
+	await messageRow
+		.getByRole("button", { name: /^More actions for message from / })
+		.click();
+	await page
+		.getByRole("menuitem", { name: "Edit message", exact: true })
+		.click();
 
 	const editForm = messageRow.getByLabel("Edit delivered message");
 	await expect(editForm).toBeVisible();
@@ -812,8 +870,6 @@ test("copies a message link from action menu", async ({ page }) => {
 
 test("opens thread from the message action menu", async ({ page }) => {
 	await openVerificationChannel(page);
-	await openRootVerificationThread(page);
-
 	const messageRoot = verificationPosts(page).locator("article").first();
 	await messageRoot.hover();
 	await messageRoot
@@ -855,7 +911,10 @@ test("deletes a user message and preserves the deleted tombstone", async ({
 	await messageRow.hover();
 	await page.once("dialog", (dialog) => dialog.accept());
 	await messageRow
-		.getByRole("button", { name: /^Delete message from / })
+		.getByRole("button", { name: /^More actions for message from / })
+		.click();
+	await page
+		.getByRole("menuitem", { name: "Delete message", exact: true })
 		.click();
 	await expect(messageRow).toBeHidden();
 	await expect(

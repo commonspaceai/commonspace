@@ -164,16 +164,24 @@ export const ChannelConversation: Story = {
 				"Review the visual baseline and document the next component states.",
 			),
 		).toBeVisible();
-		await expect(
-			canvas.getByText("Routed to Review Bot · AI selected · Completed"),
-		).toBeVisible();
-		await userEvent.click(
-			canvas.getByText("Routed to Review Bot · AI selected · Completed"),
+		const routingTrigger = canvas.getByLabelText(
+			"Routing details: Routed to Review Bot · AI selected · Completed",
+		);
+		await expect(routingTrigger).toBeVisible();
+		await userEvent.click(routingTrigger);
+		const details = within(
+			await within(document.body).findByRole("dialog", {
+				name: "Routing details",
+			}),
 		);
 		await expect(
-			canvas.getByText(/Design review matches Hermes\./u),
+			details.getByText(/Design review matches Hermes\./u),
 		).toBeVisible();
-		await expect(canvas.getByText(/Original message/u)).toBeVisible();
+		await expect(details.getByText(/Original message/u)).toBeVisible();
+		await userEvent.keyboard("{Escape}");
+		await waitFor(async () => {
+			await expect(routingTrigger).toHaveFocus();
+		});
 	},
 };
 
@@ -198,10 +206,12 @@ export const HistoricalRouting: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(
-			canvas.getByText("Routed to Review Bot · AI selected · Completed"),
+			canvas.getByLabelText(
+				"Routing details: Routed to Review Bot · AI selected · Completed",
+			),
 		);
 		await expect(
-			canvas.getByText(
+			within(document.body).getByText(
 				/Historical request: Inspect only the desktop UI boundary\./u,
 			),
 		).toBeVisible();
@@ -225,20 +235,44 @@ export const ChannelThreadViews: Story = {
 			"Compare the dense Inbox and Threads layouts against the current visual contract.";
 
 		await userEvent.click(
-			canvas.getByRole("button", { name: "Show running threads" }),
+			canvas.getByRole("button", { name: "Channel thread view" }),
+		);
+		await userEvent.click(
+			await within(document.body).findByRole("menuitemradio", {
+				name: "Show running threads",
+			}),
+		);
+		await waitFor(() =>
+			expect(within(document.body).queryByRole("menu")).not.toBeInTheDocument(),
 		);
 		await expect(canvas.getByText(runningThread)).toBeVisible();
 		await expect(canvas.queryByText(followedThread)).not.toBeInTheDocument();
 		await expect(canvas.queryByText(otherThread)).not.toBeInTheDocument();
 
 		await userEvent.click(
-			canvas.getByRole("button", { name: "Show followed threads" }),
+			canvas.getByRole("button", { name: "Channel thread view" }),
+		);
+		await userEvent.click(
+			await within(document.body).findByRole("menuitemradio", {
+				name: "Show followed threads",
+			}),
+		);
+		await waitFor(() =>
+			expect(within(document.body).queryByRole("menu")).not.toBeInTheDocument(),
 		);
 		await expect(canvas.getByText(followedThread)).toBeVisible();
 		await expect(canvas.queryByText(runningThread)).not.toBeInTheDocument();
 
 		await userEvent.click(
-			canvas.getByRole("button", { name: "Show all threads" }),
+			canvas.getByRole("button", { name: "Channel thread view" }),
+		);
+		await userEvent.click(
+			await within(document.body).findByRole("menuitemradio", {
+				name: "Show all threads",
+			}),
+		);
+		await waitFor(() =>
+			expect(within(document.body).queryByRole("menu")).not.toBeInTheDocument(),
 		);
 		await expect(canvas.getByText(runningThread)).toBeVisible();
 		await expect(canvas.getByText(followedThread)).toBeVisible();
@@ -274,16 +308,104 @@ export const CancelledRoutingOutcome: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const receipt = canvas.getByText(
-			"Routed to No agent selected · explicit mention · Cancelled",
-		);
+		const receipt = canvas.getByText("Routing cancelled · No agent selected");
 		await expect(receipt).toBeVisible();
 		await userEvent.click(receipt);
 		await expect(
-			canvas.getByText(
+			within(document.body).getByText(
 				"No destination agent was available for this routing attempt.",
 			),
 		).toBeVisible();
+	},
+};
+
+const recoveredRoutingBootstrap = structuredClone(storyBootstrap);
+const recoveredMessages =
+	recoveredRoutingBootstrap.state.messages["channel:channel-design"] ?? [];
+const recoveredSource = recoveredMessages.find(
+	(message) => message.id === "message-root",
+);
+if (recoveredSource?.routing !== undefined) {
+	recoveredSource.routing.assignments.unshift({
+		id: "failed-assignment",
+		agentId: hermesAgent.id,
+		projectIds: [],
+	});
+	recoveredSource.routing.corrections.push({
+		id: "recovery",
+		fromAssignmentId: "failed-assignment",
+		toAssignmentId: "assignment-design-review",
+		createdAt: "2026-09-03T09:59:00.000Z",
+	});
+	recoveredMessages.push({
+		id: "failed-attempt",
+		threadId: "thread-review",
+		parentMessageId: "message-root",
+		conversation: channel,
+		authorType: "system",
+		authorId: "system",
+		authorName: "Commonspace",
+		text: "The earlier run failed: runtime unavailable.",
+		createdAt: "2026-09-03T09:58:30.000Z",
+		sourceMessageId: "message-root",
+		routingAssignmentId: "failed-assignment",
+		replyStatus: "failed",
+	});
+}
+export const RecoveredRoutingOutcome: Story = {
+	args: {
+		store: createStoryStore(recoveredRoutingBootstrap, {
+			activeConversation: channel,
+			activeProjectId: primaryProject.id,
+			activeThreadId: "thread-review",
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(
+			within(canvasElement).getByRole("log", { name: "Thread messages" }),
+		);
+		await expect(
+			canvas.getByLabelText(
+				"Routing details: Routed to Review Bot · manually corrected · Completed",
+			),
+		).toBeVisible();
+		await expect(
+			canvas.getByText("The earlier run failed: runtime unavailable."),
+		).toBeVisible();
+	},
+};
+
+const pendingRoutingBootstrap = structuredClone(storyBootstrap);
+const pendingRoutingMessage =
+	pendingRoutingBootstrap.state.messages["channel:channel-design"]?.[0];
+if (pendingRoutingMessage !== undefined) {
+	delete pendingRoutingMessage.replyStatus;
+	pendingRoutingMessage.routing = {
+		source: "ai",
+		status: "pending",
+		startedAt: "2026-09-03T09:58:00.000Z",
+		agentIds: [],
+		assignments: [],
+		corrections: [],
+		inferredProjectIds: [],
+		reason: "Selecting an agent.",
+	};
+}
+pendingRoutingBootstrap.state.messages["channel:channel-design"] =
+	pendingRoutingMessage === undefined ? [] : [pendingRoutingMessage];
+export const PendingRoutingOutcome: Story = {
+	args: {
+		store: createStoryStore(pendingRoutingBootstrap, {
+			activeConversation: channel,
+			activeProjectId: primaryProject.id,
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByText("Selecting an agent…")).toBeVisible();
+		await expect(
+			canvas.queryByText(/Routed to|AI selected/),
+		).not.toBeInTheDocument();
 	},
 };
 
@@ -318,10 +440,10 @@ export const FailedRoutingRecovery: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(
-			canvas.getByText("Routed to No agent selected · AI selected · Failed"),
+			canvas.getByText("Routing failed · No agent selected"),
 		);
 		await userEvent.click(
-			canvas.getByRole("button", { name: "Retry AI routing" }),
+			within(document.body).getByRole("button", { name: "Retry AI routing" }),
 		);
 		await expect(retryRouting).toHaveBeenCalledWith({
 			sourceMessageId: "message-root",
@@ -329,10 +451,12 @@ export const FailedRoutingRecovery: Story = {
 		});
 
 		await userEvent.selectOptions(
-			canvas.getByLabelText("Manual routing agent"),
+			within(document.body).getByLabelText("Manual routing agent"),
 			hermesAgent.id,
 		);
-		await userEvent.click(canvas.getByRole("button", { name: "Route" }));
+		await userEvent.click(
+			within(document.body).getByRole("button", { name: "Route" }),
+		);
 		await expect(retryRouting).toHaveBeenLastCalledWith({
 			sourceMessageId: "message-root",
 			mode: "manual",
@@ -606,15 +730,31 @@ export const EditingDeliveredMessage: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const editButton = canvas.getByRole("button", {
-			name: "Edit message from Ralph",
+		const actions = canvas.getByRole("button", {
+			name: "More actions for message from Ralph",
 		});
-		editButton.focus();
-		await waitFor(() => expect(editButton).toBeVisible());
-		await userEvent.click(editButton);
+		actions.focus();
+		await userEvent.click(actions);
+		await userEvent.click(
+			await within(canvasElement.ownerDocument.body).findByRole("menuitem", {
+				name: "Edit message",
+			}),
+		);
 		await expect(
 			canvas.getByRole("form", { name: "Edit delivered message" }),
 		).toBeVisible();
+		await waitFor(() =>
+			expect(
+				canvas.getByRole("textbox", { name: "Edited message" }),
+			).toHaveFocus(),
+		);
+		await waitFor(() =>
+			expect(
+				canvasElement.ownerDocument.querySelector(
+					'[data-slot="dropdown-menu-content"]',
+				),
+			).toBeNull(),
+		);
 		await expect(
 			canvas.getByRole("textbox", { name: "Edited message" }),
 		).toHaveValue(

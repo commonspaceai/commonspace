@@ -120,6 +120,11 @@ export const ProjectSettingsNavigation: Story = {
 		await expect(
 			within(settings).getByRole("heading", { name: "Platform" }),
 		).toBeVisible();
+		await waitFor(() => {
+			expect(
+				page.queryByRole("menuitem", { name: "Project settings" }),
+			).not.toBeInTheDocument();
+		});
 
 		await userEvent.click(
 			canvas.getByRole("button", { name: "Close project settings" }),

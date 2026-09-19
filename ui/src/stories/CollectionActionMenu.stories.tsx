@@ -13,7 +13,7 @@ const meta = {
 					<strong className="truncate text-[13px] font-medium">
 						verification
 					</strong>
-					<span className="font-mono text-xs text-sidebar-foreground/60">
+					<span className="font-mono text-xs text-muted-foreground">
 						2 agents
 					</span>
 				</div>

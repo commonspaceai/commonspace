@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { CommonspaceDirectory } from "../CommonspaceDirectory";
 import {
 	createStoryStore,
@@ -41,5 +41,23 @@ export const Empty: Story = {
 		kind: "projects",
 		bootstrap: emptyBootstrap,
 		store: createStoryStore(emptyBootstrap),
+	},
+};
+
+export const FilterRecovery: Story = {
+	args: { kind: "projects" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.type(
+			canvas.getByRole("searchbox", { name: "Filter projects" }),
+			"no such project",
+		);
+		await expect(
+			canvas.queryByRole("button", { name: "Open project Commonspace" }),
+		).not.toBeInTheDocument();
+		await userEvent.click(canvas.getByRole("button", { name: "Clear filter" }));
+		await expect(
+			canvas.getByRole("button", { name: "Open project Commonspace" }),
+		).toBeVisible();
 	},
 };

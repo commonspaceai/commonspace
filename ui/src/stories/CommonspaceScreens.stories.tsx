@@ -1,5 +1,6 @@
 import type { ConversationRef } from "@commonspace/shared";
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { useState } from "react";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import {
 	type CommonspaceRoute,
@@ -303,6 +304,106 @@ export const ThreadConversation: Story = {
 	},
 };
 
+function ThreadPresentationPreview({ width }: { width: number }) {
+	const [store] = useState(() =>
+		createStoryStore(storyBootstrap, {
+			activeConversation: channel,
+			activeThreadId: "thread-review",
+		}),
+	);
+	return (
+		<div style={{ width, height: "100vh" }}>
+			<CommonspaceScreen
+				destination="conversation"
+				conversation={channel}
+				threadId="thread-review"
+				store={store}
+			/>
+		</div>
+	);
+}
+
+export const ThreadRightOverlay: Story = {
+	...ThreadConversation,
+	render: () => <ThreadPresentationPreview width={1000} />,
+	tags: ["smoke"],
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const thread = await canvas.findByRole("complementary", {
+			name: "Thread replies",
+		});
+		const primary = canvasElement.querySelector(
+			".commonspace-conversation-primary",
+		);
+		await waitFor(() => {
+			expect(primary).toBeVisible();
+			expect(primary).toHaveAttribute("inert");
+			const bounds = primary?.getBoundingClientRect();
+			if (bounds === undefined) throw new Error("Conversation missing");
+			expect(thread.getBoundingClientRect().left).toBeLessThan(bounds.right);
+			expect(
+				Math.abs(thread.getBoundingClientRect().right - bounds.right),
+			).toBeLessThan(2);
+		});
+		await userEvent.click(canvas.getByRole("button", { name: "Close thread" }));
+		await waitFor(() => {
+			expect(
+				canvasElement.querySelector(".commonspace-thread-panel"),
+			).toBeNull();
+			expect(
+				canvasElement.querySelector(".commonspace-conversation-primary"),
+			).not.toHaveAttribute("inert");
+			expect(
+				canvas.getByPlaceholderText("Start a new Thread in #design-review"),
+			).toHaveFocus();
+		});
+		await userEvent.click(
+			canvas.getByRole("button", { name: "1 reply, 1 unread" }),
+		);
+		await waitFor(() =>
+			expect(
+				canvas.getByRole("button", { name: "Close thread" }),
+			).toHaveFocus(),
+		);
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() =>
+			expect(
+				canvasElement.querySelector(".commonspace-thread-panel"),
+			).toBeNull(),
+		);
+	},
+};
+
+export const ThreadDocked: Story = {
+	...ThreadConversation,
+	render: () => <ThreadPresentationPreview width={1440} />,
+	tags: ["smoke"],
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const thread = await canvas.findByRole("complementary", {
+			name: "Thread replies",
+		});
+		await waitFor(() => {
+			const primary = canvasElement.querySelector(
+				".commonspace-conversation-primary",
+			);
+			expect(primary).toBeVisible();
+			expect(primary).not.toHaveAttribute("inert");
+			const bounds = primary?.getBoundingClientRect();
+			if (bounds === undefined) throw new Error("Conversation missing");
+			expect(thread.getBoundingClientRect().left).toBeGreaterThanOrEqual(
+				bounds.right,
+			);
+			expect(
+				Math.abs(thread.getBoundingClientRect().top - bounds.top),
+			).toBeLessThan(2);
+		});
+		await expect(
+			canvas.getByRole("separator", { name: "Resize thread" }),
+		).toBeVisible();
+	},
+};
+
 export const DirectMessage: Story = {
 	args: {
 		destination: "conversation",
@@ -427,12 +528,21 @@ export const ThreadContextOpen: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const reply = canvas.getByRole("textbox", { name: "Reply in thread" });
+		await userEvent.type(reply, "Keep this draft");
 		await userEvent.click(
 			canvas.getByRole("button", { name: "Open thread context" }),
 		);
 		await expect(
 			canvas.getByRole("region", { name: "Thread context" }),
 		).toBeVisible();
+		await expect(reply).not.toBeVisible();
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Back to replies" }),
+		);
+		await expect(reply).toHaveValue("Keep this draft");
+		await expect(reply).toBeVisible();
+		await waitFor(() => expect(reply).toHaveFocus());
 	},
 };
 
@@ -493,6 +603,7 @@ export const ProjectSettings: Story = {
 };
 
 export const GlobalSearch: Story = {
+	args: { store: createStoryStore(storyBootstrap, { interactive: true }) },
 	play: async ({ canvasElement }) => {
 		const page = within(canvasElement.ownerDocument.body);
 		await userEvent.keyboard("{Control>}k{/Control}");
@@ -502,6 +613,25 @@ export const GlobalSearch: Story = {
 			name: /Open Channel: #design-review/iu,
 		});
 		await waitFor(() => expect(result).toBeVisible());
+	},
+};
+
+export const SearchOpensConversation: Story = {
+	args: { store: createStoryStore(storyBootstrap, { interactive: true }) },
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		await userEvent.keyboard("{Control>}k{/Control}");
+		await userEvent.click(
+			await page.findByRole("option", {
+				name: /Open Channel: #design-review/iu,
+			}),
+		);
+		await expect(
+			await page.findByRole("region", { name: "design-review posts" }),
+		).toBeVisible();
+		await expect(
+			page.queryByRole("dialog", { name: "Search Commonspace" }),
+		).not.toBeInTheDocument();
 	},
 };
 
@@ -548,7 +678,7 @@ export const WorkspaceSettings: Story = {
 			page.getByRole("button", { name: "Commonspace settings" }),
 		);
 		await expect(
-			page.getByRole("form", { name: "Workspace settings" }),
+			page.getByRole("region", { name: "Workspace settings" }),
 		).toBeVisible();
 	},
 };
@@ -724,3 +854,42 @@ export const NarrowSearch: Story = {
 		await waitFor(() => expect(dialog).toBeVisible());
 	},
 };
+
+export const CaughtUpNextAction: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "View activity" }),
+		);
+		await expect(
+			canvas.getByRole("button", { name: /^Activity/ }),
+		).toHaveAttribute("aria-pressed", "true");
+		await expect(
+			canvas.getAllByRole("button", { name: /^Open completed/ }).length,
+		).toBeGreaterThan(0);
+	},
+};
+
+function settingsCategoryStory(category: string): Story {
+	return {
+		...WorkspaceSettings,
+		play: async ({ canvasElement }) => {
+			const page = within(canvasElement.ownerDocument.body);
+			await userEvent.click(
+				within(canvasElement).getByRole("button", {
+					name: "Commonspace settings",
+				}),
+			);
+			await userEvent.click(page.getByRole("tab", { name: category }));
+			await expect(page.getByRole("tab", { name: category })).toHaveAttribute(
+				"aria-selected",
+				"true",
+			);
+		},
+	};
+}
+export const SettingsIntelligence = settingsCategoryStory("Intelligence");
+export const SettingsAgentRuns = settingsCategoryStory("Agent runs");
+export const SettingsNotifications = settingsCategoryStory("Notifications");
+export const SettingsDiagnostics = settingsCategoryStory("Diagnostics");
+export const SettingsData = settingsCategoryStory("Data");

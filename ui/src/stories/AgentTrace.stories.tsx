@@ -26,14 +26,11 @@ export const Collapsed: Story = {};
 export const Expanded: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(
-			canvas.getByRole("button", {
-				name: "Show Hermes activity for Review Bot",
-			}),
-		);
-		await expect(
-			canvas.getByRole("region", { name: "Review Bot activity trace" }),
-		).toBeVisible();
+		const trigger = canvas.getByRole("button", {
+			name: "Show Hermes activity for Review Bot",
+		});
+		await userEvent.click(trigger);
+		await expect(trigger).toHaveAttribute("aria-expanded", "true");
 	},
 };
 

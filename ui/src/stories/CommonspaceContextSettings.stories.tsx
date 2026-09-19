@@ -235,3 +235,44 @@ export const AgentCapabilitiesIgnoreLateAgentResponse: Story = {
 export const MissingChannel: Story = {
 	args: { id: "missing-channel" },
 };
+
+export const AgentSettingsSaveFailure: Story = {
+	render: () => (
+		<AgentSettingsPane
+			bootstrap={{
+				...storyBootstrap,
+				agents: storyBootstrap.agents.map((agent) => ({
+					...agent,
+					fullAccess: false,
+					permissionPolicy: { source: "server", fullAccess: true },
+				})),
+			}}
+			id="agent-hermes"
+			store={createStoryStore(storyBootstrap, {
+				mutate: async () => {
+					throw new Error("Synthetic save failure");
+				},
+				inspectAgentCapabilities: async () => populatedCapabilityInventory,
+			})}
+			onClose={fn()}
+		/>
+	),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.queryByText("Configuration verified from the native profile"),
+		).not.toBeInTheDocument();
+		await expect(
+			canvas.getByRole("checkbox", { name: /Full access/ }),
+		).toBeChecked();
+		await expect(
+			canvas.getByRole("checkbox", { name: /Full access/ }),
+		).toBeDisabled();
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Save agent settings" }),
+		);
+		await expect(
+			await canvas.findByText("Synthetic save failure"),
+		).toBeVisible();
+	},
+};

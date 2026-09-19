@@ -22,7 +22,67 @@ async function openStory(
 
 test.use({ viewport: { width: 1180, height: 820 } });
 
-test("shows completed routing receipts and expandable details", async ({
+test("compact navigation remains usable above an open thread", async ({
+	page,
+}) => {
+	await page.setViewportSize({ width: 480, height: 820 });
+	await openStory(page, {
+		id: "review-conversation-flow--interactive",
+		title: "Review/Conversation Flow",
+		name: "Interactive",
+	});
+	await page
+		.getByRole("button", { name: "1 reply, 1 unread", exact: true })
+		.click();
+	await expect(
+		page.getByRole("complementary", { name: "Thread replies" }),
+	).toBeVisible();
+	await page
+		.getByRole("button", { name: "Open navigation", exact: true })
+		.click();
+	await page
+		.getByRole("button", { name: "Commonspace settings", exact: true })
+		.click({ timeout: 5000 });
+	await expect(
+		page.getByRole("combobox", { name: "Settings category" }),
+	).toBeVisible();
+});
+
+test("compact settings preserve drafts across category and viewport changes", async ({
+	page,
+}) => {
+	await page.setViewportSize({ width: 480, height: 820 });
+	await openStory(page, {
+		id: "review-conversation-flow--interactive",
+		title: "Review/Conversation Flow",
+		name: "Interactive",
+	});
+	await page
+		.getByRole("button", { name: "Open navigation", exact: true })
+		.click();
+	await page
+		.getByRole("button", { name: "Commonspace settings", exact: true })
+		.click();
+	const category = page.getByRole("combobox", { name: "Settings category" });
+	await expect(category).toBeVisible();
+	await category.selectOption("intelligence");
+	await page
+		.getByRole("checkbox", { name: "Use Jev for routing" })
+		.press("Space");
+	const model = page.getByRole("textbox", { name: "Jev model", exact: true });
+	await model.fill("unsaved-model-draft");
+	await category.selectOption("appearance");
+	await category.selectOption("intelligence");
+	await expect(model).toHaveValue("unsaved-model-draft");
+	await page.setViewportSize({ width: 1440, height: 960 });
+	await expect(category).toBeHidden();
+	await expect(
+		page.getByRole("tab", { name: "Intelligence", exact: true }),
+	).toHaveAttribute("aria-selected", "true");
+	await expect(model).toHaveValue("unsaved-model-draft");
+});
+
+test("shows completed routing receipts and one routing popover", async ({
 	page,
 }) => {
 	await openStory(page, {
@@ -30,16 +90,15 @@ test("shows completed routing receipts and expandable details", async ({
 		title: "Pages/CommonspaceConversation",
 		name: "Channel Conversation",
 	});
-	const receipt = page.getByText(
-		"Routed to Review Bot · AI selected · Completed",
+	const receipt = page.getByLabel(
+		"Routing details: Routed to Review Bot · AI selected · Completed",
 	);
 	await expect(receipt).toBeVisible();
 	const reason = page.getByText("Design review matches Hermes.");
 	if (!(await reason.isVisible())) await receipt.click();
 	await expect(reason).toBeVisible();
-	await expect(
-		page.getByRole("list", { name: "Routing assignments" }),
-	).toContainText("Inspect only the desktop UI boundary.");
+	const assignments = page.getByRole("list", { name: "Routing assignments" });
+	await expect(assignments).toContainText("Original message");
 });
 
 test("shows unresolved cancellation locally on its source message", async ({
@@ -50,9 +109,7 @@ test("shows unresolved cancellation locally on its source message", async ({
 		title: "Pages/CommonspaceConversation",
 		name: "Cancelled Routing Outcome",
 	});
-	const receipt = page.getByText(
-		"Routed to No agent selected · explicit mention · Cancelled",
-	);
+	const receipt = page.getByText("Routing cancelled · No agent selected");
 	await expect(receipt).toBeVisible();
 	await expect(
 		page.getByText(
@@ -93,4 +150,53 @@ test("omits unsupported thread-wide steering and interruption", async ({
 			name: "Interrupt and send thread follow-up",
 		}),
 	).toHaveCount(0);
+});
+
+test("hover reveals message actions without selecting the message or another destination", async ({
+	page,
+}) => {
+	await openStory(page, {
+		id: "review-conversation-flow--interactive",
+		title: "Review/Conversation Flow",
+		name: "Interactive",
+	});
+	const posts = page.getByRole("region", { name: "design-review posts" });
+	const root = posts
+		.locator("article")
+		.filter({
+			hasText:
+				"Review the visual baseline and document the next component states.",
+		})
+		.first();
+	const inbox = page.getByRole("button", {
+		name: "Open Inbox, 2 unread",
+		exact: true,
+	});
+	const channel = page.getByRole("button", {
+		name: "Open channel design-review, 1 unread",
+		exact: true,
+	});
+	await expect(channel).toHaveAttribute("aria-pressed", "true");
+	await inbox.hover();
+	await expect(inbox).toHaveAttribute("aria-pressed", "false");
+	await expect(inbox).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+	await expect(channel).toHaveAttribute("aria-pressed", "true");
+	await root.hover();
+	await expect(root).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+	const message = root.locator("article");
+	await expect(message).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+	await root
+		.getByRole("button", { name: "More actions for message from Ralph" })
+		.click();
+	await page
+		.getByRole("menuitem", { name: "Edit message", exact: true })
+		.click();
+	await expect(
+		page.getByRole("textbox", { name: "Edited message" }),
+	).toBeFocused();
+	await expect(
+		page.getByRole("textbox", { name: "Edited message" }),
+	).toHaveValue(
+		"Review the visual baseline and document the next component states.",
+	);
 });

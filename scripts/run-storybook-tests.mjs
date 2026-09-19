@@ -20,7 +20,7 @@ process.exitCode = await runTool(
 	nodeToolCommand("vitest", "vitest", [
 		"run",
 		"--config",
-		"vitest.storybook.config.ts",
+		"vitest.config.ts",
 		...forwardedArguments,
 	]),
 	{

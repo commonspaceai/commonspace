@@ -47,6 +47,20 @@ const preview: Preview = {
 		};
 	},
 	parameters: {
+		options: {
+			storySort: {
+				order: [
+					"Workspace",
+					"Review",
+					"Foundations",
+					"Design System",
+					"Pages",
+					"Shell",
+					"Screens",
+					"*",
+				],
+			},
+		},
 		layout: "fullscreen",
 		controls: {
 			matchers: {

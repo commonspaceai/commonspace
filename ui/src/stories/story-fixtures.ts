@@ -628,6 +628,7 @@ export const emptyBootstrap = createStoryBootstrap({
 export function createStoryStore(
 	bootstrap: CommonspaceBootstrap | null = storyBootstrap,
 	options: {
+		interactive?: boolean;
 		activeConversation?: ConversationRef | null;
 		activeProjectId?: string | null;
 		activeThreadId?: string | null;
@@ -637,15 +638,17 @@ export function createStoryStore(
 		pendingSubmissions?: CommonspaceClientSnapshot["pendingSubmissions"];
 		send?: CommonspaceStore["send"];
 		retryRouting?: CommonspaceStore["retryRouting"];
+		diagnostics?: CommonspaceStore["diagnostics"];
 		mutate?: CommonspaceStore["mutate"];
 		compactChannelContext?: CommonspaceStore["compactChannelContext"];
+		updateRoutingConfiguration?: CommonspaceStore["updateRoutingConfiguration"];
 		addPin?: CommonspaceStore["addPin"];
 		removePin?: CommonspaceStore["removePin"];
 		discoverAgents?: CommonspaceStore["discoverAgents"];
 		inspectAgentCapabilities?: CommonspaceStore["inspectAgentCapabilities"];
 	} = {},
 ): CommonspaceStore {
-	const snapshot: CommonspaceClientSnapshot = {
+	let snapshot: CommonspaceClientSnapshot = {
 		bootstrap,
 		loading: options.loading ?? false,
 		pendingSubmissions: options.pendingSubmissions ?? [],
@@ -656,6 +659,7 @@ export function createStoryStore(
 		activeThreadId: options.activeThreadId ?? null,
 	};
 	const store = new CommonspaceClientStore();
+	const listeners = new Set<() => void>();
 	return new Proxy(store, {
 		get(target, property) {
 			if (property === Symbol.toStringTag) return "CommonspaceStoryStore";
@@ -664,8 +668,53 @@ export function createStoryStore(
 				return () => "[object CommonspaceStoryStore]";
 			if (property === "valueOf") return () => target;
 			if (property === "getSnapshot") return () => snapshot;
+			if (property === "dismissError")
+				return () => {
+					snapshot = { ...snapshot, error: null };
+					for (const listener of listeners) listener();
+				};
 			if (property === "send" && options.send !== undefined)
 				return options.send;
+			if (property === "send" && options.interactive) {
+				const send: CommonspaceStore["send"] = async (text, threadId) => {
+					const current = snapshot.bootstrap;
+					const conversation = snapshot.activeConversation;
+					if (current === null || conversation === null) return;
+					const key = `${conversation.kind}:${conversation.id}`;
+					const message: CommonspaceMessage = {
+						id: crypto.randomUUID(),
+						conversation,
+						text,
+						authorType: "user",
+						authorId: "preview-user",
+						authorName: "You",
+						createdAt: new Date().toISOString(),
+						projectIds: [],
+					};
+					if (threadId !== undefined) {
+						const thread = current.state.threads.find(
+							(item) => item.id === threadId,
+						);
+						if (thread === undefined)
+							throw new Error("Preview thread no longer exists.");
+						message.threadId = threadId;
+						message.parentMessageId = thread.rootMessageId;
+					}
+					const next = {
+						...current,
+						state: {
+							...current.state,
+							messages: {
+								...current.state.messages,
+								[key]: [...(current.state.messages[key] ?? []), message],
+							},
+						},
+					};
+					snapshot = { ...snapshot, bootstrap: next };
+					for (const listener of listeners) listener();
+				};
+				return send;
+			}
 			if (property === "mutate" && options.mutate !== undefined)
 				return options.mutate;
 			if (
@@ -673,6 +722,13 @@ export function createStoryStore(
 				options.compactChannelContext !== undefined
 			)
 				return options.compactChannelContext;
+			if (
+				property === "updateRoutingConfiguration" &&
+				options.updateRoutingConfiguration !== undefined
+			)
+				return options.updateRoutingConfiguration;
+			if (property === "diagnostics" && options.diagnostics !== undefined)
+				return options.diagnostics;
 			if (property === "retryRouting" && options.retryRouting !== undefined)
 				return options.retryRouting;
 			if (property === "addPin" && options.addPin !== undefined)
@@ -689,18 +745,37 @@ export function createStoryStore(
 			if (property === "messages") {
 				return () => {
 					const conversation = snapshot.activeConversation;
-					if (conversation === null || bootstrap === null) return [];
+					if (conversation === null || snapshot.bootstrap === null) return [];
 					return (
-						bootstrap.state.messages[
+						snapshot.bootstrap.state.messages[
 							`${conversation.kind}:${conversation.id}`
 						] ?? []
 					);
 				};
 			}
-			if (property === "subscribe") return () => () => undefined;
+			if (property === "subscribe")
+				return (listener: () => void) => {
+					listeners.add(listener);
+					return () => listeners.delete(listener);
+				};
+			if (property === "selectThread")
+				return (threadId: string | null) => {
+					if (snapshot.activeThreadId === threadId) return;
+					snapshot = { ...snapshot, activeThreadId: threadId };
+					for (const listener of listeners) listener();
+				};
 			if (property === "connectEvents" || property === "disconnectEvents")
 				return () => undefined;
-			if (property === "selectConversation") return () => undefined;
+			if (property === "selectConversation")
+				return (conversation: ConversationRef) => {
+					if (!options.interactive) return;
+					snapshot = {
+						...snapshot,
+						activeConversation: conversation,
+						activeThreadId: null,
+					};
+					for (const listener of listeners) listener();
+				};
 			if (property === "selectProject") return () => undefined;
 			if (property === "selectDirectory") return async () => null;
 			if (property === "verifyDesktopNotifications")
