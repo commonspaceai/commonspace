@@ -50,6 +50,11 @@ export const OpenImageFile: Story = {
 		await waitFor(() => expect(image.naturalWidth).toBeGreaterThan(0), {
 			timeout: 5_000,
 		});
+		const fit = canvas.getByRole("button", { name: "Fit" });
+		const actual = canvas.getByRole("button", { name: "Actual size" });
+		await expect(fit).toHaveAttribute("aria-pressed", "true");
+		await userEvent.click(actual);
+		await expect(actual).toHaveAttribute("aria-pressed", "true");
 	},
 };
 
@@ -79,9 +84,17 @@ export const MediaPreviewFailed: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(await canvas.findByRole("alert")).toHaveTextContent(
-			"Preview data could not be read.",
+		const alert = await canvas.findByRole("alert");
+		await expect(alert).toHaveTextContent("Preview data could not be read.");
+		await userEvent.click(
+			within(alert).getByRole("button", { name: "Retry preview" }),
 		);
+		await userEvent.click(
+			await canvas.findByRole("button", { name: /Open file README\.md/iu }),
+		);
+		await expect(
+			await canvas.findByText(/export const story = 'verified'/u),
+		).toBeVisible();
 	},
 };
 

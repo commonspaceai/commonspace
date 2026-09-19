@@ -1000,7 +1000,10 @@ export const mediaErrorProjectFetcher: typeof globalThis.fetch = async (
 	input,
 ) => {
 	const url = new URL(String(input), "http://storybook.local");
-	if (url.pathname.endsWith("/file"))
+	if (
+		url.pathname.endsWith("/file") &&
+		url.searchParams.get("path") === "commonspace-logo.png"
+	)
 		return jsonResponse({ error: "Preview data could not be read." }, 422);
 	return storyProjectFetcher(input);
 };

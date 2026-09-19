@@ -9,9 +9,11 @@ import {
 	FileTextIcon,
 	FolderIcon,
 	ImageIcon,
+	RefreshCwIcon,
 	VideoIcon,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
 	Empty,
 	EmptyDescription,
@@ -62,6 +64,8 @@ export function CommonspaceProjectFiles({
 	const [mediaUrl, setMediaUrl] = useState<string | null>(null);
 	const [listingError, setListingError] = useState<string | null>(null);
 	const [previewError, setPreviewError] = useState<string | null>(null);
+	const [previewAttempt, setPreviewAttempt] = useState(0);
+	const [imageSizing, setImageSizing] = useState<"fit" | "actual">("fit");
 
 	useEffect(() => {
 		if (targetFile === null) return;
@@ -69,6 +73,11 @@ export function CommonspaceProjectFiles({
 		setDirectoryPath(targetFile.path.split("/").slice(0, -1).join("/"));
 		setSelected(null);
 	}, [targetFile]);
+
+	useEffect(() => {
+		void selected?.path;
+		setImageSizing("fit");
+	}, [selected?.path]);
 
 	useEffect(() => {
 		const controller = new AbortController();
@@ -94,6 +103,7 @@ export function CommonspaceProjectFiles({
 	}, [directoryPath, fetcher, projectId, rootIndex]);
 
 	useEffect(() => {
+		void previewAttempt;
 		setText(null);
 		setPreviewError(null);
 		if (selected?.kind !== "file" || selected.preview !== "text") return;
@@ -113,9 +123,10 @@ export function CommonspaceProjectFiles({
 		return () => {
 			controller.abort();
 		};
-	}, [fetcher, projectId, rootIndex, selected]);
+	}, [fetcher, previewAttempt, projectId, rootIndex, selected]);
 
 	useEffect(() => {
+		void previewAttempt;
 		setMediaUrl(null);
 		setPreviewError(null);
 		if (
@@ -149,7 +160,7 @@ export function CommonspaceProjectFiles({
 			controller.abort();
 			if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
 		};
-	}, [fetcher, projectId, rootIndex, selected]);
+	}, [fetcher, previewAttempt, projectId, rootIndex, selected]);
 
 	useEffect(() => {
 		if (
@@ -291,7 +302,7 @@ export function CommonspaceProjectFiles({
 										<span className="block truncate text-[13px] font-medium">
 											{entry.name}
 										</span>
-										<small className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+										<small className="mt-0.5 block truncate text-xs text-muted-foreground">
 											{entry.kind === "directory"
 												? "Folder"
 												: formatFileSize(entry.size)}
@@ -302,6 +313,11 @@ export function CommonspaceProjectFiles({
 									kind={entry.kind === "directory" ? "folder" : "file"}
 									label={entry.name}
 									meta={entry.kind === "directory" ? "Folder" : "File"}
+									triggerClassName={
+										entry.kind === "file" && selected?.path === entry.path
+											? "opacity-100"
+											: undefined
+									}
 									onOpen={openEntry}
 									onCopy={() => {
 										void navigator.clipboard
@@ -360,14 +376,35 @@ export function CommonspaceProjectFiles({
 						</header>
 						<div className="p-5">
 							{previewError !== null && (
-								<div className="py-12 text-center" role="alert">
-									<strong>Preview unavailable</strong>
-									<p className="mt-1 text-xs text-destructive">
-										{previewError}
-									</p>
-									<p className="mt-1 text-xs text-muted-foreground">
-										Choose another file to continue browsing.
-									</p>
+								<div
+									className="grid min-h-[420px] place-items-center border-y bg-muted/15 px-6 py-12 text-center"
+									role="alert"
+								>
+									<div className="max-w-sm">
+										<strong>Preview unavailable</strong>
+										<p className="mt-1 text-sm text-destructive">
+											{previewError}
+										</p>
+										<p className="mt-2 text-xs leading-5 text-muted-foreground">
+											Retry this file, or choose another file without losing
+											your place.
+										</p>
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											className="mt-4"
+											onClick={() => {
+												setPreviewAttempt((attempt) => attempt + 1);
+											}}
+										>
+											<RefreshCwIcon
+												data-icon="inline-start"
+												aria-hidden="true"
+											/>
+											Retry preview
+										</Button>
+									</div>
 								</div>
 							)}
 							{previewError === null &&
@@ -395,30 +432,65 @@ export function CommonspaceProjectFiles({
 							{previewError === null &&
 								selected.preview === "image" &&
 								mediaUrl !== null && (
-									<img
-										className="mx-auto max-h-[70vh] rounded-sm border"
-										src={mediaUrl}
-										alt={`Preview ${selected.name}`}
-										onError={() => {
-											setPreviewError("Preview could not be rendered.");
-										}}
-									/>
+									<section aria-label={`${selected.name} image viewer`}>
+										<div className="mb-3 flex items-center justify-end gap-1">
+											<Button
+												type="button"
+												variant={imageSizing === "fit" ? "secondary" : "ghost"}
+												size="sm"
+												aria-pressed={imageSizing === "fit"}
+												onClick={() => setImageSizing("fit")}
+											>
+												Fit
+											</Button>
+											<Button
+												type="button"
+												variant={
+													imageSizing === "actual" ? "secondary" : "ghost"
+												}
+												size="sm"
+												aria-pressed={imageSizing === "actual"}
+												onClick={() => setImageSizing("actual")}
+											>
+												Actual size
+											</Button>
+										</div>
+										<div className="flex min-h-[min(62vh,600px)] items-center justify-center overflow-auto border-y bg-muted/15 p-6">
+											<img
+												className={
+													imageSizing === "fit"
+														? "max-h-[58vh] max-w-full object-contain"
+														: "max-w-none"
+												}
+												src={mediaUrl}
+												alt={`Preview ${selected.name}`}
+												onError={() => {
+													setPreviewError("Preview could not be rendered.");
+												}}
+											/>
+										</div>
+									</section>
 								)}
 							{previewError === null &&
 								selected.preview === "video" &&
 								mediaUrl !== null && (
-									<video
-										className="mx-auto max-h-[70vh] rounded-sm border"
-										src={mediaUrl}
-										aria-label={`Preview ${selected.name}`}
-										controls
-										muted
-										playsInline
-										preload="metadata"
-										onError={() => {
-											setPreviewError("Preview could not be rendered.");
-										}}
-									/>
+									<section
+										aria-label={`${selected.name} video viewer`}
+										className="flex min-h-[min(62vh,600px)] items-center justify-center overflow-hidden border-y bg-black/90 p-6"
+									>
+										<video
+											className="max-h-[58vh] w-full max-w-[960px] bg-black"
+											src={mediaUrl}
+											aria-label={`Preview ${selected.name}`}
+											controls
+											muted
+											playsInline
+											preload="metadata"
+											onError={() => {
+												setPreviewError("Preview could not be rendered.");
+											}}
+										/>
+									</section>
 								)}
 							{previewError === null && selected.preview === "binary" && (
 								<div className="py-12 text-center">
