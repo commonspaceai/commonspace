@@ -36,7 +36,7 @@ const results: CommonspaceSearchResult[] = [
 		kind: "message",
 		projectIds: [project.id],
 		title: "Review the visual baseline",
-		detail: "Ralph · verification",
+		detail: "You · verification",
 		receipt: "verification",
 		occurredAt: "2026-09-03T10:02:00.000Z",
 		highlights: [],

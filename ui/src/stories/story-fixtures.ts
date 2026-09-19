@@ -67,17 +67,14 @@ const agentDefinitions: CommonspaceAgentDefinition[] = [
 export const primaryProject: CommonspaceProject = {
 	id: "project-commonspace",
 	name: "Commonspace",
-	paths: [
-		"/Users/ralph/Developer/commonspace",
-		"/Users/ralph/Developer/design",
-	],
+	paths: ["/workspace/commonspace", "/workspace/design"],
 	createdAt: now,
 };
 
 export const secondaryProject: CommonspaceProject = {
 	id: "project-platform",
 	name: "Platform",
-	paths: ["/Users/ralph/Developer/platform"],
+	paths: ["/workspace/platform"],
 	createdAt: now,
 };
 
@@ -235,8 +232,8 @@ const rootMessage: CommonspaceMessage = {
 	id: "message-root",
 	conversation: { kind: "channel", id: designChannel.id },
 	authorType: "user",
-	authorId: "ralph",
-	authorName: "Ralph",
+	authorId: "sample-user",
+	authorName: "You",
 	text: "Review the visual baseline and document the next component states.",
 	createdAt: "2026-09-03T09:58:00.000Z",
 	projectIds: [primaryProject.id],
@@ -283,8 +280,8 @@ const buildRoot: CommonspaceMessage = {
 	id: "message-build-root",
 	conversation: { kind: "channel", id: buildChannel.id },
 	authorType: "user",
-	authorId: "ralph",
-	authorName: "Ralph",
+	authorId: "sample-user",
+	authorName: "You",
 	text: "Run the focused Storybook checks.",
 	createdAt: "2026-09-03T09:57:00.000Z",
 	projectIds: [primaryProject.id],
@@ -295,8 +292,8 @@ const dmUserMessage: CommonspaceMessage = {
 	id: "message-dm-user",
 	conversation: { kind: "dm", id: hermesAgent.id },
 	authorType: "user",
-	authorId: "ralph",
-	authorName: "Ralph",
+	authorId: "sample-user",
+	authorName: "You",
 	text: "Can you summarize the remaining visual coverage?",
 	createdAt: "2026-09-03T09:56:00.000Z",
 	projectIds: [primaryProject.id],
@@ -357,9 +354,9 @@ export function createStoryState(
 			memoryThreads: 3,
 		},
 		agents: agentDefinitions,
-		dmSessions: { [hermesAgent.id]: "dm-session-hermes" },
+		dmSessions: { [hermesAgent.id]: "fixture-a" },
 		agentSessions: {
-			[hermesAgent.id]: { [primaryProject.id]: "agent-session-hermes" },
+			[hermesAgent.id]: { [primaryProject.id]: "fixture-b" },
 		},
 		projects: [primaryProject, secondaryProject],
 		channels: [designChannel, buildChannel],
@@ -400,8 +397,8 @@ const denseThreadRoots: CommonspaceMessage[] = Array.from(
 		id: `message-dense-root-${String(index + 1)}`,
 		conversation: { kind: "channel", id: designChannel.id },
 		authorType: "user",
-		authorId: "ralph",
-		authorName: "Ralph",
+		authorId: "sample-user",
+		authorName: "You",
 		text:
 			[
 				"Audit the responsive workspace shell and record any clipping or focus issues.",
@@ -1027,7 +1024,7 @@ const searchResults: CommonspaceSearchResult[] = [
 		kind: "message",
 		projectIds: [primaryProject.id],
 		title: "Review the visual baseline",
-		detail: "Ralph · design-review",
+		detail: "You · design-review",
 		receipt: "design-review",
 		occurredAt: rootMessage.createdAt,
 		highlights: [],

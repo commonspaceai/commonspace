@@ -71,7 +71,7 @@ it("pins a Channel root to the Channel even while its Thread is open", async () 
 	const user = userEvent.setup();
 	await user.click(
 		within(posts).getByRole("button", {
-			name: "More actions for message from Ralph",
+			name: "More actions for message from You",
 		}),
 	);
 	await user.click(
@@ -149,7 +149,7 @@ it("unpins only the Channel copy when the same message is also pinned in a Threa
 	const user = userEvent.setup();
 	await user.click(
 		within(posts).getByRole("button", {
-			name: "More actions for message from Ralph",
+			name: "More actions for message from You",
 		}),
 	);
 	await user.click(

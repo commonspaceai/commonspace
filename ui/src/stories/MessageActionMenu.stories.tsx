@@ -10,7 +10,7 @@ const meta = {
 		(Story) => (
 			<div className="group/message flex w-[560px] items-center justify-between gap-4 rounded-md border bg-background p-3 text-foreground">
 				<div className="min-w-0">
-					<strong className="block text-[13px] font-medium">Ralph</strong>
+					<strong className="block text-[13px] font-medium">You</strong>
 					<p className="truncate text-xs text-muted-foreground">
 						Please review the current visual baseline.
 					</p>
@@ -20,7 +20,7 @@ const meta = {
 		),
 	],
 	args: {
-		authorName: "Ralph",
+		authorName: "You",
 		summary: "Please review the current visual baseline.",
 		saved: false,
 		onToggleSaved: fn(),

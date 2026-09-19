@@ -835,7 +835,7 @@ export const EditingDeliveredMessage: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const actions = canvas.getByRole("button", {
-			name: "More actions for message from Ralph",
+			name: "More actions for message from You",
 		});
 		actions.focus();
 		await userEvent.click(actions);

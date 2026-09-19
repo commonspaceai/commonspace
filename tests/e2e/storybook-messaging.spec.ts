@@ -186,7 +186,7 @@ test("hover reveals message actions without selecting the message or another des
 	const message = root.locator("article");
 	await expect(message).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 	await root
-		.getByRole("button", { name: "More actions for message from Ralph" })
+		.getByRole("button", { name: "More actions for message from You" })
 		.click();
 	await page
 		.getByRole("menuitem", { name: "Edit message", exact: true })
