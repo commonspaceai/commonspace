@@ -9,6 +9,7 @@ The design system gives Commonspace one consistent set of colors, typography, sp
 | [`ui/src/index.css`](../../ui/src/index.css) | Semantic theme variables, font roles, radius aliases, base styles, and reduced-motion behavior |
 | [`ui/components.json`](../../ui/components.json) | shadcn configuration and component aliases |
 | `ui/src/components/ui` | Shared UI primitives |
+| `ui/src/design-system` | Shared product patterns: identity, headers, collection controls, delivery, and counters |
 | `ui/src` | Product components and screen composition |
 | `ui/src/stories` | Isolated component and screen states |
 
@@ -27,7 +28,7 @@ The stable aliases in `ui/src/index.css` connect Commonspace's needs to the them
 | `--font-display`, `--font-body`, `--font-code` | Heading, prose, and code typography |
 | `--surface`, `--surface-raised` | Ordinary and raised content surfaces |
 | `--radius-control`, `--radius-field`, `--radius-panel` | Component corner roles derived from the base radius |
-| `--sidebar-deep` | Additional sidebar depth within the same palette |
+| `--sidebar-deep` | Compatibility alias for the navigation surface |
 | `--status-success`, `--status-warning`, `--status-danger` | Semantic status colors |
 | `--control` | Shared control sizing |
 | `--shadow-soft`, `--shadow-high` | Subtle and elevated shadows |
@@ -48,11 +49,35 @@ Review the resulting diff, preserve the stable aliases, and inspect every affect
 - `CommonspaceLogo` owns the monochrome identity: three uneven, flowing agent shapes form an open C, with two circular eye cutouts per shape. Preserve the organic silhouette and curved gaps. The SVG inherits text color; its eyes show the underlying surface. Use the same geometry for the browser icons and repository logo. The `Design System/CommonspaceLogo/Monochrome` story shows both polarities and sizes from 16px to 32px.
 
 - `NativeSelect` owns compact native pickers, neutral borders, chevron spacing, disabled/error states, and keyboard focus. Pass native select props and children; keep labels at the call site. Folder pickers display the public folder label once, without adding a duplicate Working/Reference prefix.
-- `Button` uses 36px by default, 28px for small actions, and 44px for large actions. Secondary buttons use neutral colors.
+- `Button` uses 36px by default, 28px for small actions, 32px for compact text filters, and 44px for large actions. Secondary buttons use neutral colors. Use `variant="tab"` for page views and `variant="filter"` for secondary collection filters, with `size="compact"` and `aria-pressed`.
+- `AgentAvatar` owns configured emoji, softly tinted accent, fallback initials, corner shape, and size across navigation, collections, conversations, activity, and profile editing. Callers may position it; do not override its shape, typography, or color. Runtime status is optional and must represent runtime state, never unread state.
+- `CollectionToolbar` owns collection width, padding, alignment, and wrapping. Supply native labels, groups, and shared controls as children; keep filter state and behavior in the screen.
 - `UnreadCount` owns quiet 18px-high navigation counters, tabular numerals, and the `99+` cap. The parent supplies the accessible unread label.
 - `ConversationRetention` owns its dialog and the choose/review/delete lifecycle. The sidebar supplies conversations and the existing retention API; it does not own dialog form state.
 
 Use the focus and density tokens rather than adding per-screen orange rings or large minimum heights. Strong status color belongs to errors and final destructive actions. Inspect `Foundations/UI Primitives`, `Pages/CommonspaceSidebar`, and `Pages/CommonspaceProjectFiles` in Storybook when changing these rules.
+
+## Component index and adoption
+
+Search this index and the existing source before adding a component. Extend the owning variant when the job is the same. Share a product pattern when at least two real callers need it; do not move an entire screen into a generic configurable component.
+
+| Job | Canonical owner | Adoption / review entry |
+| --- | --- | --- |
+| Ordinary actions and collection filters | [`Button`](../../ui/src/components/ui/button.tsx) | Inbox and Threads toolbars, filters, and row actions; `Review/Component System` |
+| Agent identity | [`AgentAvatar`](../../ui/src/design-system/AgentAvatar.tsx) | Sidebar, directory, Inbox, Threads, messages, activity, Project, and agent settings; dedicated identity stories |
+| Collection control layout | [`CollectionToolbar`](../../ui/src/design-system/CollectionToolbar.tsx) | Inbox and Threads; `Review/Component System` |
+| Workspace settings categories | [`WorkspaceSettingsLayout`](../../ui/src/design-system/WorkspaceSettingsLayout.tsx) | Six keyboard-accessible categories; drafts remain mounted across category changes |
+| Theme selection | [`AppearanceSettings`](../../ui/src/design-system/AppearanceSettings.tsx) | Light, Dark, and System previews using native radio behavior |
+| Channel thread filter | [`ChannelThreadFilter`](../../ui/src/design-system/ChannelThreadFilter.tsx) | Checked menu options; selection closes the menu |
+| Page heading | [`WorkspaceHeader`](../../ui/src/design-system/WorkspaceHeader.tsx) | Workspace collections; dedicated header stories |
+| Native picker | [`NativeSelect`](../../ui/src/components/ui/native-select.tsx) | Sorting and forms; `Foundations/UI Primitives` |
+| Navigation unread count | [`UnreadCount`](../../ui/src/design-system/UnreadCount.tsx) | Sidebar; `Review/Component System` |
+| Collection sort menu | [`SidebarSortControl`](../../ui/src/design-system/SidebarSortControl.tsx) | Sidebar; `Pages/CommonspaceSidebar` |
+| Follow-up delivery | [`RunDelivery`](../../ui/src/design-system/RunDelivery.tsx) | DM and Thread composer trays; dedicated delivery stories |
+
+This is an adoption map, not a claim that consolidation is complete. Complex clickable list rows remain native buttons with their own row layout. Sidebar navigation, settings forms, and directory tabs still include screen-owned controls; audit their semantics before migrating them. User and system-message identities are distinct from agent identities.
+
+The review entry renders the production owners together and links to assembled fixture screens. It must not introduce a parallel set of demonstration-only controls. The [capture catalog](../../ui/src/stories/review-catalog.ts) declares representative screens and a review question for each. Add an affected screen or state when changing a shared owner, then follow the visual verification protocol. Passing stories demonstrate behavior; screenshots become accepted only after pixel inspection.
 
 ## Component behavior
 
@@ -67,6 +92,10 @@ The same visual treatment should mean the same thing across screens. Selected ro
 | Agent activity | Present only harness-emitted activity, collapsed by default. |
 | Thread | Keep the root, focused reply, and continuation understandable. |
 | Composer | Keep active context visible and provide slash-command and reference suggestions. |
+
+The conversation checkpoint uses `NavigationSection`, `RoutingReceipt`, and `MessageComposer` as shared pattern owners. Section titles navigate; separate chevrons collapse. Routing opens a single anchored popover with the stored decision, source, timing, assignments, and corrections; delivery history has no nested disclosure. A generic selection receipt is not a rationale. Preserve recovery actions and all stored history. Root and Thread composers share native form/input framing without moving their submission state.
+
+Use `Workspace/Conversation` as the connected design workspace. It renders the production app and client store against a disposable mock HTTP service. Shared component edits appear here and in the live app; reload resets the sample data. Focused component stories remain available for individual states.
 
 The desktop shell uses the dimensions in [DESIGN.md](../../DESIGN.md#layout). Screen components should compose those shared rules rather than define alternate shell geometry.
 
@@ -87,3 +116,19 @@ Respect `prefers-reduced-motion`. Use text, icons, and semantic state alongside 
 5. Run the appropriate [development checks](../guides/development.md#verification-commands) and complete the [visual review](visual-verification.md).
 
 Keep [DESIGN.md](../../DESIGN.md) current when changing a visual requirement. Product documentation should explain what users can do; token names and implementation details belong here.
+
+## Reference-aligned workspace
+
+The shell uses a monochrome SVG mark, one navigation group per collection, and the semantic charcoal/white surface hierarchy from the accepted design direction. Conversation text, collapsed details, and composers share the same rhythm. Keep configured agent identity while using its accent as a tint.
+
+`useThreadOverlay` measures available conversation width. Below 960px the Thread overlays the right side; otherwise it docks beside the channel with resizing available. Covered channel controls become inert, while the channel remains visually present. Closing or pressing Escape restores the channel composer; an open Thread context closes first. Review `Screens/Workspace/ThreadRightOverlay` and `ThreadDocked` for these behaviors.
+
+### Interaction emphasis
+
+`NavigationItem` owns the 36px navigation row and its quiet selected surface. Pointer hover changes navigation text; it must not resemble a second selection. Keyboard focus remains explicit. Collection rows use the weaker hover token to identify the clickable row. Messages themselves have no hover fill: hovering or focusing exposes the message menu, while the active thread source uses a narrow neutral location marker. Pin, edit, and delete live in that menu; reply remains directly available.
+
+Use spacing and section headings for settings groups. Do not repeat a radio selection as a colored border plus a Selected label, or frame each passive project fact as a card. Repeated agent choices share one explanation above the list. Directory search, count, sort, and actions share one toolbar.
+
+The visual direction is a conversation workspace: the authored work and the right-side reply pane establish the hierarchy. Use the platform system typeface for both content and controls, with 15px message text, 13–14px controls, and 12px supporting metadata. Align labels, content, and form fields to a common left edge. Dark roles use rail `#191a1c`, canvas `#202123`, selection `#292b30`, primary text `#ededf0`, secondary text `#abadb6`, and action blue `#78b5ff`; Light uses the corresponding semantic tokens. Surface differences identify navigation, work, and a foreground reply—not decorative cards.
+
+Disabled optional provider fields stay mounted but hidden until enabled, preserving the unsaved draft. Error notices occupy normal layout space: the workspace footer normally owns the notice, and open Workspace settings owns it below its header. An error must never cover a save or retry control. Use one focus outline rather than stacking a border, ring, and outline.
