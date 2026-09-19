@@ -6,6 +6,9 @@
 		"types": ["node"]
 	},
 	"include": [
+		"scripts/benchmark-browser-refresh.ts",
+		"scripts/browser-refresh-metrics.ts",
+		"tests/benchmark-browser-refresh.spec.ts",
 		"scripts/benchmark-workspace*.ts",
 		"tests/benchmark-workspace*.spec.ts",
 		"scripts/context-evaluation*.ts",
