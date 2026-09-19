@@ -115,12 +115,25 @@ export const FlowVerification: Story = {
 		await userEvent.click(
 			canvas.getByRole("button", { name: "Open channel design-review" }),
 		);
-		await expect(canvas.getByText("Post to #design-review")).toBeVisible();
-		await expect(canvas.getByText("Starts a new Thread")).toBeVisible();
-		await expect(canvas.getByText(/AI selects from Review Bot/u)).toBeVisible();
 		const rootComposer = canvas.getByRole("textbox", {
 			name: "Post in design-review",
 		});
+		const rootComposerFrame = canvas.getByRole("form", {
+			name: "Start a new Thread in design-review",
+		});
+		await expect(rootComposer).toHaveAttribute(
+			"placeholder",
+			"Start a new Thread in #design-review",
+		);
+		await expect(
+			within(rootComposerFrame).queryByText(/AI selects/u),
+		).not.toBeInTheDocument();
+		await expect(
+			within(rootComposerFrame).queryByText("Post to #design-review"),
+		).not.toBeInTheDocument();
+		await expect(
+			within(rootComposerFrame).queryByText("Starts a new Thread"),
+		).not.toBeInTheDocument();
 		const rootAttachment = canvas.getByLabelText("Attach files");
 		rootAttachment.focus();
 		await expect(rootAttachment).toHaveFocus();
@@ -164,8 +177,13 @@ export const FlowVerification: Story = {
 		const thread = within(
 			await canvas.findByRole("complementary", { name: "Thread replies" }),
 		);
-		await expect(thread.getByText("Reply in this Thread")).toBeVisible();
-		await expect(thread.getByText(/AI selects from Review Bot/u)).toBeVisible();
+		await expect(
+			thread.getByRole("textbox", { name: "Reply in thread" }),
+		).toHaveAttribute("placeholder", "Continue this Thread…");
+		await expect(thread.queryByText(/AI selects/u)).not.toBeInTheDocument();
+		await expect(
+			thread.queryByText("Reply in this Thread"),
+		).not.toBeInTheDocument();
 		const attachment = thread.getByLabelText("Attach files to Thread");
 		attachment.focus();
 		await expect(attachment).toHaveFocus();
@@ -186,9 +204,7 @@ export const FlowVerification: Story = {
 		).toBeVisible();
 		await userEvent.clear(reply);
 		await userEvent.type(reply, "@build-smith @@platform");
-		await expect(thread.getByText("Explicit recipients")).toBeVisible();
-		await expect(thread.getByText("@build-smith")).toBeVisible();
-		await expect(thread.getByText("Explicit Project context")).toBeVisible();
+		await expect(reply).toHaveValue("@build-smith @@platform");
 		await userEvent.clear(reply);
 		await expect(thread.getByText("Completed")).toBeVisible();
 		await userEvent.click(

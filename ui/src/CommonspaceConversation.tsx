@@ -497,30 +497,6 @@ function renderMessageText(
 	);
 }
 
-interface ComposerReferences {
-	agentTokens: string[];
-	projectTokens: string[];
-}
-
-function composerReferences(
-	text: string,
-	bootstrap?: CommonspaceBootstrap,
-): ComposerReferences {
-	const parts = tagReferenceParts(text, bootstrap);
-	return {
-		agentTokens: [
-			...new Set(
-				parts.flatMap((part) => (part.kind === "agent" ? [part.text] : [])),
-			),
-		],
-		projectTokens: [
-			...new Set(
-				parts.flatMap((part) => (part.kind === "project" ? [part.text] : [])),
-			),
-		],
-	};
-}
-
 function fileSizeLabel(size: number): string {
 	if (size < 1_024) return `${String(size)} B`;
 	if (size < 1_024 * 1_024) return `${(size / 1_024).toFixed(1)} KB`;
@@ -1277,19 +1253,6 @@ export function CommonspaceConversation({
 					(channel) => channel.id === snapshot.activeConversation?.id,
 				)
 			: undefined;
-	const channelAgentNames = useMemo(
-		() =>
-			(activeChannel?.agentIds ?? []).map(
-				(agentId) =>
-					bootstrap?.agents.find((agent) => agent.id === agentId)
-						?.displayName ?? agentId,
-			),
-		[activeChannel?.agentIds, bootstrap?.agents],
-	);
-	const rootComposerReferences = useMemo(
-		() => composerReferences(draft, bootstrap ?? undefined),
-		[bootstrap, draft],
-	);
 	const slashSuggestions =
 		snapshot.activeConversation === null ||
 		pendingImages.length > 0 ||
@@ -1333,17 +1296,6 @@ export function CommonspaceConversation({
 			: bootstrap.state.projects.find(
 					(project) => project.id === activeThread.projectId,
 				);
-	const activeThreadProjects = useMemo(() => {
-		if (activeThread === undefined || bootstrap === null) return [];
-		const projectIds =
-			activeThread.projectIds ??
-			(activeThread.projectId === null ? [] : [activeThread.projectId]);
-		return projectIds.map(
-			(projectId) =>
-				bootstrap.state.projects.find((project) => project.id === projectId)
-					?.name ?? projectId,
-		);
-	}, [activeThread, bootstrap]);
 	const sessions = useMemo(
 		() =>
 			bootstrap === null
@@ -1360,18 +1312,6 @@ export function CommonspaceConversation({
 				? []
 				: sessions.filter((session) => session.threadId === activeThread.id),
 		[activeThread, sessions],
-	);
-	const activeThreadAgentNames = useMemo(() => {
-		if (activeThread === undefined || bootstrap === null) return [];
-		return activeThread.agentIds.map(
-			(agentId) =>
-				bootstrap.agents.find((agent) => agent.id === agentId)?.displayName ??
-				agentId,
-		);
-	}, [activeThread, bootstrap]);
-	const threadComposerReferences = useMemo(
-		() => composerReferences(threadDraft, bootstrap ?? undefined),
-		[bootstrap, threadDraft],
 	);
 	const threadFollowing = activeThreadSessions.some(
 		(session) => session.followed,
@@ -2788,61 +2728,6 @@ export function CommonspaceConversation({
 									onSelectTag={selectSuggestion}
 								/>
 							)}
-							<div className="-mx-3 -mt-3 flex min-w-0 items-start gap-3 rounded-t-[8px] border-b bg-muted/35 px-3 py-2.5">
-								<span
-									className="grid size-7 shrink-0 place-items-center rounded-md bg-primary/10 font-heading text-sm font-semibold text-primary"
-									aria-hidden="true"
-								>
-									{isChannel ? "#" : "@"}
-								</span>
-								<div className="min-w-0 flex-1">
-									<div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-										<strong className="text-xs font-semibold text-foreground">
-											{isChannel
-												? `Post to #${heading.title}`
-												: `Message ${heading.title}`}
-										</strong>
-										<span className="text-[11px] text-muted-foreground">
-											{isChannel
-												? "Starts a new Thread"
-												: "Continues this direct message"}
-										</span>
-									</div>
-									{isChannel ? (
-										<div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted-foreground">
-											<span>
-												{rootComposerReferences.agentTokens.length > 0
-													? "Explicit recipients"
-													: channelAgentNames.length > 0
-														? `AI selects from ${channelAgentNames.join(" + ")}`
-														: "No Channel agents available"}
-											</span>
-											{rootComposerReferences.agentTokens.map((token) => (
-												<span
-													key={token}
-													className="rounded-sm border bg-background px-1.5 py-0.5 font-medium text-foreground"
-												>
-													{token}
-												</span>
-											))}
-											<span aria-hidden="true">·</span>
-											<span>
-												{rootComposerReferences.projectTokens.length > 0
-													? "Explicit Project context"
-													: "AI selects Project context after send"}
-											</span>
-											{rootComposerReferences.projectTokens.map((token) => (
-												<span
-													key={token}
-													className="rounded-sm border bg-background px-1.5 py-0.5 font-medium text-foreground"
-												>
-													{token}
-												</span>
-											))}
-										</div>
-									) : null}
-								</div>
-							</div>
 							<div className="relative w-full">
 								<MessageComposerInput
 									ref={composer}
@@ -3393,61 +3278,6 @@ export function CommonspaceConversation({
 											onSelectTag={selectThreadSuggestion}
 										/>
 									)}
-									<div className="-mx-3 -mt-3 flex min-w-0 items-start gap-3 rounded-t-[8px] border-b bg-primary/[0.045] px-3 py-2.5">
-										<span
-											className="grid size-7 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"
-											aria-hidden="true"
-										>
-											<MessageCircleReplyIcon className="size-4" />
-										</span>
-										<div className="min-w-0 flex-1">
-											<div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-												<strong className="text-xs font-semibold text-foreground">
-													Reply in this Thread
-												</strong>
-												<span className="text-[11px] text-muted-foreground">
-													Continues #
-													{activeChannel?.name ?? activeThread.channelId}
-												</span>
-											</div>
-											<div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted-foreground">
-												<span>
-													{threadReplyTarget !== null
-														? `Only ${threadReplyTarget.agentName} will respond`
-														: threadComposerReferences.agentTokens.length > 0
-															? "Explicit recipients"
-															: activeThreadAgentNames.length > 0
-																? `AI selects from ${activeThreadAgentNames.join(" + ")}`
-																: "No Thread agents available"}
-												</span>
-												{threadReplyTarget === null &&
-													threadComposerReferences.agentTokens.map((token) => (
-														<span
-															key={token}
-															className="rounded-sm border bg-background px-1.5 py-0.5 font-medium text-foreground"
-														>
-															{token}
-														</span>
-													))}
-												<span aria-hidden="true">·</span>
-												<span>
-													{threadComposerReferences.projectTokens.length > 0
-														? "Explicit Project context"
-														: activeThreadProjects.length > 0
-															? `Thread context: ${activeThreadProjects.join(" + ")}`
-															: "No Project context"}
-												</span>
-												{threadComposerReferences.projectTokens.map((token) => (
-													<span
-														key={token}
-														className="rounded-sm border bg-background px-1.5 py-0.5 font-medium text-foreground"
-													>
-														{token}
-													</span>
-												))}
-											</div>
-										</div>
-									</div>
 									<div className="relative w-full">
 										{threadReplyTarget !== null && (
 											<div
