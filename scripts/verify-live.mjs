@@ -653,6 +653,10 @@ async function seedExperienceFixture(root) {
 				accentColor: agent.id === "hermes" ? "#e879f9" : "#60a5fa",
 			});
 		}
+		await service.updateRoutingConfiguration({
+			provider: "harness",
+			harnessAgentId: "codex",
+		});
 
 		let state = await service.mutate({
 			action: "create-project",
@@ -1031,7 +1035,7 @@ try {
 	});
 	await installedPage.goto(installedUrl, { waitUntil: "domcontentloaded" });
 	await installedPage
-		.getByRole("main", { name: "Inbox" })
+		.getByRole("main", { name: "Workspace setup" })
 		.waitFor({ state: "visible" });
 	await installedPage
 		.getByLabel("Commonspace browser")
@@ -1050,6 +1054,7 @@ try {
 			apiServer: true,
 			browserMounted: true,
 			installedBrowserMounted: true,
+			installedOnboardingMounted: true,
 			keyboardNavigation: true,
 			lightDarkPalettes: true,
 			baseline,
