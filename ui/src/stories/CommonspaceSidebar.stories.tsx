@@ -158,7 +158,20 @@ async function selectSort(
 	await waitFor(() => expect(page.queryAllByRole("menu")).toHaveLength(0));
 }
 
+function resetStoryPins() {
+	window.localStorage.setItem(
+		"commonspace-pins",
+		JSON.stringify([
+			collectionKey("project", primaryProject.id),
+			collectionKey("channel", designChannel.id),
+			collectionKey("agent", hermesAgent.id),
+		]),
+	);
+	sidebarPreferencesStore.reload();
+}
+
 async function prepareChannelSorting(canvasElement: HTMLElement) {
+	resetStoryPins();
 	await selectSort(canvasElement, "channel", "Recent activity");
 	sidebarPreferencesStore.setCustomOrder("channel", []);
 	if (
@@ -332,6 +345,7 @@ export const AllCollectionsAlphabetical: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		resetStoryPins();
 		await selectSort(canvasElement, "project", "Alphabetical");
 		await selectSort(canvasElement, "channel", "Alphabetical");
 		await selectSort(canvasElement, "agent", "Alphabetical");
