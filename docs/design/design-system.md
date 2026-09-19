@@ -45,6 +45,8 @@ Review the resulting diff, preserve the stable aliases, and inspect every affect
 
 ## Shared controls
 
+- `CommonspaceLogo` owns the monochrome identity: three uneven, flowing agent shapes form an open C, with two circular eye cutouts per shape. Preserve the organic silhouette and curved gaps. The SVG inherits text color; its eyes show the underlying surface. Use the same geometry for the browser icons and repository logo. The `Design System/CommonspaceLogo/Monochrome` story shows both polarities and sizes from 16px to 32px.
+
 - `NativeSelect` owns compact native pickers, neutral borders, chevron spacing, disabled/error states, and keyboard focus. Pass native select props and children; keep labels at the call site. Folder pickers display the public folder label once, without adding a duplicate Working/Reference prefix.
 - `Button` uses 36px by default, 28px for small actions, and 44px for large actions. Secondary buttons use neutral colors.
 - `UnreadCount` owns quiet 18px-high navigation counters, tabular numerals, and the `99+` cap. The parent supplies the accessible unread label.
