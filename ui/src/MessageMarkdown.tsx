@@ -78,7 +78,7 @@ export const MessageMarkdown = memo(function MessageMarkdown({
 }) {
 	return (
 		<div
-			className="min-w-0 text-sm leading-6 break-words [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_code]:font-mono [&_li]:my-1 [&_ol]:my-2 [&_ol]:pl-6 [&_p]:my-2 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:border [&_pre]:bg-muted [&_pre]:p-3 [&_table]:w-full [&_td]:border-t [&_td]:p-2 [&_th]:p-2 [&_ul]:my-2 [&_ul]:pl-6"
+			className="min-w-0 text-sm leading-[1.65] break-words [&_a]:text-primary [&_a]:underline [&_blockquote]:rounded-sm [&_blockquote]:bg-muted/55 [&_blockquote]:px-3 [&_blockquote]:py-1 [&_blockquote]:text-muted-foreground [&_code]:font-mono [&_li]:my-1 [&_ol]:my-2 [&_ol]:pl-6 [&_p]:my-1 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:border [&_pre]:bg-muted [&_pre]:p-3 [&_table]:w-full [&_td]:border-t [&_td]:p-2 [&_th]:p-2 [&_ul]:my-2 [&_ul]:pl-6"
 			data-selectable-text="true"
 		>
 			<Streamdown

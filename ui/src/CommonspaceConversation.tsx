@@ -16,17 +16,17 @@ import {
 	type SendImageAttachment,
 } from "@commonspace/shared";
 import {
+	ArrowUpIcon,
 	MessageCircleReplyIcon,
-	PencilIcon,
-	PinIcon,
+	PaperclipIcon,
 	SettingsIcon,
-	Trash2Icon,
 } from "lucide-react";
 import {
 	type Dispatch,
 	type FormEvent,
 	Fragment,
 	lazy,
+	type ReactNode,
 	type SetStateAction,
 	Suspense,
 	useCallback,
@@ -38,7 +38,13 @@ import {
 	useSyncExternalStore,
 } from "react";
 import { Button } from "@/components/ui/button";
-import { NativeSelect } from "@/components/ui/native-select";
+import { ChannelThreadFilter } from "@/design-system/ChannelThreadFilter";
+import {
+	MessageComposerActions,
+	MessageComposerFrame,
+	MessageComposerInput,
+} from "@/design-system/MessageComposer";
+import { RoutingReceipt } from "@/design-system/RoutingReceipt";
 import {
 	type PendingAdmissionItem,
 	PendingAdmissions,
@@ -65,6 +71,7 @@ import {
 	COMMONSPACE_RESIZABLE_PANEL,
 	useResizablePanel,
 } from "./design-system/useResizablePanel.ts";
+import { useThreadOverlay } from "./design-system/useThreadOverlay";
 import { LiveAgentActivity } from "./LiveAgentActivity.tsx";
 import { RunAttribution } from "./RunAttribution.tsx";
 import {
@@ -490,232 +497,34 @@ function renderMessageText(
 	);
 }
 
+interface ComposerReferences {
+	agentTokens: string[];
+	projectTokens: string[];
+}
+
+function composerReferences(
+	text: string,
+	bootstrap?: CommonspaceBootstrap,
+): ComposerReferences {
+	const parts = tagReferenceParts(text, bootstrap);
+	return {
+		agentTokens: [
+			...new Set(
+				parts.flatMap((part) => (part.kind === "agent" ? [part.text] : [])),
+			),
+		],
+		projectTokens: [
+			...new Set(
+				parts.flatMap((part) => (part.kind === "project" ? [part.text] : [])),
+			),
+		],
+	};
+}
+
 function fileSizeLabel(size: number): string {
 	if (size < 1_024) return `${String(size)} B`;
 	if (size < 1_024 * 1_024) return `${(size / 1_024).toFixed(1)} KB`;
 	return `${(size / (1_024 * 1_024)).toFixed(1)} MB`;
-}
-
-function routingDurationLabel(durationMs: number | undefined): string | null {
-	if (durationMs === undefined) return null;
-	if (durationMs < 1_000) return `routed in ${String(durationMs)}ms`;
-	return `routed in ${(durationMs / 1_000).toFixed(durationMs < 10_000 ? 1 : 0)}s`;
-}
-
-function routingAgentName(
-	agentId: string,
-	bootstrap?: CommonspaceBootstrap | null,
-): string {
-	return (
-		bootstrap?.agents.find((agent) => agent.id === agentId)?.displayName ??
-		agentId
-	);
-}
-
-function routingOutcome(
-	message: CommonspaceMessage,
-	bootstrap?: CommonspaceBootstrap | null,
-): "Routing" | "Queued" | "Running" | "Completed" | "Cancelled" | "Failed" {
-	const responses = Object.values(bootstrap?.state.messages ?? {})
-		.flat()
-		.filter((candidate) => candidate.sourceMessageId === message.id);
-	if (message.replyStatus === "cancelled") return "Cancelled";
-	if (
-		message.replyStatus === "failed" ||
-		message.replyStatus === "error" ||
-		message.replyStatus === "timeout" ||
-		message.replyStatus === "silent" ||
-		message.routing?.status === "failed" ||
-		(message.routing?.agentIds.length === 0 &&
-			message.routing.status !== "pending") ||
-		responses.some(
-			(response) =>
-				response.replyStatus === "failed" ||
-				response.replyStatus === "error" ||
-				response.replyStatus === "timeout" ||
-				response.replyStatus === "silent" ||
-				(response.authorType === "system" &&
-					/\brun failed:/iu.test(response.text)),
-		)
-	)
-		return "Failed";
-	if (
-		message.replyStatus === "running" ||
-		bootstrap?.liveActivities?.some(
-			(activity) => activity.sourceMessageId === message.id,
-		) === true
-	)
-		return "Running";
-	if (message.replyStatus === "complete") return "Completed";
-	if (responses.length > 0) return "Completed";
-	if (message.routing?.status === "pending") return "Routing";
-	return "Queued";
-}
-
-function RoutingReceipt({
-	message,
-	bootstrap,
-	onRetryRouting,
-}: {
-	message: CommonspaceMessage;
-	bootstrap: CommonspaceBootstrap | null | undefined;
-	onRetryRouting?: (
-		message: CommonspaceMessage,
-		choice: { mode: "ai" } | { mode: "manual"; agentId: string },
-	) => Promise<void>;
-}) {
-	const routing = message.routing;
-	const [manualAgentId, setManualAgentId] = useState("");
-	const [retrying, setRetrying] = useState<"ai" | "manual" | null>(null);
-	if (message.authorType !== "user" || routing === undefined) return null;
-	const channelAgents =
-		message.conversation.kind === "channel"
-			? (bootstrap?.state.channels
-					.find((channel) => channel.id === message.conversation.id)
-					?.agentIds.map((agentId) =>
-						bootstrap.agents.find((agent) => agent.id === agentId),
-					)
-					.filter((agent) => agent !== undefined) ?? [])
-			: [];
-	const agents = routing.agentIds.map((agentId) =>
-		routingAgentName(agentId, bootstrap),
-	);
-	const destination =
-		agents.length === 0 ? "No agent selected" : agents.join(", ");
-	const source =
-		routing.source === "explicit"
-			? "explicit mention"
-			: routing.source === "ai"
-				? "AI selected"
-				: "local routing";
-	const outcome = routingOutcome(message, bootstrap);
-	const duration = routingDurationLabel(routing.durationMs);
-	return (
-		<details className="mt-2 rounded-sm border bg-muted/35 px-2.5 py-1.5 text-xs">
-			<summary className="cursor-pointer list-none font-medium marker:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
-				<span
-					className={cn(outcome === "Failed" && "text-destructive")}
-					role={outcome === "Failed" ? "alert" : "status"}
-				>
-					Routed to {destination} · {source} · {outcome}
-				</span>
-			</summary>
-			<div className="mt-2 grid gap-2 border-t pt-2 text-muted-foreground">
-				{message.replyError !== undefined && (
-					<p>
-						<strong className="text-foreground">Outcome:</strong>{" "}
-						{message.replyError}
-					</p>
-				)}
-				<p>
-					<strong className="text-foreground">Reason:</strong> {routing.reason}
-					{duration === null ? "" : ` · ${duration}`}
-				</p>
-				{routing.assignments.length > 0 && (
-					<ul className="grid gap-1" aria-label="Routing assignments">
-						{routing.assignments.map((assignment) => {
-							const projects = assignment.projectIds.map(
-								(projectId) =>
-									bootstrap?.state.projects.find(
-										(project) => project.id === projectId,
-									)?.name ?? projectId,
-							);
-							return (
-								<li key={assignment.id}>
-									<strong className="text-foreground">
-										{routingAgentName(assignment.agentId, bootstrap)}:
-									</strong>{" "}
-									{assignment.legacySubRequest === undefined
-										? "Original message"
-										: `Historical request: ${assignment.legacySubRequest}`}
-									{projects.length === 0 ? "" : ` · ${projects.join(", ")}`}
-								</li>
-							);
-						})}
-					</ul>
-				)}
-				{routing.corrections.length > 0 && (
-					<ul className="grid gap-1" aria-label="Routing corrections">
-						{routing.corrections.map((correction) => {
-							const from = routing.assignments.find(
-								(assignment) => assignment.id === correction.fromAssignmentId,
-							);
-							const to = routing.assignments.find(
-								(assignment) => assignment.id === correction.toAssignmentId,
-							);
-							return (
-								<li key={correction.id}>
-									Rerouted{" "}
-									{from === undefined
-										? correction.fromAssignmentId
-										: routingAgentName(from.agentId, bootstrap)}{" "}
-									→{" "}
-									{to === undefined
-										? correction.toAssignmentId
-										: routingAgentName(to.agentId, bootstrap)}
-								</li>
-							);
-						})}
-					</ul>
-				)}
-				{routing.status === "failed" && onRetryRouting !== undefined && (
-					<div className="flex flex-wrap items-center gap-2 border-t pt-2">
-						<Button
-							type="button"
-							size="sm"
-							variant="outline"
-							disabled={retrying !== null}
-							onClick={async () => {
-								setRetrying("ai");
-								try {
-									await onRetryRouting(message, { mode: "ai" });
-								} finally {
-									setRetrying(null);
-								}
-							}}
-						>
-							{retrying === "ai" ? "Retrying…" : "Retry AI routing"}
-						</Button>
-						<NativeSelect
-							aria-label="Manual routing agent"
-							className="h-8 text-xs"
-							value={manualAgentId}
-							disabled={retrying !== null}
-							onChange={(event) => {
-								setManualAgentId(event.target.value);
-							}}
-						>
-							<option value="">Route manually…</option>
-							{channelAgents.map((agent) => (
-								<option key={agent.id} value={agent.id}>
-									{agent.displayName}
-								</option>
-							))}
-						</NativeSelect>
-						<Button
-							type="button"
-							size="sm"
-							disabled={manualAgentId === "" || retrying !== null}
-							onClick={async () => {
-								if (manualAgentId === "") return;
-								setRetrying("manual");
-								try {
-									await onRetryRouting(message, {
-										mode: "manual",
-										agentId: manualAgentId,
-									});
-								} finally {
-									setRetrying(null);
-								}
-							}}
-						>
-							{retrying === "manual" ? "Routing…" : "Route"}
-						</Button>
-					</div>
-				)}
-			</div>
-		</details>
-	);
 }
 
 function conversationDateLabel(
@@ -738,6 +547,8 @@ function MessageRow({
 	elementId,
 	bootstrap,
 	flush = false,
+	quotedSource = false,
+	replyLink,
 	highlighted = false,
 	onReplyToAgent,
 	onPin,
@@ -756,6 +567,8 @@ function MessageRow({
 	elementId?: string;
 	bootstrap?: CommonspaceBootstrap | null;
 	flush?: boolean;
+	quotedSource?: boolean;
+	replyLink?: ReactNode;
 	highlighted?: boolean;
 	onReplyToAgent?: (message: CommonspaceMessage) => void;
 	onPin?: (message: CommonspaceMessage, attachmentId?: string) => Promise<void>;
@@ -778,6 +591,7 @@ function MessageRow({
 }) {
 	const supersedesMessageId = message.supersedesMessageId;
 	const [editing, setEditing] = useState(false);
+	const editInputRef = useRef<HTMLTextAreaElement>(null);
 	const [editedText, setEditedText] = useState(message.text);
 	const [savingEdit, setSavingEdit] = useState(false);
 	const [pinning, setPinning] = useState(false);
@@ -815,110 +629,13 @@ function MessageRow({
 		<article
 			id={elementId}
 			className={cn(
-				"group/message relative mx-auto mb-0 grid w-full max-w-[920px] grid-cols-[36px_minmax(0,1fr)] gap-3 rounded-none px-3 py-2 hover:bg-muted/50 focus-within:bg-muted/50",
-				flush && "px-0 py-0",
+				"group/message relative mx-auto mb-0 grid w-full max-w-[920px] grid-cols-[32px_minmax(0,1fr)] gap-[11px] rounded-md px-1.5 py-2.5",
+				flush && "px-0 py-2.5",
 				highlighted && "bg-muted/40",
 			)}
 			data-author={message.authorType}
 			aria-current={highlighted ? "true" : undefined}
 		>
-			<div className="pointer-events-none absolute top-1 right-2 z-10 flex items-center gap-0.5 rounded-sm border bg-background p-0.5 opacity-0 shadow-[var(--shadow-low)] transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100">
-				{message.authorType === "agent" && onReplyToAgent !== undefined && (
-					<button
-						type="button"
-						className={messageActionButtonClassName}
-						aria-label={`Reply directly to ${message.authorName}`}
-						title={`Reply directly to ${message.authorName}`}
-						onClick={() => {
-							onReplyToAgent(message);
-						}}
-					>
-						<MessageCircleReplyIcon className="size-4" aria-hidden="true" />
-					</button>
-				)}
-				{onPin !== undefined && message.deletedAt === undefined && (
-					<button
-						type="button"
-						className={messageActionButtonClassName}
-						aria-label={`${pinned ? "Unpin" : "Pin"} message from ${message.authorName}`}
-						title={`${pinned ? "Unpin" : "Pin"} message from ${message.authorName}`}
-						aria-pressed={pinned}
-						disabled={pinning}
-						onClick={() => {
-							void pinMessage();
-						}}
-					>
-						<PinIcon className="size-4" aria-hidden="true" />
-					</button>
-				)}
-				{message.authorType === "user" &&
-					message.deletedAt === undefined &&
-					onEdit !== undefined && (
-						<button
-							type="button"
-							className={messageActionButtonClassName}
-							aria-label={`Edit message from ${message.authorName}`}
-							title={`Edit message from ${message.authorName}`}
-							onClick={() => {
-								setEditedText(message.text);
-								setEditing(true);
-							}}
-						>
-							<PencilIcon className="size-4" aria-hidden="true" />
-						</button>
-					)}
-				{message.deletedAt === undefined && onDelete !== undefined && (
-					<button
-						type="button"
-						className={cn(
-							messageActionButtonClassName,
-							"hover:bg-destructive/10 hover:text-destructive",
-						)}
-						aria-label={`Delete message from ${message.authorName}`}
-						title={`Delete message from ${message.authorName}`}
-						onClick={() => {
-							if (
-								window.confirm(
-									"Delete this delivered message content? The transcript marker and delivery history will remain.",
-								)
-							)
-								void onDelete(message);
-						}}
-					>
-						<Trash2Icon className="size-4" aria-hidden="true" />
-					</button>
-				)}
-				{onToggleSaved !== undefined && onCopyLink !== undefined && (
-					<MessageActionMenu
-						authorName={message.authorName}
-						summary={message.text}
-						saved={saved}
-						pinned={pinned}
-						pinning={pinning}
-						{...(onPin === undefined || message.deletedAt !== undefined
-							? {}
-							: {
-									onPin: () => {
-										void pinMessage();
-									},
-								})}
-						{...(onReplyInThread === undefined ? {} : { onReplyInThread })}
-						onToggleSaved={() => {
-							void onToggleSaved(message, !saved);
-						}}
-						{...(onMarkUnread === undefined
-							? {}
-							: {
-									onMarkUnread: () => {
-										void onMarkUnread(message);
-									},
-								})}
-						onCopyLink={() => {
-							onCopyLink(message);
-						}}
-					/>
-				)}
-			</div>
 			{pinError !== null && (
 				<p role="alert" className="col-span-2 text-xs text-destructive">
 					{pinError}
@@ -929,12 +646,11 @@ function MessageRow({
 					agent={messageAgent}
 					fallbackName={message.authorName}
 					size="md"
-					className="rounded-md text-primary"
 				/>
 			) : (
 				<div
 					className={cn(
-						"grid size-9 place-items-center rounded-md border bg-background font-mono text-xs font-semibold",
+						"grid size-8 place-items-center rounded-[7px] bg-muted font-sans text-xs font-medium",
 						message.authorType === "system" && "bg-muted text-muted-foreground",
 					)}
 					aria-hidden="true"
@@ -943,14 +659,110 @@ function MessageRow({
 				</div>
 			)}
 			<div className="min-w-0">
-				<header className="flex min-h-5 flex-wrap items-baseline gap-[7px] text-xs [&>strong]:font-heading [&>strong]:text-sm">
+				<header className="flex min-h-[21px] flex-wrap items-center gap-2 text-sm [&>strong]:font-heading [&>strong]:font-semibold">
 					<strong>{message.authorName}</strong>
-					<time className="text-muted-foreground text-[11px]">
+					<time className="whitespace-nowrap text-muted-foreground text-[11px]">
 						{new Date(message.createdAt).toLocaleTimeString([], {
 							hour: "2-digit",
 							minute: "2-digit",
 						})}
 					</time>
+					<div className="ml-auto flex min-w-0 items-center gap-2">
+						<RoutingReceipt
+							quotedSource={quotedSource}
+							message={message}
+							bootstrap={bootstrap}
+							{...(onRetryRouting === undefined ? {} : { onRetryRouting })}
+						/>
+						{message.authorType === "agent" && message.trace !== undefined && (
+							<AgentTrace
+								authorName={message.authorName}
+								trace={message.trace}
+							/>
+						)}
+						<div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 has-[[aria-expanded=true]]:opacity-100">
+							{message.authorType === "agent" &&
+								onReplyToAgent !== undefined && (
+									<button
+										type="button"
+										className={messageActionButtonClassName}
+										aria-label={`Reply directly to ${message.authorName}`}
+										title={`Reply directly to ${message.authorName}`}
+										onClick={() => {
+											onReplyToAgent(message);
+										}}
+									>
+										<MessageCircleReplyIcon
+											className="size-4"
+											aria-hidden="true"
+										/>
+									</button>
+								)}
+							{(onPin !== undefined ||
+								onEdit !== undefined ||
+								onDelete !== undefined ||
+								onToggleSaved !== undefined ||
+								onCopyLink !== undefined) && (
+								<MessageActionMenu
+									finalFocus={() => editInputRef.current ?? true}
+									authorName={message.authorName}
+									summary={message.text}
+									saved={saved}
+									pinned={pinned}
+									pinning={pinning}
+									{...(onPin === undefined || message.deletedAt !== undefined
+										? {}
+										: {
+												onPin: () => {
+													void pinMessage();
+												},
+											})}
+									{...(onReplyInThread === undefined
+										? {}
+										: { onReplyInThread })}
+									{...(onToggleSaved === undefined
+										? {}
+										: {
+												onToggleSaved: () => {
+													void onToggleSaved(message, !saved);
+												},
+											})}
+									{...(onMarkUnread === undefined
+										? {}
+										: {
+												onMarkUnread: () => {
+													void onMarkUnread(message);
+												},
+											})}
+									{...(onCopyLink === undefined
+										? {}
+										: { onCopyLink: () => onCopyLink(message) })}
+									{...(message.authorType !== "user" ||
+									message.deletedAt !== undefined ||
+									onEdit === undefined
+										? {}
+										: {
+												onEdit: () => {
+													setEditedText(message.text);
+													setEditing(true);
+												},
+											})}
+									{...(message.deletedAt !== undefined || onDelete === undefined
+										? {}
+										: {
+												onDelete: () => {
+													if (
+														window.confirm(
+															"Delete this delivered message content? The transcript marker and delivery history will remain.",
+														)
+													)
+														void onDelete(message);
+												},
+											})}
+								/>
+							)}
+						</div>
+					</div>
 				</header>
 				{supersedesMessageId !== undefined && (
 					<div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
@@ -983,14 +795,14 @@ function MessageRow({
 							<LazyMessageMarkdown text={message.text} />
 						</Suspense>
 					) : (
-						<p className="mt-1 whitespace-pre-wrap text-sm leading-[1.5]">
+						<p className="mt-1 whitespace-pre-wrap text-sm leading-[1.65]">
 							{renderMessageText(message, bootstrap ?? undefined)}
 						</p>
 					))
 				)}
 				{editing && (
 					<form
-						className="mt-3 grid gap-2 rounded-md border bg-muted p-3 [&_button]:min-h-9 [&_button]:rounded-sm [&_button]:border [&_button]:px-3 [&_label]:grid [&_label]:gap-1 [&_textarea]:min-h-24 [&_textarea]:rounded-sm [&_textarea]:border [&_textarea]:bg-background [&_textarea]:p-2"
+						className="mt-3 grid gap-2 rounded-md border bg-muted p-3 [&_button]:min-h-9 [&_button]:rounded-sm [&_button]:border [&_button]:px-3 [&_label]:grid [&_label]:gap-1 [&_textarea]:min-h-24 [&_textarea]:rounded-sm [&_textarea]:border [&_textarea]:bg-background [&_textarea]:p-3"
 						aria-label="Edit delivered message"
 						onSubmit={(event) => {
 							void submitEdit(event);
@@ -999,6 +811,7 @@ function MessageRow({
 						<label>
 							Message
 							<textarea
+								ref={editInputRef}
 								aria-label="Edited message"
 								value={editedText}
 								onChange={(event) => {
@@ -1024,11 +837,7 @@ function MessageRow({
 						</div>
 					</form>
 				)}
-				<RoutingReceipt
-					message={message}
-					bootstrap={bootstrap}
-					{...(onRetryRouting === undefined ? {} : { onRetryRouting })}
-				/>
+				<div className="mt-1 grid justify-items-start gap-0">{replyLink}</div>
 				{message.attachments !== undefined &&
 					message.attachments.length > 0 && (
 						<div className="mt-3 flex flex-wrap gap-2">
@@ -1091,9 +900,6 @@ function MessageRow({
 					</section>
 				)}
 
-				{message.authorType === "agent" && message.trace !== undefined && (
-					<AgentTrace authorName={message.authorName} trace={message.trace} />
-				)}
 				{message.authorType === "agent" &&
 					message.projectId !== undefined &&
 					message.runAttribution !== undefined && (
@@ -1110,8 +916,10 @@ function MessageRow({
 }
 
 function suggestionLabel(suggestion: TagSuggestion): string {
-	if (suggestion.kind === "agent")
-		return `Agent · ${suggestion.label}${suggestion.channelMembership === "outside" ? " · will be added" : ""}`;
+	if (suggestion.kind === "agent") {
+		const scope = suggestion.membershipScope ?? "channel";
+		return `Agent · ${suggestion.label}${suggestion.channelMembership === "outside" ? ` · will be added to this ${scope}` : ""}`;
+	}
 	if (suggestion.kind === "project") return `Project · ${suggestion.label}`;
 	return `Channel · ${suggestion.label}`;
 }
@@ -1168,6 +976,7 @@ function SuggestionMenu({
 				const showMembershipHeading =
 					suggestion.channelMembership !== undefined &&
 					suggestion.channelMembership !== previousMembership;
+				const membershipScope = suggestion.membershipScope ?? "channel";
 				return (
 					<Fragment key={`${suggestion.kind}-${suggestion.id}`}>
 						{showMembershipHeading && (
@@ -1176,8 +985,8 @@ function SuggestionMenu({
 								role="presentation"
 							>
 								{suggestion.channelMembership === "member"
-									? "In this channel"
-									: "Not in this channel · tagging adds them"}
+									? `In this ${membershipScope}`
+									: `Not in this ${membershipScope} · tagging adds them`}
 							</div>
 						)}
 						<button
@@ -1241,7 +1050,7 @@ function ThreadAgentActivity({
 						agent={agent}
 						fallbackName={name}
 						size="stack"
-						className="-ml-1 rounded-full border-background bg-primary text-primary-foreground first:ml-0"
+						className="-ml-1 first:ml-0"
 						data-runtime={agent?.adapter}
 						ariaLabel={`${name} is responding`}
 						style={{ zIndex: respondingAgentIds.length - index }}
@@ -1279,7 +1088,7 @@ function ThreadReplyAgents({
 						agent={agent}
 						fallbackName={reply.authorName}
 						size="stack"
-						className="-ml-1 rounded-full border-background bg-muted text-foreground first:ml-0"
+						className="-ml-1 first:ml-0"
 						data-runtime={agent?.adapter}
 						ariaLabel={`${reply.authorName} replied`}
 					/>
@@ -1417,6 +1226,20 @@ export function CommonspaceConversation({
 	const threadMessages = useRef<HTMLDivElement>(null);
 	const composer = useRef<HTMLTextAreaElement>(null);
 	const threadComposer = useRef<HTMLTextAreaElement>(null);
+	const threadPanel = useRef<HTMLElement>(null);
+	const threadOverlay = useThreadOverlay(
+		conversationLayout,
+		snapshot.activeConversation !== null,
+	);
+	const closeThread = () => {
+		selectThread(null);
+	};
+	const previousThreadId = useRef(snapshot.activeThreadId);
+	useEffect(() => {
+		if (previousThreadId.current !== null && snapshot.activeThreadId === null)
+			composer.current?.focus();
+		previousThreadId.current = snapshot.activeThreadId;
+	}, [snapshot.activeThreadId]);
 	const rootInputOccupied = useRef(false);
 	const threadInputOccupied = useRef(false);
 	rootInputOccupied.current =
@@ -1454,6 +1277,19 @@ export function CommonspaceConversation({
 					(channel) => channel.id === snapshot.activeConversation?.id,
 				)
 			: undefined;
+	const channelAgentNames = useMemo(
+		() =>
+			(activeChannel?.agentIds ?? []).map(
+				(agentId) =>
+					bootstrap?.agents.find((agent) => agent.id === agentId)
+						?.displayName ?? agentId,
+			),
+		[activeChannel?.agentIds, bootstrap?.agents],
+	);
+	const rootComposerReferences = useMemo(
+		() => composerReferences(draft, bootstrap ?? undefined),
+		[bootstrap, draft],
+	);
 	const slashSuggestions =
 		snapshot.activeConversation === null ||
 		pendingImages.length > 0 ||
@@ -1484,23 +1320,59 @@ export function CommonspaceConversation({
 	const activeThread = channelThreads.find(
 		(thread) => thread.id === snapshot.activeThreadId,
 	);
+	useEffect(() => {
+		if (threadOverlay && snapshot.activeThreadId !== null) {
+			threadPanel.current
+				?.querySelector<HTMLButtonElement>('button[aria-label="Close thread"]')
+				?.focus();
+		}
+	}, [threadOverlay, snapshot.activeThreadId]);
 	const activeThreadProject =
 		activeThread === undefined || bootstrap === null
 			? undefined
 			: bootstrap.state.projects.find(
 					(project) => project.id === activeThread.projectId,
 				);
-	const sessions =
-		bootstrap === null
-			? []
-			: deriveCommonspaceSessions(
-					bootstrap.state,
-					bootstrap.liveActivities ?? [],
-				);
-	const activeThreadSessions =
-		activeThread === undefined
-			? []
-			: sessions.filter((session) => session.threadId === activeThread.id);
+	const activeThreadProjects = useMemo(() => {
+		if (activeThread === undefined || bootstrap === null) return [];
+		const projectIds =
+			activeThread.projectIds ??
+			(activeThread.projectId === null ? [] : [activeThread.projectId]);
+		return projectIds.map(
+			(projectId) =>
+				bootstrap.state.projects.find((project) => project.id === projectId)
+					?.name ?? projectId,
+		);
+	}, [activeThread, bootstrap]);
+	const sessions = useMemo(
+		() =>
+			bootstrap === null
+				? []
+				: deriveCommonspaceSessions(
+						bootstrap.state,
+						bootstrap.liveActivities ?? [],
+					),
+		[bootstrap],
+	);
+	const activeThreadSessions = useMemo(
+		() =>
+			activeThread === undefined
+				? []
+				: sessions.filter((session) => session.threadId === activeThread.id),
+		[activeThread, sessions],
+	);
+	const activeThreadAgentNames = useMemo(() => {
+		if (activeThread === undefined || bootstrap === null) return [];
+		return activeThread.agentIds.map(
+			(agentId) =>
+				bootstrap.agents.find((agent) => agent.id === agentId)?.displayName ??
+				agentId,
+		);
+	}, [activeThread, bootstrap]);
+	const threadComposerReferences = useMemo(
+		() => composerReferences(threadDraft, bootstrap ?? undefined),
+		[bootstrap, threadDraft],
+	);
 	const threadFollowing = activeThreadSessions.some(
 		(session) => session.followed,
 	);
@@ -1522,7 +1394,7 @@ export function CommonspaceConversation({
 		bootstrap === null ||
 		threadDraft.startsWith("/")
 			? []
-			: tagSuggestions(threadDraft, bootstrap, activeChannel?.agentIds);
+			: tagSuggestions(threadDraft, bootstrap, activeThread.agentIds, "thread");
 	const threadSuggestionCount =
 		threadSlashSuggestions.length + threadReferenceSuggestions.length;
 	const activeThreadSuggestionId =
@@ -2002,7 +1874,7 @@ export function CommonspaceConversation({
 				setCommandFeedback({
 					tone: "info",
 					title: "Channel status",
-					body: `${heading.title} · Global Channel · ${channel?.agentIds.length ?? 0} agents${project === undefined ? "" : `\nNext thread project context: ${project.name}`}\nWorkspace model: ${bootstrap.state.defaults.model ?? "agent defaults"} · Workspace reasoning: ${bootstrap.state.defaults.reasoning}`,
+					body: `${heading.title} · Global Channel · ${String(channel?.agentIds.length ?? 0)} ${(channel?.agentIds.length ?? 0) === 1 ? "agent" : "agents"}${project === undefined ? "" : `\nNext thread project context: ${project.name}`}\nWorkspace model: ${bootstrap.state.defaults.model ?? "agent defaults"} · Workspace reasoning: ${bootstrap.state.defaults.reasoning}`,
 				});
 			}
 			return;
@@ -2520,36 +2392,20 @@ export function CommonspaceConversation({
 				actions={
 					<div className="flex items-center gap-1">
 						{isChannel && (
-							<fieldset
-								aria-label="Channel thread view"
-								className="m-0 flex items-center gap-0.5 rounded-md border bg-muted/40 p-0.5"
-							>
-								{(
-									[
-										["running", "Running", runningThreadCount],
-										["followed", "Followed", followedThreadCount],
-										["all", "All", roots.length],
-									] as const
-								).map(([view, label, count]) => (
-									<button
-										key={view}
-										type="button"
-										className="min-h-7 rounded-sm border-0 bg-transparent px-2 text-[11px] font-semibold text-muted-foreground hover:bg-background hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm"
-										aria-label={`Show ${view} threads`}
-										aria-pressed={channelThreadView === view}
-										onClick={() => {
-											setChannelThreadView(view);
-										}}
-									>
-										{label} {String(count)}
-									</button>
-								))}
-							</fieldset>
+							<ChannelThreadFilter
+								value={channelThreadView}
+								counts={{
+									all: roots.length,
+									running: runningThreadCount,
+									followed: followedThreadCount,
+								}}
+								onChange={setChannelThreadView}
+							/>
 						)}
 						{nextUnreadMessage !== undefined && (
 							<button
 								type="button"
-								className="min-h-8 rounded-sm border-0 bg-transparent px-3 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+								className="min-h-8 rounded-sm border-0 bg-transparent px-3 text-xs font-semibold text-muted-foreground hover:text-foreground hover:underline"
 								aria-label="Jump to next unread message"
 								onClick={() => {
 									if (isChannel) setChannelThreadView("all");
@@ -2596,14 +2452,15 @@ export function CommonspaceConversation({
 			) : (
 				<div
 					ref={conversationLayout}
+					data-thread-overlay={threadOverlay && activeThread !== undefined}
 					className={cn(
 						"commonspace-conversation-layout relative grid min-h-0 flex-1 overflow-hidden",
 						resizingPanel && "select-none",
 					)}
 					style={
-						activeThread !== undefined
+						activeThread !== undefined && !threadOverlay
 							? {
-									gridTemplateColumns: `${String(100 - panelWidth)}fr 8px ${String(panelWidth)}fr`,
+									gridTemplateColumns: `minmax(420px, ${String(100 - panelWidth)}fr) 8px minmax(360px, ${String(panelWidth)}fr)`,
 								}
 							: contextSettingsOpen
 								? {
@@ -2613,12 +2470,13 @@ export function CommonspaceConversation({
 					}
 				>
 					<section
+						inert={threadOverlay && activeThread !== undefined}
 						className="commonspace-conversation-primary flex min-h-0 min-w-0 flex-col bg-background"
 						aria-label={
 							isChannel ? `${heading.title} posts` : `${heading.title} messages`
 						}
 					>
-						<div className="min-h-0 flex-1 overflow-y-auto px-3 pt-4 pb-3 max-[640px]:px-2">
+						<div className="min-h-0 flex-1 overflow-y-auto px-6 pt-6 pb-4 max-[640px]:px-2">
 							{rootsForChannelThreadView.length === 0 && (
 								<div className="p-10 text-center text-sm text-muted-foreground">
 									{roots.length === 0
@@ -2629,7 +2487,7 @@ export function CommonspaceConversation({
 								</div>
 							)}
 							{dateLabel !== null && (
-								<div className="mx-auto mb-4 flex w-full max-w-[920px] items-center gap-3 text-xs text-muted-foreground before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">
+								<div className="mx-auto mb-2 flex w-full max-w-[920px] items-center justify-center text-xs text-muted-foreground">
 									<span>{dateLabel}</span>
 								</div>
 							)}
@@ -2665,8 +2523,8 @@ export function CommonspaceConversation({
 													conversationUnreadMessages.length > 0 && (
 														<button
 															type="button"
-															className="mx-auto mb-3 grid min-h-11 w-full max-w-[812px] grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 border-0 bg-transparent px-4 text-xs font-semibold text-primary before:h-px before:bg-primary hover:[&>span:last-child]:text-foreground hover:[&>span:last-child]:underline"
-															aria-label={`${String(conversationUnreadMessages.length)} new messages, mark read`}
+															className="mx-auto mb-1 grid min-h-8 w-full max-w-[920px] grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 border-0 bg-transparent px-3 text-xs font-medium text-muted-foreground before:h-px before:bg-border hover:[&>span:last-child]:text-foreground hover:[&>span:last-child]:underline"
+															aria-label={`${String(conversationUnreadMessages.length)} new ${conversationUnreadMessages.length === 1 ? "message" : "messages"}, mark read`}
 															onClick={markConversationRead}
 														>
 															<span>
@@ -2683,13 +2541,83 @@ export function CommonspaceConversation({
 												<article
 													id={`commonspace-message-${root.id}`}
 													className={cn(
-														"mx-auto mb-1 w-full max-w-[920px] rounded-sm pb-1",
-														threadIsFocused && "bg-muted/40",
+														"relative mx-auto mb-2 w-full max-w-[920px] px-1.5 py-1",
+														threadIsFocused &&
+															"before:absolute before:inset-y-3 before:left-0 before:w-0.5 before:rounded-full before:bg-border",
 													)}
 													aria-current={threadIsFocused ? "true" : undefined}
 												>
 													<MessageRow
 														message={root}
+														replyLink={
+															replyCount === 0 &&
+															threadActivities.length === 0 ? null : (
+																<button
+																	type="button"
+																	className={cn(
+																		"relative inline-flex min-h-7 w-fit items-center gap-2 rounded-sm border-0 bg-transparent py-0.5 pr-2 pl-0 text-xs font-normal text-primary hover:underline",
+																		unreadCount > 0 && "text-primary",
+																	)}
+																	aria-label={`${String(replyCount)} ${replyCount === 1 ? "reply" : "replies"}${unreadCount === 0 ? "" : `, ${String(unreadCount)} unread`}`}
+																	onClick={() => {
+																		if (thread === undefined) return;
+																		setContextSettingsOpen(false);
+																		selectThread(thread.id);
+																		for (const reply of unreadReplies) {
+																			void store.mutate({
+																				action: "mark-inbox-item-read",
+																				messageId: reply.id,
+																			});
+																		}
+																	}}
+																>
+																	<span className="inline-flex min-w-0 items-center gap-2">
+																		{bootstrap !== null && (
+																			<ThreadReplyAgents
+																				replies={threadReplies}
+																				agents={bootstrap.agents}
+																			/>
+																		)}
+																		<span>
+																			{unreadCount > 0
+																				? `${String(unreadCount)} new ${unreadCount === 1 ? "reply" : "replies"}`
+																				: replyCount === 0
+																					? "Reply"
+																					: `${String(replyCount)} ${replyCount === 1 ? "reply" : "replies"}`}
+																		</span>
+																	</span>
+																	{threadActivities.length > 0 && (
+																		<span className="inline-flex items-center gap-2">
+																			{thread !== undefined &&
+																				bootstrap !== null && (
+																					<ThreadAgentActivity
+																						thread={thread}
+																						agents={bootstrap.agents}
+																						{...(threadActivities.length === 0
+																							? {}
+																							: {
+																									respondingAgentIds:
+																										threadActivities.map(
+																											(activity) =>
+																												activity.agentId,
+																										),
+																								})}
+																					/>
+																				)}
+																			<span className="rounded-full bg-[color-mix(in_oklch,var(--status-warning)_11%,var(--background))] px-2 py-1 text-[10px] text-foreground">
+																				Agents working
+																			</span>
+																		</span>
+																	)}
+																	{unreadCount > 0 && (
+																		<span
+																			className="absolute -top-1 -right-1 size-2.5 rounded-full border-2 border-background bg-primary"
+																			aria-hidden="true"
+																		/>
+																	)}
+																</button>
+															)
+														}
 														bootstrap={bootstrap}
 														flush
 														onPin={pinChannelMessage}
@@ -2715,66 +2643,6 @@ export function CommonspaceConversation({
 																	},
 																})}
 													/>
-													<button
-														type="button"
-														className={cn(
-															"relative ml-12 mt-0.5 inline-flex min-h-8 w-fit items-center gap-2 rounded-sm border-0 bg-transparent py-0.5 pr-2 pl-0.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground",
-															unreadCount > 0 && "text-primary",
-														)}
-														aria-label={`${String(replyCount)} ${replyCount === 1 ? "reply" : "replies"}${unreadCount === 0 ? "" : `, ${String(unreadCount)} unread`}`}
-														onClick={() => {
-															if (thread === undefined) return;
-															setContextSettingsOpen(false);
-															selectThread(thread.id);
-															for (const reply of unreadReplies) {
-																void store.mutate({
-																	action: "mark-inbox-item-read",
-																	messageId: reply.id,
-																});
-															}
-														}}
-													>
-														<span className="inline-flex min-w-0 items-center gap-2">
-															{bootstrap !== null && (
-																<ThreadReplyAgents
-																	replies={threadReplies}
-																	agents={bootstrap.agents}
-																/>
-															)}
-															<span>
-																{unreadCount > 0
-																	? `${String(unreadCount)} new ${unreadCount === 1 ? "reply" : "replies"}`
-																	: `${String(replyCount)} ${replyCount === 1 ? "reply" : "replies"}`}
-															</span>
-														</span>
-														{threadActivities.length > 0 && (
-															<span className="inline-flex items-center gap-2">
-																{thread !== undefined && bootstrap !== null && (
-																	<ThreadAgentActivity
-																		thread={thread}
-																		agents={bootstrap.agents}
-																		{...(threadActivities.length === 0
-																			? {}
-																			: {
-																					respondingAgentIds:
-																						threadActivities.map(
-																							(activity) => activity.agentId,
-																						),
-																				})}
-																	/>
-																)}
-																<span className="rounded-full bg-[color-mix(in_oklch,var(--status-warning)_11%,var(--background))] px-2 py-1 text-[10px] text-foreground">
-																	Agents working
-																</span>
-															</span>
-														)}
-														{unreadCount > 0 && (
-															<span
-																className="absolute -top-1 -right-1 size-2.5 rounded-full border-2 border-background bg-destructive"
-																aria-hidden="true"
-															/>
-														)}
-													</button>
 												</article>
 											</Fragment>
 										);
@@ -2899,14 +2767,84 @@ export function CommonspaceConversation({
 							</section>
 						)}
 
-						<form
-							className="mx-auto mb-3 flex w-[calc(100%-32px)] max-w-[920px] flex-col gap-1 rounded-sm border bg-background p-2 transition-colors focus-within:border-foreground/25 focus-within:ring-2 focus-within:ring-foreground/10 max-[640px]:mb-3 max-[640px]:w-[calc(100%-16px)]"
+						<MessageComposerFrame
+							aria-label={
+								isChannel
+									? `Start a new Thread in ${heading.title}`
+									: `Message ${heading.title}`
+							}
+							className="mx-auto mb-[22px] w-[calc(100%-44px)] max-w-[920px] shrink-0"
 							onSubmit={(event) => {
 								void sendRoot(event);
 							}}
 						>
+							{suggestionCount > 0 && (
+								<SuggestionMenu
+									id={suggestionListId}
+									selectedSuggestion={selectedSuggestion}
+									slashSuggestions={slashSuggestions}
+									referenceSuggestions={referenceSuggestions}
+									onSelectSlash={selectSlashSuggestion}
+									onSelectTag={selectSuggestion}
+								/>
+							)}
+							<div className="-mx-3 -mt-3 flex min-w-0 items-start gap-3 rounded-t-[8px] border-b bg-muted/35 px-3 py-2.5">
+								<span
+									className="grid size-7 shrink-0 place-items-center rounded-md bg-primary/10 font-heading text-sm font-semibold text-primary"
+									aria-hidden="true"
+								>
+									{isChannel ? "#" : "@"}
+								</span>
+								<div className="min-w-0 flex-1">
+									<div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+										<strong className="text-xs font-semibold text-foreground">
+											{isChannel
+												? `Post to #${heading.title}`
+												: `Message ${heading.title}`}
+										</strong>
+										<span className="text-[11px] text-muted-foreground">
+											{isChannel
+												? "Starts a new Thread"
+												: "Continues this direct message"}
+										</span>
+									</div>
+									{isChannel ? (
+										<div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted-foreground">
+											<span>
+												{rootComposerReferences.agentTokens.length > 0
+													? "Explicit recipients"
+													: channelAgentNames.length > 0
+														? `AI selects from ${channelAgentNames.join(" + ")}`
+														: "No Channel agents available"}
+											</span>
+											{rootComposerReferences.agentTokens.map((token) => (
+												<span
+													key={token}
+													className="rounded-sm border bg-background px-1.5 py-0.5 font-medium text-foreground"
+												>
+													{token}
+												</span>
+											))}
+											<span aria-hidden="true">·</span>
+											<span>
+												{rootComposerReferences.projectTokens.length > 0
+													? "Explicit Project context"
+													: "AI selects Project context after send"}
+											</span>
+											{rootComposerReferences.projectTokens.map((token) => (
+												<span
+													key={token}
+													className="rounded-sm border bg-background px-1.5 py-0.5 font-medium text-foreground"
+												>
+													{token}
+												</span>
+											))}
+										</div>
+									) : null}
+								</div>
+							</div>
 							<div className="relative w-full">
-								<textarea
+								<MessageComposerInput
 									ref={composer}
 									aria-label={
 										isChannel
@@ -2918,10 +2856,9 @@ export function CommonspaceConversation({
 										suggestionCount > 0 ? suggestionListId : undefined
 									}
 									aria-activedescendant={activeSuggestionId}
-									className="block min-h-11 max-h-40 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-6 outline-none"
 									placeholder={
 										isChannel
-											? `Message #${heading.title}`
+											? `Start a new Thread in #${heading.title}`
 											: `Message ${heading.title}`
 									}
 									value={draft}
@@ -3010,18 +2947,8 @@ export function CommonspaceConversation({
 										);
 									}}
 								/>
-								{suggestionCount > 0 && (
-									<SuggestionMenu
-										id={suggestionListId}
-										selectedSuggestion={selectedSuggestion}
-										slashSuggestions={slashSuggestions}
-										referenceSuggestions={referenceSuggestions}
-										onSelectSlash={selectSlashSuggestion}
-										onSelectTag={selectSuggestion}
-									/>
-								)}
 							</div>
-							<div className="flex min-h-[52px] flex-wrap items-center gap-2 pt-1">
+							<MessageComposerActions>
 								{directMessageActivities.length > 0 && !isChannel && (
 									<RunDeliveryControls
 										disabled={
@@ -3035,8 +2962,8 @@ export function CommonspaceConversation({
 										}}
 									/>
 								)}
-								<label className="relative inline-flex min-h-9 items-center rounded-sm border px-2 text-xs font-semibold">
-									Attach
+								<label className="relative inline-flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background">
+									<PaperclipIcon className="size-5" aria-hidden="true" />
 									<input
 										className="absolute inset-0 opacity-0"
 										type="file"
@@ -3050,13 +2977,11 @@ export function CommonspaceConversation({
 										}}
 									/>
 								</label>
-								{(directMessageActivities.length === 0 || isChannel) && (
+								{!isChannel && directMessageActivities.length === 0 ? (
 									<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-										{isChannel
-											? "@ agent · @@ project · # channel · files · / commands"
-											: "Enter to send · files · / commands"}
+										Enter to send · files · / commands
 									</span>
-								)}
+								) : null}
 								{(directMessageActivities.length === 0 || isChannel) && (
 									<button
 										type="submit"
@@ -3074,26 +2999,24 @@ export function CommonspaceConversation({
 													? "Post message"
 													: "Send message"
 										}
-										className="inline-flex min-h-9 min-w-[72px] items-center justify-center rounded-sm border-0 bg-primary px-3 text-sm font-semibold text-primary-foreground disabled:opacity-45"
+										className="ml-auto inline-flex size-9 items-center justify-center rounded-lg border-0 bg-primary/20 text-primary disabled:opacity-45"
 										disabled={
 											draft.trim() === "" &&
 											pendingImages.length === 0 &&
 											pendingFiles.length === 0
 										}
 									>
-										<span className="sr-only" aria-hidden="true">
-											↑
-										</span>
-										<span>
+										<ArrowUpIcon className="size-5" aria-hidden="true" />
+										<span className="sr-only">
 											{rootIsCommand ? "Run" : isChannel ? "Post" : "Send"}
 										</span>
 									</button>
 								)}
-							</div>
-						</form>
+							</MessageComposerActions>
+						</MessageComposerFrame>
 					</section>
 
-					{activeThread !== undefined && (
+					{activeThread !== undefined && !threadOverlay && (
 						<ResizablePanelHandle
 							className="commonspace-thread-resizer relative z-20"
 							ariaLabel="Resize thread"
@@ -3109,28 +3032,42 @@ export function CommonspaceConversation({
 
 					{activeThread !== undefined && (
 						<aside
-							className="commonspace-thread-panel relative z-20 flex min-h-0 min-w-[360px] flex-col border-l bg-background"
+							ref={threadPanel}
+							className="commonspace-thread-panel relative z-20 flex min-h-0 min-w-[360px] flex-col border-l bg-card"
 							aria-label="Thread replies"
+							onKeyDown={(event) => {
+								if (event.key !== "Escape" || event.defaultPrevented) return;
+								event.preventDefault();
+								event.stopPropagation();
+								if (threadContextOpen) {
+									setThreadContextOpen(false);
+									event.currentTarget
+										.querySelector<HTMLButtonElement>(
+											'button[aria-label="Open thread context"]',
+										)
+										?.focus();
+								} else closeThread();
+							}}
 						>
-							<header className="flex min-h-14 items-center gap-2 border-b px-3 py-2.5">
+							<header className="flex min-h-[62px] items-center gap-2 px-6 py-2">
 								<div className="min-w-0 flex-1">
 									<strong className="font-heading text-base font-semibold">
 										Thread
 									</strong>
-									<p className="mt-0.5 flex gap-2 text-xs text-muted-foreground">
+									<p className="mt-0.5 truncate text-xs text-muted-foreground">
 										<span>{activeThreadProject?.name ?? "No project"}</span>
-										<span>·</span>
+										<span> · </span>
 										<span>
 											#{activeChannel?.name ?? activeThread.channelId}
 										</span>
 										{activeThreadActivities.length > 0 && (
-											<span>· Agents working</span>
+											<span> · Agents working</span>
 										)}
 									</p>
 								</div>
 								<button
 									type="button"
-									className="min-h-8 min-w-[80px] rounded-sm border bg-background px-2.5 text-xs font-semibold hover:bg-muted disabled:opacity-50"
+									className="min-h-8 min-w-[80px] rounded-md border-0 bg-transparent px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground disabled:opacity-50"
 									aria-label={
 										threadFollowing ? "Unfollow thread" : "Follow thread"
 									}
@@ -3156,9 +3093,7 @@ export function CommonspaceConversation({
 										type="button"
 										className="grid size-8 shrink-0 place-items-center rounded-sm border-0 bg-transparent text-base leading-none text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
 										aria-label="Close thread"
-										onClick={() => {
-											selectThread(null);
-										}}
+										onClick={closeThread}
 									>
 										×
 									</button>
@@ -3166,9 +3101,22 @@ export function CommonspaceConversation({
 							</header>
 							{threadContextOpen && (
 								<section
-									className="max-h-[48%] overflow-y-auto border-b bg-muted p-4 text-xs [&_button]:min-h-10 [&_button]:rounded-sm [&_button]:border [&_button]:px-3 [&_details]:rounded-md [&_details]:border [&_details]:bg-background [&_details]:p-3 [&_form]:mt-3 [&_form]:grid [&_form]:gap-2 [&_input]:min-h-10 [&_input]:rounded-sm [&_input]:border [&_input]:bg-background [&_input]:px-2 [&_label]:grid [&_label]:gap-1 [&_textarea]:min-h-20 [&_textarea]:rounded-sm [&_textarea]:border [&_textarea]:bg-background [&_textarea]:p-2"
+									className="min-h-0 flex-1 overflow-y-auto bg-card p-6 text-[13px] leading-relaxed [&_button]:min-h-9 [&_button]:rounded-sm [&_button]:border [&_button]:px-3 [&_details]:rounded-md [&_details]:border [&_details]:bg-background [&_details]:p-3 [&_form]:mt-5 [&_form]:grid [&_form]:gap-3 [&_header]:flex [&_header]:items-center [&_header]:justify-between [&_header]:gap-3 [&_header>span]:text-xs [&_header>span]:text-muted-foreground [&_input]:min-h-10 [&_input]:rounded-sm [&_input]:border [&_input]:bg-background [&_input]:px-2 [&_label]:grid [&_label]:gap-1 [&_textarea]:min-h-20 [&_textarea]:rounded-sm [&_textarea]:border [&_textarea]:bg-background [&_textarea]:p-3"
 									aria-label="Thread context"
 								>
+									<Button
+										type="button"
+										variant="ghost"
+										className="mb-4"
+										onClick={() => {
+											setThreadContextOpen(false);
+											requestAnimationFrame(() =>
+												threadComposer.current?.focus(),
+											);
+										}}
+									>
+										Back to replies
+									</Button>
 									<details open>
 										<summary>Inherited Channel snapshot</summary>
 										<p>
@@ -3320,238 +3268,121 @@ export function CommonspaceConversation({
 								</section>
 							)}
 							<div
-								ref={threadMessages}
-								className="min-h-0 flex-1 overflow-y-auto bg-background p-3"
-								role="log"
-								aria-label="Thread messages"
+								className={
+									threadContextOpen ? "hidden" : "flex min-h-0 flex-1 flex-col"
+								}
 							>
-								{activeRoot !== undefined && (
-									<MessageRow
-										message={activeRoot}
-										bootstrap={bootstrap}
-										flush
-										highlighted={activeRoot.id === focusedMessageId}
-										onPin={pinThreadMessage}
-										pinned={
-											pinnedMessagesByScope
-												.get(`thread:${activeThread.id}`)
-												?.has(activeRoot.id) ?? false
-										}
-										onEdit={editDeliveredMessage}
-										onDelete={deleteDeliveredMessage}
-										onOpenVersion={openMessageVersion}
-										saved={savedMessageIds.has(activeRoot.id)}
-										onToggleSaved={toggleSavedMessage}
-										onMarkUnread={markMessageUnread}
-										onCopyLink={copyMessageLink}
-										onRetryRouting={retryFailedRouting}
-									/>
-								)}
-								<div className="my-3 flex items-center gap-3 text-xs text-muted-foreground after:h-px after:flex-1 after:bg-border">
-									Replies
-								</div>
-								{replies.map((reply) => (
-									<MessageRow
-										key={reply.id}
-										elementId={`commonspace-message-${reply.id}`}
-										message={reply}
-										bootstrap={bootstrap}
-										highlighted={reply.id === focusedMessageId}
-										onReplyToAgent={replyDirectlyToAgent}
-										onPin={pinThreadMessage}
-										pinned={
-											pinnedMessagesByScope
-												.get(`thread:${activeThread.id}`)
-												?.has(reply.id) ?? false
-										}
-										onEdit={editDeliveredMessage}
-										onDelete={deleteDeliveredMessage}
-										onOpenVersion={openMessageVersion}
-										saved={savedMessageIds.has(reply.id)}
-										onToggleSaved={toggleSavedMessage}
-										onMarkUnread={markMessageUnread}
-										onCopyLink={copyMessageLink}
-										onRetryRouting={retryFailedRouting}
-									/>
-								))}
-								{activeThreadActivities.length > 0 && (
-									<LiveAgentActivity
-										activities={activeThreadActivities}
-										fallbackAgents={[]}
-										agents={bootstrap?.agents ?? []}
-										phase="running"
-										onStop={(activity) => {
-											void stopActivity(activity);
-										}}
-									/>
-								)}
-								<PermissionRequests
-									permissions={activeThreadPermissions}
-									agents={bootstrap?.agents ?? []}
-									onRespond={(permissionId, optionId) =>
-										store.respondPermission(permissionId, optionId)
-									}
-								/>
-							</div>
-							<PendingAdmissions
-								items={activeThreadPendingSubmissions.map(pendingAdmissionItem)}
-								thread
-								className="mx-3 mb-2"
-								onRestore={(submissionId) => {
-									const submission = activeThreadPendingSubmissions.find(
-										(candidate) => candidate.id === submissionId,
-									);
-									if (submission !== undefined)
-										restorePendingSubmission(submission);
-								}}
-								onDismiss={(submissionId) => {
-									store.dismissPendingSubmission(submissionId);
-								}}
-							/>
-							<QueuedFollowups
-								followups={activeThreadFollowups}
-								onFocusComposer={() => threadComposer.current?.focus()}
-								thread
-								className="mx-3 mb-2"
-								onMove={(messageId, direction) => {
-									void store
-										.reorderFollowup(messageId, direction)
-										.catch(() => undefined);
-								}}
-								onRemove={(messageId) => {
-									void store.removeFollowup(messageId).catch(() => undefined);
-								}}
-							/>
-							<form
-								className="relative mx-3 mb-3 grid gap-2 rounded-sm border bg-background p-2 transition-colors focus-within:border-foreground/25 focus-within:ring-2 focus-within:ring-foreground/10"
-								onSubmit={(event) => {
-									void sendThreadReply(event);
-								}}
-							>
-								<div className="relative w-full">
-									{threadReplyTarget !== null && (
-										<div
-											className="mb-2 grid grid-cols-[minmax(0,1fr)_auto] rounded-sm border bg-muted p-2 text-xs"
-											role="status"
-										>
-											<span>Replying to {threadReplyTarget.agentName}</span>
-											<small>Only this agent will respond</small>
-											<button
-												type="button"
-												aria-label="Cancel direct reply"
-												onClick={() => {
-													setThreadReplyTarget(null);
-													threadComposer.current?.focus();
-												}}
-											>
-												×
-											</button>
-										</div>
-									)}
-									<textarea
-										ref={threadComposer}
-										aria-label="Reply in thread"
-										aria-autocomplete="list"
-										aria-controls={
-											threadSuggestionCount > 0
-												? threadSuggestionListId
-												: undefined
-										}
-										aria-activedescendant={activeThreadSuggestionId}
-										className="block min-h-11 max-h-40 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-6 outline-none"
-										placeholder="Reply in thread, tag context, or type /"
-										value={threadDraft}
-										onChange={(event) => {
-											setThreadDraft(event.target.value);
-											setSelectedThreadSuggestion(0);
-										}}
-										onPaste={(event) => {
-											const files = Array.from(
-												event.clipboardData.files,
-											).filter((file) => file.type.startsWith("image/"));
-											if (files.length > 0)
-												void attachPastedImages(files, setPendingThreadImages);
-										}}
-										onKeyDown={(event) => {
-											if (
-												threadSuggestionCount > 0 &&
-												(event.key === "ArrowDown" || event.key === "ArrowUp")
-											) {
-												event.preventDefault();
-												setSelectedThreadSuggestion((current) =>
-													event.key === "ArrowDown"
-														? (current + 1) % threadSuggestionCount
-														: (current - 1 + threadSuggestionCount) %
-															threadSuggestionCount,
-												);
-											} else if (
-												threadSuggestionCount > 0 &&
-												event.key === "Tab"
-											) {
-												event.preventDefault();
-												if (threadSlashSuggestions.length > 0) {
-													const suggestion =
-														threadSlashSuggestions[selectedThreadSuggestion] ??
-														threadSlashSuggestions[0];
-													if (suggestion !== undefined)
-														selectThreadSlashSuggestion(suggestion.name);
-												} else {
-													const suggestion =
-														threadReferenceSuggestions[
-															selectedThreadSuggestion
-														] ?? threadReferenceSuggestions[0];
-													if (suggestion !== undefined)
-														selectThreadSuggestion(suggestion);
-												}
-											} else if (event.key === "Enter" && !event.shiftKey) {
-												event.preventDefault();
-												if (
-													threadSlashSuggestions.length > 0 &&
-													resolvedThreadCommand === null
-												) {
-													const suggestion =
-														threadSlashSuggestions[selectedThreadSuggestion] ??
-														threadSlashSuggestions[0];
-													if (suggestion !== undefined)
-														selectThreadSlashSuggestion(suggestion.name);
-												} else if (threadReferenceSuggestions.length > 0) {
-													const suggestion =
-														threadReferenceSuggestions[
-															selectedThreadSuggestion
-														] ?? threadReferenceSuggestions[0];
-													if (suggestion !== undefined)
-														selectThreadSuggestion(suggestion);
-												} else {
-													const form = event.currentTarget.form;
-													const steer =
-														activeThreadActivities.length > 0 &&
-														threadReplyTarget === null &&
-														(event.metaKey || event.ctrlKey)
-															? form?.querySelector<HTMLButtonElement>(
-																	'button[name="delivery"][value="steer"]:not(:disabled)',
-																)
-															: undefined;
-													form?.requestSubmit(steer);
-												}
+								<div
+									ref={threadMessages}
+									className="min-h-0 flex-1 overflow-y-auto px-[18px] py-1"
+									role="log"
+									aria-label="Thread messages"
+								>
+									{activeRoot !== undefined && (
+										<MessageRow
+											message={activeRoot}
+											quotedSource
+											bootstrap={bootstrap}
+											flush
+											highlighted={activeRoot.id === focusedMessageId}
+											onPin={pinThreadMessage}
+											pinned={
+												pinnedMessagesByScope
+													.get(`thread:${activeThread.id}`)
+													?.has(activeRoot.id) ?? false
 											}
-										}}
+											onEdit={editDeliveredMessage}
+											onDelete={deleteDeliveredMessage}
+											onOpenVersion={openMessageVersion}
+											saved={savedMessageIds.has(activeRoot.id)}
+											onToggleSaved={toggleSavedMessage}
+											onMarkUnread={markMessageUnread}
+											onCopyLink={copyMessageLink}
+											onRetryRouting={retryFailedRouting}
+										/>
+									)}
+									<div className="my-5 h-px bg-border text-[0px]">Replies</div>
+									{replies.map((reply) => (
+										<MessageRow
+											key={reply.id}
+											elementId={`commonspace-message-${reply.id}`}
+											message={reply}
+											bootstrap={bootstrap}
+											highlighted={reply.id === focusedMessageId}
+											onReplyToAgent={replyDirectlyToAgent}
+											onPin={pinThreadMessage}
+											pinned={
+												pinnedMessagesByScope
+													.get(`thread:${activeThread.id}`)
+													?.has(reply.id) ?? false
+											}
+											onEdit={editDeliveredMessage}
+											onDelete={deleteDeliveredMessage}
+											onOpenVersion={openMessageVersion}
+											saved={savedMessageIds.has(reply.id)}
+											onToggleSaved={toggleSavedMessage}
+											onMarkUnread={markMessageUnread}
+											onCopyLink={copyMessageLink}
+											onRetryRouting={retryFailedRouting}
+										/>
+									))}
+									{activeThreadActivities.length > 0 && (
+										<LiveAgentActivity
+											activities={activeThreadActivities}
+											fallbackAgents={[]}
+											agents={bootstrap?.agents ?? []}
+											phase="running"
+											onStop={(activity) => {
+												void stopActivity(activity);
+											}}
+										/>
+									)}
+									<PermissionRequests
+										permissions={activeThreadPermissions}
+										agents={bootstrap?.agents ?? []}
+										onRespond={(permissionId, optionId) =>
+											store.respondPermission(permissionId, optionId)
+										}
 									/>
-									<PendingImageStrip
-										images={pendingThreadImages}
-										onRemove={(index) => {
-											setPendingThreadImages((current) =>
-												current.filter((_, candidate) => candidate !== index),
-											);
-										}}
-									/>
-									<PendingFileStrip
-										files={pendingThreadFiles}
-										onRemove={(index) => {
-											setPendingThreadFiles((current) =>
-												current.filter((_, candidate) => candidate !== index),
-											);
-										}}
-									/>
+								</div>
+								<PendingAdmissions
+									items={activeThreadPendingSubmissions.map(
+										pendingAdmissionItem,
+									)}
+									thread
+									className="mx-3 mb-2"
+									onRestore={(submissionId) => {
+										const submission = activeThreadPendingSubmissions.find(
+											(candidate) => candidate.id === submissionId,
+										);
+										if (submission !== undefined)
+											restorePendingSubmission(submission);
+									}}
+									onDismiss={(submissionId) => {
+										store.dismissPendingSubmission(submissionId);
+									}}
+								/>
+								<QueuedFollowups
+									followups={activeThreadFollowups}
+									onFocusComposer={() => threadComposer.current?.focus()}
+									thread
+									className="mx-3 mb-2"
+									onMove={(messageId, direction) => {
+										void store
+											.reorderFollowup(messageId, direction)
+											.catch(() => undefined);
+									}}
+									onRemove={(messageId) => {
+										void store.removeFollowup(messageId).catch(() => undefined);
+									}}
+								/>
+								<MessageComposerFrame
+									aria-label="Reply in active Thread"
+									className="mx-auto mb-[22px] w-[calc(100%-44px)] max-w-[920px] shrink-0"
+									onSubmit={(event) => {
+										void sendThreadReply(event);
+									}}
+								>
 									{threadSuggestionCount > 0 && (
 										<SuggestionMenu
 											id={threadSuggestionListId}
@@ -3562,50 +3393,243 @@ export function CommonspaceConversation({
 											onSelectTag={selectThreadSuggestion}
 										/>
 									)}
-								</div>
-								<div className="flex flex-wrap items-center gap-2">
-									{activeThreadActivities.length > 0 &&
-										threadReplyTarget === null && (
-											<RunDeliveryControls
-												thread
+									<div className="-mx-3 -mt-3 flex min-w-0 items-start gap-3 rounded-t-[8px] border-b bg-primary/[0.045] px-3 py-2.5">
+										<span
+											className="grid size-7 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"
+											aria-hidden="true"
+										>
+											<MessageCircleReplyIcon className="size-4" />
+										</span>
+										<div className="min-w-0 flex-1">
+											<div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+												<strong className="text-xs font-semibold text-foreground">
+													Reply in this Thread
+												</strong>
+												<span className="text-[11px] text-muted-foreground">
+													Continues #
+													{activeChannel?.name ?? activeThread.channelId}
+												</span>
+											</div>
+											<div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted-foreground">
+												<span>
+													{threadReplyTarget !== null
+														? `Only ${threadReplyTarget.agentName} will respond`
+														: threadComposerReferences.agentTokens.length > 0
+															? "Explicit recipients"
+															: activeThreadAgentNames.length > 0
+																? `AI selects from ${activeThreadAgentNames.join(" + ")}`
+																: "No Thread agents available"}
+												</span>
+												{threadReplyTarget === null &&
+													threadComposerReferences.agentTokens.map((token) => (
+														<span
+															key={token}
+															className="rounded-sm border bg-background px-1.5 py-0.5 font-medium text-foreground"
+														>
+															{token}
+														</span>
+													))}
+												<span aria-hidden="true">·</span>
+												<span>
+													{threadComposerReferences.projectTokens.length > 0
+														? "Explicit Project context"
+														: activeThreadProjects.length > 0
+															? `Thread context: ${activeThreadProjects.join(" + ")}`
+															: "No Project context"}
+												</span>
+												{threadComposerReferences.projectTokens.map((token) => (
+													<span
+														key={token}
+														className="rounded-sm border bg-background px-1.5 py-0.5 font-medium text-foreground"
+													>
+														{token}
+													</span>
+												))}
+											</div>
+										</div>
+									</div>
+									<div className="relative w-full">
+										{threadReplyTarget !== null && (
+											<div
+												className="mb-2 flex items-center gap-2 border-b px-1 pb-2 text-xs text-muted-foreground"
+												role="status"
+											>
+												<span
+													className="min-w-0 flex-1 truncate"
+													title="Only this agent will respond"
+												>
+													Replying only to{" "}
+													<span className="text-foreground">
+														{threadReplyTarget.agentName}
+													</span>
+												</span>
+												<button
+													type="button"
+													className="grid size-7 shrink-0 place-items-center rounded-md hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+													aria-label="Cancel direct reply"
+													onClick={() => {
+														setThreadReplyTarget(null);
+														threadComposer.current?.focus();
+													}}
+												>
+													×
+												</button>
+											</div>
+										)}
+										<MessageComposerInput
+											ref={threadComposer}
+											aria-label="Reply in thread"
+											aria-autocomplete="list"
+											aria-controls={
+												threadSuggestionCount > 0
+													? threadSuggestionListId
+													: undefined
+											}
+											aria-activedescendant={activeThreadSuggestionId}
+											placeholder="Continue this Thread…"
+											value={threadDraft}
+											onChange={(event) => {
+												setThreadDraft(event.target.value);
+												setSelectedThreadSuggestion(0);
+											}}
+											onPaste={(event) => {
+												const files = Array.from(
+													event.clipboardData.files,
+												).filter((file) => file.type.startsWith("image/"));
+												if (files.length > 0)
+													void attachPastedImages(
+														files,
+														setPendingThreadImages,
+													);
+											}}
+											onKeyDown={(event) => {
+												if (
+													threadSuggestionCount > 0 &&
+													(event.key === "ArrowDown" || event.key === "ArrowUp")
+												) {
+													event.preventDefault();
+													setSelectedThreadSuggestion((current) =>
+														event.key === "ArrowDown"
+															? (current + 1) % threadSuggestionCount
+															: (current - 1 + threadSuggestionCount) %
+																threadSuggestionCount,
+													);
+												} else if (
+													threadSuggestionCount > 0 &&
+													event.key === "Tab"
+												) {
+													event.preventDefault();
+													if (threadSlashSuggestions.length > 0) {
+														const suggestion =
+															threadSlashSuggestions[
+																selectedThreadSuggestion
+															] ?? threadSlashSuggestions[0];
+														if (suggestion !== undefined)
+															selectThreadSlashSuggestion(suggestion.name);
+													} else {
+														const suggestion =
+															threadReferenceSuggestions[
+																selectedThreadSuggestion
+															] ?? threadReferenceSuggestions[0];
+														if (suggestion !== undefined)
+															selectThreadSuggestion(suggestion);
+													}
+												} else if (event.key === "Enter" && !event.shiftKey) {
+													event.preventDefault();
+													if (
+														threadSlashSuggestions.length > 0 &&
+														resolvedThreadCommand === null
+													) {
+														const suggestion =
+															threadSlashSuggestions[
+																selectedThreadSuggestion
+															] ?? threadSlashSuggestions[0];
+														if (suggestion !== undefined)
+															selectThreadSlashSuggestion(suggestion.name);
+													} else if (threadReferenceSuggestions.length > 0) {
+														const suggestion =
+															threadReferenceSuggestions[
+																selectedThreadSuggestion
+															] ?? threadReferenceSuggestions[0];
+														if (suggestion !== undefined)
+															selectThreadSuggestion(suggestion);
+													} else {
+														const form = event.currentTarget.form;
+														const steer =
+															activeThreadActivities.length > 0 &&
+															threadReplyTarget === null &&
+															(event.metaKey || event.ctrlKey)
+																? form?.querySelector<HTMLButtonElement>(
+																		'button[name="delivery"][value="steer"]:not(:disabled)',
+																	)
+																: undefined;
+														form?.requestSubmit(steer);
+													}
+												}
+											}}
+										/>
+										<PendingImageStrip
+											images={pendingThreadImages}
+											onRemove={(index) => {
+												setPendingThreadImages((current) =>
+													current.filter((_, candidate) => candidate !== index),
+												);
+											}}
+										/>
+										<PendingFileStrip
+											files={pendingThreadFiles}
+											onRemove={(index) => {
+												setPendingThreadFiles((current) =>
+													current.filter((_, candidate) => candidate !== index),
+												);
+											}}
+										/>
+									</div>
+									<MessageComposerActions>
+										{activeThreadActivities.length > 0 &&
+											threadReplyTarget === null && (
+												<RunDeliveryControls
+													thread
+													disabled={
+														threadDraft.trim() === "" &&
+														pendingThreadImages.length === 0 &&
+														pendingThreadFiles.length === 0
+													}
+												/>
+											)}
+										<label className="relative inline-flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background">
+											<PaperclipIcon className="size-5" aria-hidden="true" />
+											<input
+												className="absolute inset-0 opacity-0"
+												type="file"
+												multiple
+												aria-label="Attach files to Thread"
+												onChange={(event) => {
+													const files = Array.from(event.target.files ?? []);
+													if (files.length > 0)
+														void attachFiles(files, setPendingThreadFiles);
+													event.target.value = "";
+												}}
+											/>
+										</label>
+										{(activeThreadActivities.length === 0 ||
+											threadReplyTarget !== null) && (
+											<button
+												className="ml-auto inline-flex size-9 items-center justify-center rounded-lg border-0 bg-primary/20 text-primary disabled:opacity-45"
+												type="submit"
+												aria-label={threadIsCommand ? "Run" : "Reply"}
 												disabled={
 													threadDraft.trim() === "" &&
 													pendingThreadImages.length === 0 &&
 													pendingThreadFiles.length === 0
 												}
-											/>
+											>
+												<ArrowUpIcon className="size-5" aria-hidden="true" />
+											</button>
 										)}
-									<label className="relative inline-flex min-h-9 w-fit items-center rounded-sm border px-2 text-xs font-semibold">
-										Attach
-										<input
-											className="absolute inset-0 opacity-0"
-											type="file"
-											multiple
-											aria-label="Attach files to Thread"
-											onChange={(event) => {
-												const files = Array.from(event.target.files ?? []);
-												if (files.length > 0)
-													void attachFiles(files, setPendingThreadFiles);
-												event.target.value = "";
-											}}
-										/>
-									</label>
-									{(activeThreadActivities.length === 0 ||
-										threadReplyTarget !== null) && (
-										<button
-											className="min-h-9 justify-self-end rounded-sm border-0 bg-primary px-3 text-sm font-semibold text-primary-foreground disabled:opacity-45"
-											type="submit"
-											disabled={
-												threadDraft.trim() === "" &&
-												pendingThreadImages.length === 0 &&
-												pendingThreadFiles.length === 0
-											}
-										>
-											{threadIsCommand ? "Run" : "Reply"}
-										</button>
-									)}
-								</div>
-							</form>
+									</MessageComposerActions>
+								</MessageComposerFrame>
+							</div>
 						</aside>
 					)}
 					{contextSettingsOpen &&

@@ -159,7 +159,7 @@ Agent settings provide an on-demand, read-only native capability browser for eve
 3. The message creates a Thread.
 4. The inference layer resolves missing Project references, selects the smallest useful set of Agents and classifies delivery as parallel or relay.
 5. A request for independent work uses parallel delivery. A request for Agents to discuss, debate, reconcile, review one another, or reach a shared conclusion uses an ordered relay with at least two assignments.
-6. The service stores the routing mode, selected Agents, ordered participant deliveries, Project references, and routing reason. These records support delivery, associate replies with assignments, and retain diagnostics and corrections. Every routed human message shows a compact receipt naming the destination, selection source, and queued, running, completed, cancelled, or failed outcome; participants, reasons, Projects, timing, and reroutes remain expandable. A failed routing receipt lets the user retry inference or choose a Channel Agent manually without duplicating the persisted message.
+6. The service stores the routing mode, selected Agents, ordered participant deliveries, Project references, and routing reason. These records support delivery, associate replies with assignments, and retain diagnostics and corrections. Every routed human message shows a compact receipt naming the destination and queued, running, completed, cancelled, or failed outcome. Expanding it shows the stored reason, selection source, and routing duration; a secondary Delivery details disclosure retains participants, Projects, historical requests, and reroutes. A failed routing receipt lets the user retry inference or choose a Channel Agent manually without duplicating the persisted message.
 7. Parallel assignments run concurrently. In a relay, only the first Agent starts; each later Agent receives a bounded head-and-tail excerpt of the preceding peer response plus the original user message. The complete reply remains available through on-demand context.
 8. Calls to the same native session are serialized.
 9. Replies, activity, results, and attention states appear under the same Thread.
@@ -203,7 +203,7 @@ Compaction summarizes context so it fits within input limits. It does not delete
 5. The user can trigger compaction manually and edit the stored summary, decisions, and questions.
 6. User-written context remains authoritative and is not silently overwritten by automatic projection.
 7. If new source messages make edited context incomplete, Commonspace marks it stale.
-8. Channel timeline messages expose Pin/Unpin in the hover toolbar and message menu. These pins belong to the Channel even when a Thread is open; actions inside the Thread belong to that Thread. Pin lists show readable source content instead of internal message IDs.
+8. Channel timeline messages expose Pin/Unpin in the message menu, whose trigger appears on hover or keyboard focus. Edit and delete share this menu; deletion retains its confirmation. These pins belong to the Channel even when a Thread is open; actions inside the Thread belong to that Thread. Pin lists show readable source content instead of internal message IDs.
 
 ### 5.8 Message correction
 

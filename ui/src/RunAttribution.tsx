@@ -61,10 +61,10 @@ export function RunAttribution({
 	const fileLabel = `${String(observedCount)} file${observedCount === 1 ? "" : "s"} changed`;
 
 	return (
-		<div className="mt-3 overflow-hidden rounded-md border bg-background">
+		<div className="mt-3 overflow-hidden rounded-md">
 			<button
 				type="button"
-				className="grid min-h-12 w-full grid-cols-[24px_auto_minmax(0,1fr)_18px] items-center gap-2 border-0 bg-transparent px-3 text-left text-xs hover:bg-muted"
+				className="grid min-h-9 w-full grid-cols-[18px_auto_minmax(0,1fr)_18px] items-center gap-2 border-0 bg-transparent px-1 text-left text-[13px] text-muted-foreground hover:text-foreground"
 				aria-expanded={open}
 				aria-controls={panelId}
 				aria-label={`${open ? "Hide" : "Show"} run evidence for ${authorName}`}
@@ -73,8 +73,11 @@ export function RunAttribution({
 				}}
 			>
 				<span aria-hidden="true">±</span>
-				<strong>Run evidence</strong>
-				<span>
+				<span>Run evidence</span>
+				<span
+					className="truncate"
+					title={`${fileLabel} · ${String(preExistingCount)} pre-existing`}
+				>
 					{fileLabel} · {String(preExistingCount)} pre-existing
 				</span>
 				<span aria-hidden="true">⌄</span>
@@ -82,14 +85,14 @@ export function RunAttribution({
 			{open && (
 				<section
 					id={panelId}
-					className="border-t bg-muted p-3"
+					className="border-t py-3"
 					aria-label={`${authorName} run evidence`}
 				>
 					{attribution.roots.map((root) =>
 						root.available ? (
 							<div
 								key={root.rootIndex}
-								className="rounded-md border bg-background p-3 [&+&]:mt-2"
+								className="min-w-0 [&+&]:mt-4 [&+&]:border-t [&+&]:pt-4"
 							>
 								<header className="flex items-center justify-between gap-2 text-xs">
 									<strong>Folder {String(root.rootIndex + 1)}</strong>
@@ -98,9 +101,9 @@ export function RunAttribution({
 									</span>
 								</header>
 								{root.preExisting.length > 0 && (
-									<div className="mt-3 rounded-sm border bg-muted p-2 text-xs">
+									<div className="mt-2 grid gap-1 text-xs text-muted-foreground">
 										<strong>Present before run</strong>
-										<span>
+										<span className="break-words">
 											{root.preExisting.map((change) => change.path).join(", ")}
 										</span>
 									</div>
@@ -120,25 +123,29 @@ export function RunAttribution({
 											const expanded = selected === anchor;
 											return (
 												<li key={anchor} id={anchor}>
-													<div className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 rounded-sm px-2 text-xs hover:bg-muted">
+													<div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 py-2 text-xs">
 														<a
+															className="col-span-2 min-w-0 break-words font-medium leading-5 text-foreground underline-offset-4 hover:underline"
 															href={`#${anchor}`}
+															aria-expanded={expanded}
 															onClick={() => {
 																setSelected(expanded ? null : anchor);
 															}}
 														>
 															{change.path}
 														</a>
-														<span>
+														<span className="min-w-0 text-muted-foreground">
 															{change.status}
 															{change.preExisting ? " · also pre-existing" : ""}
+															{" · "}
+															<span className="whitespace-nowrap">
+																+{change.additions ?? "–"} / −
+																{change.deletions ?? "–"}
+															</span>
 														</span>
-														<small>
-															+{change.additions ?? "–"} / −
-															{change.deletions ?? "–"}
-														</small>
 														<button
 															type="button"
+															className="min-h-8 whitespace-nowrap text-muted-foreground hover:text-foreground"
 															aria-label={`Open ${change.path} in editor`}
 															onClick={() => {
 																void openInEditor(

@@ -15,6 +15,7 @@ export interface TagSuggestion {
 	label: string;
 	token: string;
 	channelMembership?: "member" | "outside";
+	membershipScope?: "channel" | "thread";
 }
 
 const referencePattern =
@@ -94,7 +95,8 @@ export function tagReferenceParts(
 export function tagSuggestions(
 	text: string,
 	bootstrap: CommonspaceBootstrap,
-	channelAgentIds?: readonly string[],
+	memberAgentIds?: readonly string[],
+	membershipScope: "channel" | "thread" = "channel",
 ): TagSuggestion[] {
 	const match = text.match(activeTokenPattern);
 	if (match === null) return [];
@@ -116,10 +118,12 @@ export function tagSuggestions(
 					label: agent.displayName,
 					token: `@${tagName}`,
 				};
-				if (channelAgentIds !== undefined)
-					suggestion.channelMembership = channelAgentIds.includes(agent.id)
+				if (memberAgentIds !== undefined) {
+					suggestion.channelMembership = memberAgentIds.includes(agent.id)
 						? "member"
 						: "outside";
+					suggestion.membershipScope = membershipScope;
+				}
 				return suggestion;
 			})
 			.sort((left, right) =>
@@ -131,18 +135,22 @@ export function tagSuggestions(
 						: 1,
 			);
 		const all: TagSuggestion[] = [];
-		if ("all".startsWith(query)) {
+		if (query === "all") {
 			const suggestion: TagSuggestion = {
 				kind: "agent",
 				id: "all",
-				label: "All agents",
+				label: `All agents · sends to everyone in this ${membershipScope}`,
 				token: "@all",
 			};
-			if (channelAgentIds !== undefined)
+			if (memberAgentIds !== undefined) {
 				suggestion.channelMembership = "member";
+				suggestion.membershipScope = membershipScope;
+			}
 			all.push(suggestion);
 		}
-		return [...all, ...agents].slice(0, 6);
+		return query === "all"
+			? [...agents.slice(0, 5), ...all]
+			: agents.slice(0, 6);
 	}
 	if (prefix === "@@") {
 		return bootstrap.state.projects

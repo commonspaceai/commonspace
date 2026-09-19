@@ -3,8 +3,16 @@ import type {
 	CommonspaceTraceEntry,
 } from "@commonspace/shared";
 import { AGENT_ADAPTERS } from "@commonspace/shared";
-import { useId, useState } from "react";
+import { ChevronDownIcon, Clock3Icon, XIcon } from "lucide-react";
+import {
+	Popover,
+	PopoverClose,
+	PopoverContent,
+	PopoverTitle,
+	PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { MessageMarkdown } from "./MessageMarkdown";
 
 interface AgentTraceProps {
 	authorName: string;
@@ -58,7 +66,7 @@ function TraceEntry({ entry }: { entry: CommonspaceTraceEntry }) {
 						: "Context compaction failed";
 		return (
 			<li
-				className="grid grid-cols-[28px_minmax(0,1fr)] gap-3 border-b py-3 last:border-b-0"
+				className="grid grid-cols-[minmax(0,1fr)] border-b py-3 last:border-b-0 [&>span]:hidden"
 				data-trace-kind="compaction"
 			>
 				<span
@@ -67,12 +75,14 @@ function TraceEntry({ entry }: { entry: CommonspaceTraceEntry }) {
 				>
 					↻
 				</span>
-				<div className="min-w-0 [&>header]:flex [&>header]:items-center [&>header]:justify-between [&>header]:gap-2 [&>header]:text-xs [&>header_span]:text-muted-foreground">
-					<header>
+				<div className="min-w-0">
+					<div className="flex items-center justify-between gap-2 text-xs [&>span]:text-muted-foreground">
 						<strong>{label}</strong>
 						<span>Session context</span>
-					</header>
-					<p className="mt-2 text-[13px] leading-5">{entry.text}</p>
+					</div>
+					<div className="mt-1 text-muted-foreground">
+						<MessageMarkdown text={entry.text} />
+					</div>
 				</div>
 			</li>
 		);
@@ -81,7 +91,7 @@ function TraceEntry({ entry }: { entry: CommonspaceTraceEntry }) {
 	if (entry.type === "reasoning") {
 		return (
 			<li
-				className="grid grid-cols-[28px_minmax(0,1fr)] gap-3 border-b py-3 last:border-b-0"
+				className="grid grid-cols-[minmax(0,1fr)] border-b py-3 last:border-b-0 [&>span]:hidden"
 				data-trace-kind="reasoning"
 			>
 				<span
@@ -90,12 +100,13 @@ function TraceEntry({ entry }: { entry: CommonspaceTraceEntry }) {
 				>
 					◇
 				</span>
-				<div className="min-w-0 [&>header]:flex [&>header]:items-center [&>header]:justify-between [&>header]:gap-2 [&>header]:text-xs [&>header_span]:text-muted-foreground">
-					<header>
-						<strong>Reasoning summary</strong>
-						<span>Emitted by harness</span>
-					</header>
-					<p className="mt-2 text-[13px] leading-5">{entry.text}</p>
+				<div className="min-w-0">
+					<div className="flex items-center justify-between gap-2 text-xs [&>span]:text-muted-foreground">
+						<strong>Reasoning</strong>
+					</div>
+					<div className="mt-1 text-muted-foreground">
+						<MessageMarkdown text={entry.text} />
+					</div>
 				</div>
 			</li>
 		);
@@ -104,7 +115,7 @@ function TraceEntry({ entry }: { entry: CommonspaceTraceEntry }) {
 	if (entry.type === "plan") {
 		return (
 			<li
-				className="grid grid-cols-[28px_minmax(0,1fr)] gap-3 border-b py-3 last:border-b-0"
+				className="grid grid-cols-[minmax(0,1fr)] border-b py-3 last:border-b-0 [&>span]:hidden"
 				data-trace-kind="plan"
 			>
 				<span
@@ -113,11 +124,11 @@ function TraceEntry({ entry }: { entry: CommonspaceTraceEntry }) {
 				>
 					☷
 				</span>
-				<div className="min-w-0 [&>header]:flex [&>header]:items-center [&>header]:justify-between [&>header]:gap-2 [&>header]:text-xs [&>header_span]:text-muted-foreground">
-					<header>
+				<div className="min-w-0">
+					<div className="flex items-center justify-between gap-2 text-xs [&>span]:text-muted-foreground">
 						<strong>Plan</strong>
 						<span>{String(entry.steps.length)} steps</span>
-					</header>
+					</div>
 					{entry.markdown !== undefined && entry.steps.length === 0 && (
 						<p className="mt-2 text-[13px] leading-5">{entry.markdown}</p>
 					)}
@@ -155,7 +166,7 @@ function TraceEntry({ entry }: { entry: CommonspaceTraceEntry }) {
 	if (entry.type === "tool") {
 		return (
 			<li
-				className="grid grid-cols-[28px_minmax(0,1fr)] gap-3 border-b py-3 last:border-b-0"
+				className="grid grid-cols-[minmax(0,1fr)] border-b py-3 last:border-b-0 [&>span]:hidden"
 				data-trace-kind="tool"
 			>
 				<span
@@ -164,8 +175,8 @@ function TraceEntry({ entry }: { entry: CommonspaceTraceEntry }) {
 				>
 					⌘
 				</span>
-				<div className="min-w-0 [&>header]:flex [&>header]:items-center [&>header]:justify-between [&>header]:gap-2 [&>header]:text-xs [&>header_span]:text-muted-foreground">
-					<header>
+				<div className="min-w-0">
+					<div className="flex items-center justify-between gap-2 text-xs [&>span]:text-muted-foreground">
 						<strong>{entry.title}</strong>
 						<span
 							className={cn(
@@ -177,7 +188,7 @@ function TraceEntry({ entry }: { entry: CommonspaceTraceEntry }) {
 						>
 							{statusLabel(entry.status)}
 						</span>
-					</header>
+					</div>
 					{(entry.toolName !== undefined || entry.toolKind !== undefined) && (
 						<div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
 							{entry.toolKind !== undefined && <span>{entry.toolKind}</span>}
@@ -197,7 +208,7 @@ function TraceEntry({ entry }: { entry: CommonspaceTraceEntry }) {
 
 	return (
 		<li
-			className="grid grid-cols-[28px_minmax(0,1fr)] gap-3 border-b py-3 last:border-b-0"
+			className="grid grid-cols-[minmax(0,1fr)] border-b py-3 last:border-b-0 [&>span]:hidden"
 			data-trace-kind="usage"
 		>
 			<span
@@ -206,14 +217,14 @@ function TraceEntry({ entry }: { entry: CommonspaceTraceEntry }) {
 			>
 				◴
 			</span>
-			<div className="min-w-0 [&>header]:flex [&>header]:items-center [&>header]:justify-between [&>header]:gap-2 [&>header]:text-xs [&>header_span]:text-muted-foreground">
-				<header>
+			<div className="min-w-0">
+				<div className="flex items-center justify-between gap-2 text-xs [&>span]:text-muted-foreground">
 					<strong>Context usage</strong>
 					<span>
 						{entry.usedTokens.toLocaleString()} /{" "}
 						{entry.contextWindow.toLocaleString()} tokens
 					</span>
-				</header>
+				</div>
 				{entry.costAmount !== undefined && (
 					<p className="mt-2 font-mono text-xs text-muted-foreground">
 						{entry.costAmount.toLocaleString(undefined, {
@@ -233,9 +244,16 @@ function TracePayload({ label, value }: { label: string; value: string }) {
 			<span className="text-xs font-semibold text-muted-foreground">
 				{label}
 			</span>
-			<pre className="mt-1 max-h-60 overflow-auto rounded-sm border bg-muted p-2 font-mono text-xs">
-				<code>{value}</code>
-			</pre>
+			<section
+				aria-label={`${label} payload`}
+				// biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users must be able to scroll overflowing trace payloads.
+				tabIndex={0}
+				className="mt-1 max-h-60 overflow-auto rounded-sm border bg-muted p-2"
+			>
+				<pre className="font-mono text-xs">
+					<code>{value}</code>
+				</pre>
+			</section>
 		</div>
 	);
 }
@@ -258,58 +276,35 @@ export function AgentTraceTimeline({
 }
 
 export function AgentTrace({ authorName, trace }: AgentTraceProps) {
-	const [open, setOpen] = useState(false);
-	const panelId = useId();
 	if (trace.entries.length === 0) return null;
 	const runtime = runtimeName(trace);
-	const tools = trace.entries.filter((entry) => entry.type === "tool").length;
-	const toolLabel = `${String(tools)} tool${tools === 1 ? "" : "s"}`;
-
 	return (
-		<div className="mt-3 overflow-hidden rounded-md border bg-background">
-			<button
-				type="button"
-				className="grid min-h-12 w-full grid-cols-[24px_auto_minmax(0,1fr)_18px] items-center gap-2 border-0 bg-transparent px-3 text-left text-xs hover:bg-muted"
-				aria-expanded={open}
-				aria-controls={panelId}
-				aria-label={`${open ? "Hide" : "Show"} ${runtime} activity for ${authorName}`}
-				onClick={() => {
-					setOpen((value) => !value);
-				}}
+		<Popover>
+			<PopoverTrigger
+				className="ml-auto inline-flex min-h-6 items-center gap-1 text-[11px] font-normal text-muted-foreground hover:text-foreground"
+				aria-label={`Show ${runtime} activity for ${authorName}`}
 			>
-				<span
-					className="grid size-6 place-items-center rounded-full border font-mono"
-					aria-hidden="true"
-				>
-					⌁
-				</span>
-				<span>{runtime} activity</span>
-				<span className="truncate text-muted-foreground">
-					{String(trace.entries.length)} events · {toolLabel} ·{" "}
-					{durationLabel(trace.startedAt, trace.completedAt)}
-				</span>
-				<span
-					className={cn("transition-transform", open && "rotate-180")}
-					aria-hidden="true"
-				>
-					⌄
-				</span>
-			</button>
-			{open && (
-				<section
-					id={panelId}
-					className="border-t bg-muted p-3"
-					aria-label={`${authorName} activity trace`}
-				>
-					<div className="mb-2 grid gap-1 text-xs">
-						<strong>Native harness trace</strong>
-						<span>
-							Reasoning summaries and tool activity reported by {runtime}.
-						</span>
-					</div>
-					<AgentTraceTimeline entries={trace.entries} />
-				</section>
-			)}
-		</div>
+				<Clock3Icon className="size-3" aria-hidden="true" /> Activity{" "}
+				<ChevronDownIcon className="size-3" aria-hidden="true" />
+			</PopoverTrigger>
+			<PopoverContent
+				aria-label={`${authorName} activity trace`}
+				className="max-h-[min(600px,75vh)] w-[360px] overflow-y-auto rounded-lg bg-card p-[18px] text-xs"
+			>
+				<div className="mb-3 flex items-center justify-between gap-3">
+					<PopoverTitle>{authorName} activity</PopoverTitle>
+					<PopoverClose
+						aria-label="Close activity"
+						className="grid size-6 place-items-center text-muted-foreground"
+					>
+						<XIcon className="size-4" />
+					</PopoverClose>
+				</div>
+				<p className="mb-2 text-[11px] text-muted-foreground">
+					{runtime} · {durationLabel(trace.startedAt, trace.completedAt)}
+				</p>
+				<AgentTraceTimeline entries={trace.entries} />
+			</PopoverContent>
+		</Popover>
 	);
 }

@@ -134,7 +134,6 @@ export function LiveAgentActivity({
 											fallbackName={activity.agentName}
 											size="lg"
 											ariaLabel={`${activity.agentName} is responding`}
-											className="rounded-full border-primary/20 bg-primary text-sm text-primary-foreground shadow-xs"
 										/>
 										<span className="min-w-0 self-center">
 											<span className="flex min-w-0 items-baseline justify-between gap-3">
@@ -201,7 +200,6 @@ export function LiveAgentActivity({
 									agent={agent}
 									size="lg"
 									ariaLabel={`${agent.displayName} is ${phase === "queued" ? "queued" : "responding"}`}
-									className="rounded-full border-primary/20 bg-primary text-sm text-primary-foreground shadow-xs"
 								/>
 								<span className="min-w-0">
 									<span className="flex items-baseline gap-2">
