@@ -85,6 +85,7 @@ lib/
 !ui/src/lib/
 !ui/src/lib/**
 artifacts/
+.impeccable/
 playwright-report/
 test-results/
 .DS_Store
