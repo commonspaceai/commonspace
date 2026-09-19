@@ -95,6 +95,12 @@ export const MediaPreviewFailed: Story = {
 		await expect(
 			await canvas.findByText(/export const story = 'verified'/u),
 		).toBeVisible();
+		await userEvent.click(
+			canvas.getByRole("button", { name: /Open file commonspace-logo\.png/iu }),
+		);
+		await expect(await canvas.findByRole("alert")).toHaveTextContent(
+			"Preview data could not be read.",
+		);
 	},
 };
 

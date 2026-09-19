@@ -543,6 +543,13 @@ export const ThreadContextOpen: Story = {
 		await expect(reply).toHaveValue("Keep this draft");
 		await expect(reply).toBeVisible();
 		await waitFor(() => expect(reply).toHaveFocus());
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Open thread context" }),
+		);
+		await expect(
+			canvas.getByRole("region", { name: "Thread context" }),
+		).toBeVisible();
+		await expect(reply).not.toBeVisible();
 	},
 };
 
