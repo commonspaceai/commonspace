@@ -17,8 +17,8 @@ describe("agent avatar identity", () => {
 
 	it("turns the configured accent into the avatar appearance", () => {
 		expect(agentAvatarStyle("#7c3aed")).toEqual({
-			backgroundColor: "#7c3aed",
-			color: "#fff",
+			backgroundColor: "color-mix(in srgb, #7c3aed 16%, var(--background))",
+			color: "color-mix(in srgb, #7c3aed 45%, var(--foreground))",
 		});
 		expect(agentAvatarStyle(undefined)).toBeUndefined();
 	});

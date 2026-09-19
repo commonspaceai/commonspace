@@ -51,7 +51,7 @@ export function ResourceActionMenu({
 		<DropdownMenu defaultOpen={defaultOpen}>
 			<DropdownMenuTrigger
 				className={cn(
-					"grid size-8 place-items-center rounded-sm border-0 bg-transparent text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100 focus:opacity-100 max-[780px]:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/30",
+					"grid size-8 place-items-center rounded-sm border-0 bg-transparent text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100 focus:opacity-100 max-[780px]:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/30",
 					triggerClassName,
 				)}
 				aria-label={`More actions for ${label}`}

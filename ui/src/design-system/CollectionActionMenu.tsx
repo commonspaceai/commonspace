@@ -27,7 +27,7 @@ import { ConfirmActionDialog } from "./ConfirmActionDialog";
 export type CommonspaceCollectionKind = "project" | "channel" | "agent";
 
 const collectionActionTriggerClassName =
-	"grid size-6 place-items-center rounded-sm border-0 bg-transparent text-foreground/65 opacity-0 transition-[background-color,color,opacity] hover:bg-foreground/10 hover:text-foreground aria-expanded:bg-foreground/10 data-[popup-open]:bg-foreground/10 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40 max-[780px]:opacity-100";
+	"grid size-6 place-items-center rounded-sm border-0 bg-transparent text-foreground/65 opacity-0 transition-[background-color,color,opacity] hover:text-foreground aria-expanded:text-foreground data-[popup-open]:text-foreground group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40 max-[780px]:opacity-100";
 const collectionActionIconClassName = "size-3.5";
 
 export type CollectionActionButtonProps = Omit<

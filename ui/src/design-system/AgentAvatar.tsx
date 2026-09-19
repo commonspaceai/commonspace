@@ -7,7 +7,13 @@ export type AgentAvatarIdentity = Pick<
 	"displayName" | "avatarEmoji" | "accentColor" | "status"
 >;
 
-export type AgentAvatarSize = "sm" | "md" | "lg" | "activity" | "stack";
+export type AgentAvatarSize =
+	| "sm"
+	| "md"
+	| "lg"
+	| "activity"
+	| "stack"
+	| "profile";
 
 export interface AgentAvatarProps
 	extends Omit<
@@ -26,10 +32,11 @@ export interface AgentAvatarProps
 
 const sizeClasses: Record<AgentAvatarSize, string> = {
 	sm: "size-5 text-xs",
-	md: "size-9 text-xs",
+	md: "size-8 text-xs",
 	lg: "size-10 text-xs",
 	activity: "size-[34px] text-xs",
-	stack: "size-6 text-[10px]",
+	stack: "size-5 text-[10px]",
+	profile: "size-16 text-2xl",
 };
 
 export function agentAvatarText({
@@ -49,7 +56,10 @@ export function agentAvatarStyle(
 ): CSSProperties | undefined {
 	return accentColor === undefined
 		? undefined
-		: { backgroundColor: accentColor, color: "#fff" };
+		: {
+				backgroundColor: `color-mix(in srgb, ${accentColor} 16%, var(--background))`,
+				color: `color-mix(in srgb, ${accentColor} 45%, var(--foreground))`,
+			};
 }
 
 export function AgentAvatar({
@@ -76,7 +86,7 @@ export function AgentAvatar({
 		<span
 			{...props}
 			className={cn(
-				"relative grid shrink-0 place-items-center border bg-background font-mono font-semibold text-foreground",
+				"relative grid shrink-0 place-items-center rounded-md bg-muted font-sans font-medium text-foreground",
 				sizeClasses[size],
 				className,
 			)}

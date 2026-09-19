@@ -6,7 +6,7 @@ export const COMMONSPACE_RESIZABLE_PANEL = {
 		"commonspace-thread-width",
 		"commonspace-settings-width",
 	] as const,
-	defaultValue: 50,
+	defaultValue: 42,
 	min: 25,
 	max: 75,
 	step: 5,
