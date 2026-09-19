@@ -64,6 +64,35 @@ export const SearchWithProvenance: Story = {
 		await expect(receipt).toBeVisible();
 	},
 };
+export const WritingScopeShortcut: Story = {
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		await page.findByRole(
+			"heading",
+			{ name: "general", level: 1 },
+			{ timeout: 5_000 },
+		);
+		const helpTrigger = page.getByRole("button", {
+			name: "Help and shortcuts",
+		});
+		await userEvent.click(helpTrigger);
+		await userEvent.click(page.getByRole("button", { name: "Close help" }));
+		await expect(helpTrigger).toHaveFocus();
+
+		const channelInput = page.getByRole("textbox", { name: "Post in general" });
+		const threadInput = page.getByRole("textbox", { name: "Reply in thread" });
+		await userEvent.keyboard("{F6}");
+		await expect(threadInput).toHaveFocus();
+		await userEvent.keyboard("{F6}");
+		await expect(channelInput).toHaveFocus();
+
+		const channelNavigation = page.getByLabelText(/Open channel general/iu);
+		channelNavigation.focus();
+		await expect(channelNavigation).toHaveFocus();
+		await userEvent.keyboard("{F6}");
+		await expect(threadInput).toHaveFocus();
+	},
+};
 export const Inbox: Story = { args: { initialPath: "/" } };
 export const Threads: Story = { args: { initialPath: "/threads" } };
 export const DirectMessage: Story = {

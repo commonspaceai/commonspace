@@ -1281,14 +1281,9 @@ export function CommonspaceConversation({
 				event.defaultPrevented
 			)
 				return;
-			const layout = conversationLayout.current;
 			const active = document.activeElement;
-			if (
-				layout === null ||
-				!(active instanceof Node) ||
-				!layout.contains(active)
-			)
-				return;
+			if (!(active instanceof Element)) return;
+			if (active.closest('[role="dialog"]') !== null) return;
 			event.preventDefault();
 			if (threadPanel.current?.contains(active) === true)
 				composer.current?.focus();
