@@ -455,7 +455,7 @@ export function CommonspaceSearchDialog({
 				showCloseButton
 				finalFocus={() => (selectingResult.current ? false : returnFocus)}
 				aria-describedby={undefined}
-				className="top-[10dvh] h-[min(600px,80dvh)] max-h-[80dvh] grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] -translate-y-0 overflow-hidden sm:max-w-[720px]"
+				className="top-[10dvh] h-[min(520px,80dvh)] max-h-[80dvh] grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] -translate-y-0 overflow-hidden sm:max-w-[720px]"
 			>
 				<DialogHeader className="sr-only">
 					<DialogTitle>Search Commonspace</DialogTitle>
@@ -511,7 +511,7 @@ export function CommonspaceSearchDialog({
 					}}
 					onClear={clearFilters}
 				/>
-				<div className="flex items-center justify-between px-4 pt-1 pb-1.5 text-xs font-semibold tracking-[0.05em] text-muted-foreground uppercase">
+				<div className="flex items-center justify-between px-4 pt-1 pb-1.5 text-xs font-medium text-muted-foreground">
 					<span>{query.trim() === "" ? "Browse" : "Results"}</span>
 					<span role="status" aria-live="polite" aria-atomic="true">
 						{pending
@@ -591,7 +591,7 @@ export function CommonspaceSearchDialog({
 									role="option"
 									aria-label={`Open ${kindLabel(result.kind)}: ${result.title}`}
 									aria-selected={index === boundedActiveIndex}
-									className="grid min-h-14 w-full grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-sm px-2.5 py-2 text-left hover:bg-muted aria-selected:bg-muted"
+									className="grid min-h-[72px] w-full grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-3 text-left hover:bg-hover aria-selected:bg-selection aria-selected:outline-1 aria-selected:-outline-offset-1 aria-selected:outline-border"
 									onMouseEnter={() => {
 										setActiveIndex(index);
 									}}
@@ -600,7 +600,7 @@ export function CommonspaceSearchDialog({
 									}}
 								>
 									<span
-										className="grid size-8 place-items-center rounded-sm border bg-background font-semibold text-muted-foreground"
+										className="grid size-8 place-items-center rounded-md bg-background font-semibold text-muted-foreground"
 										aria-hidden="true"
 									>
 										{result.kind === "project" ? (
@@ -610,7 +610,7 @@ export function CommonspaceSearchDialog({
 										)}
 									</span>
 									<span className="min-w-0">
-										<strong className="block truncate text-[13px]">
+										<strong className="block truncate text-sm font-medium">
 											<HighlightedText
 												text={result.title}
 												field="title"
@@ -625,7 +625,7 @@ export function CommonspaceSearchDialog({
 											/>
 										</small>
 										<small
-											className="block truncate text-xs text-muted-foreground/80"
+											className="block truncate text-xs text-muted-foreground"
 											title={result.receipt}
 										>
 											{resultReceiptLabel(result)}

@@ -2,6 +2,11 @@ import type {
 	CommonspaceBootstrap,
 	SendMessageResponse,
 } from "@commonspace/shared";
+import {
+	CommonspaceReasoning,
+	CommonspaceRoutingProvider,
+	CredentialSource,
+} from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommonspaceClientStore } from "../ui/src/commonspace-store.ts";
 import { storyBootstrap } from "../ui/src/stories/story-fixtures.ts";
@@ -55,7 +60,136 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
+it("refreshes changed routing without a workspace revision, including changes during refresh and reconnect", async () => {
+	const events = new EventTarget();
+	vi.stubGlobal(
+		"EventSource",
+		class {
+			addEventListener = events.addEventListener.bind(events);
+		},
+	);
+	const pending = deferred<Response>();
+	const updated: CommonspaceBootstrap = {
+		...storyBootstrap,
+		routing: {
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "updated-router",
+			baseUrl: "https://example.test/v1",
+			apiKeyConfigured: false,
+			apiKeySource: CredentialSource.None,
+		},
+	};
+	const fetch = vi
+		.fn()
+		.mockResolvedValueOnce(jsonResponse(storyBootstrap))
+		.mockReturnValueOnce(pending.promise)
+		.mockImplementation(() => Promise.resolve(jsonResponse(updated)));
+	vi.stubGlobal("fetch", fetch);
+	const store = new CommonspaceClientStore();
+	await store.refresh();
+	store.connectEvents();
+	const refreshing = store.refresh();
+	events.dispatchEvent(new MessageEvent("routing-changed", { data: "{}" }));
+	pending.resolve(jsonResponse(storyBootstrap));
+	await refreshing;
+	await vi.waitFor(() =>
+		expect(store.getSnapshot().bootstrap?.routing).toEqual(updated.routing),
+	);
+	expect(fetch).toHaveBeenCalledTimes(3);
+	events.dispatchEvent(new MessageEvent("routing-changed", { data: "{}" }));
+	await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
+	await store.refresh();
+	events.dispatchEvent(new Event("open"));
+	await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(5));
+});
+
 describe("CommonspaceClientStore message admission", () => {
+	it("keeps a later routing update when an older routing save response arrives", async () => {
+		const pending = deferred<Response>();
+		const events = new EventTarget();
+		vi.stubGlobal(
+			"EventSource",
+			class {
+				addEventListener = events.addEventListener.bind(events);
+			},
+		);
+		const updated: CommonspaceBootstrap = {
+			...storyBootstrap,
+			routing: {
+				provider: CommonspaceRoutingProvider.OpenAiCompatible,
+				model: "later-router",
+				baseUrl: "https://example.test/v1",
+				apiKeyConfigured: false,
+				apiKeySource: CredentialSource.None,
+			},
+		};
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValueOnce(jsonResponse(storyBootstrap))
+				.mockReturnValueOnce(pending.promise)
+				.mockImplementation(() => Promise.resolve(jsonResponse(updated))),
+		);
+		const store = new CommonspaceClientStore();
+		await store.refresh();
+		store.connectEvents();
+		const saving = store.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.OpenAiCompatible,
+			model: "earlier-router",
+		});
+		events.dispatchEvent(new MessageEvent("routing-changed", { data: "{}" }));
+		await store.refresh();
+		const observed: Array<CommonspaceBootstrap["routing"]> = [];
+		const unsubscribe = store.subscribe(() =>
+			observed.push(store.getSnapshot().bootstrap?.routing),
+		);
+		pending.resolve(
+			Response.json({ ...updated.routing, model: "earlier-router" }),
+		);
+		await saving;
+		unsubscribe();
+		expect(observed.length).toBeGreaterThan(0);
+		for (const routing of observed) expect(routing).toEqual(updated.routing);
+	});
+	it("does not restore stale routing from a delayed workspace mutation", async () => {
+		const pending = deferred<Response>();
+		const oldBootstrap = {
+			...storyBootstrap,
+			state: {
+				...storyBootstrap.state,
+				revision: storyBootstrap.state.revision + 1,
+			},
+		};
+		const updated: CommonspaceBootstrap = {
+			...oldBootstrap,
+			routing: {
+				provider: CommonspaceRoutingProvider.OpenAiCompatible,
+				model: "new-router",
+				baseUrl: "https://example.test/v1",
+				apiKeyConfigured: false,
+				apiKeySource: CredentialSource.None,
+			},
+		};
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValueOnce(jsonResponse(storyBootstrap))
+				.mockReturnValueOnce(pending.promise)
+				.mockResolvedValueOnce(jsonResponse(updated)),
+		);
+		const store = new CommonspaceClientStore();
+		await store.refresh();
+		const mutation = store.mutate({
+			action: "set-defaults",
+			reasoning: CommonspaceReasoning.Native,
+		});
+		await store.refresh();
+		pending.resolve(jsonResponse(oldBootstrap));
+		await mutation;
+		expect(store.getSnapshot().bootstrap?.routing).toEqual(updated.routing);
+	});
 	it.each(["send", "edit"] as const)(
 		"keeps a newer thread selection when a delayed %s finishes",
 		async (operation) => {
@@ -236,4 +370,26 @@ describe("CommonspaceClientStore message admission", () => {
 		admissions[1]?.reject(new Error("cleanup"));
 		await Promise.all([first, second]);
 	});
+});
+
+it("reports an identical failure again after dismissing the current error", async () => {
+	const store = new CommonspaceClientStore();
+	vi.stubGlobal(
+		"fetch",
+		vi.fn().mockRejectedValue(new Error("Network unavailable")),
+	);
+	const mutation = {
+		action: "create-channel",
+		name: "Review",
+		agentIds: [],
+	} as const;
+	await expect(store.mutate({ ...mutation, agentIds: [] })).rejects.toThrow(
+		"Network unavailable",
+	);
+	store.dismissError();
+	expect(store.getSnapshot().error).toBeNull();
+	await expect(store.mutate({ ...mutation, agentIds: [] })).rejects.toThrow(
+		"Network unavailable",
+	);
+	expect(store.getSnapshot().error).toBe("Network unavailable");
 });

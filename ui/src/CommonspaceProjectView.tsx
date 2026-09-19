@@ -13,7 +13,6 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CommonspaceLogo } from "@/design-system/CommonspaceLogo";
@@ -81,10 +80,10 @@ function ProjectConversations({
 	const conversationCount = channels.length + directMessages.length;
 	return (
 		<section
-			className="mx-auto max-w-[920px] overflow-hidden rounded-md border bg-background"
+			className="mx-auto w-full max-w-[1280px] overflow-hidden bg-background"
 			aria-labelledby="project-conversations-heading"
 		>
-			<header className="border-b px-[18px] py-3.5">
+			<header className="sr-only">
 				<strong
 					id="project-conversations-heading"
 					className="block text-[17px]"
@@ -104,14 +103,14 @@ function ProjectConversations({
 						<button
 							key={`channel:${channel.id}`}
 							type="button"
-							className="grid min-h-[82px] w-full grid-cols-[34px_minmax(0,1fr)_20px] items-center gap-3 border-0 border-b bg-transparent px-4 py-2.5 text-left last:border-b-0 hover:bg-muted"
+							className="grid min-h-[82px] w-full grid-cols-[34px_minmax(0,1fr)_20px] items-center gap-3 border-0 border-b bg-transparent px-4 py-2.5 text-left last:border-b-0 hover:bg-hover"
 							aria-label={`Open channel ${channel.name}`}
 							onClick={() =>
 								onOpenConversation({ kind: "channel", id: channel.id })
 							}
 						>
 							<span
-								className="grid size-[34px] place-items-center rounded-sm border bg-muted font-mono"
+								className="grid size-[34px] place-items-center rounded-lg bg-muted text-muted-foreground"
 								aria-hidden="true"
 							>
 								#
@@ -119,9 +118,9 @@ function ProjectConversations({
 							<span className="min-w-0">
 								<strong className="block truncate"># {channel.name}</strong>
 								<small className="block truncate text-xs text-muted-foreground">
-									Global Channel · references {project.name}
+									Channel
 								</small>
-								<p className="mt-1 truncate text-[13px]">
+								<p className="mt-1 truncate text-sm">
 									{latest?.text ??
 										(channel.instructions.trim() || "No messages yet.")}
 								</p>
@@ -140,21 +139,17 @@ function ProjectConversations({
 						<button
 							key={`dm:${agent.id}`}
 							type="button"
-							className="grid min-h-[82px] w-full grid-cols-[34px_minmax(0,1fr)_20px] items-center gap-3 border-0 border-b bg-transparent px-4 py-2.5 text-left last:border-b-0 hover:bg-muted"
+							className="grid min-h-[82px] w-full grid-cols-[34px_minmax(0,1fr)_20px] items-center gap-3 border-0 border-b bg-transparent px-4 py-2.5 text-left last:border-b-0 hover:bg-hover"
 							aria-label={`Open direct message ${agent.displayName}`}
 							onClick={() => onOpenConversation({ kind: "dm", id: agent.id })}
 						>
-							<AgentAvatar
-								agent={agent}
-								size="activity"
-								className="rounded-full bg-primary text-primary-foreground"
-							/>
+							<AgentAvatar agent={agent} size="activity" />
 							<span className="min-w-0">
 								<strong className="block truncate">{agent.displayName}</strong>
 								<small className="block truncate text-xs text-muted-foreground">
-									Agent DM · selected project context
+									Direct message
 								</small>
-								<p className="mt-1 truncate text-[13px]">
+								<p className="mt-1 truncate text-sm">
 									{latest?.text ?? "No messages yet."}
 								</p>
 							</span>
@@ -170,7 +165,7 @@ function ProjectConversations({
 					</div>
 				)}
 			</div>
-			<div className="border-t px-4 py-3 text-xs text-muted-foreground">
+			<div className="sr-only">
 				{conversationCount}{" "}
 				{conversationCount === 1 ? "conversation" : "conversations"} available
 				in {project.name}
@@ -313,7 +308,7 @@ export function CommonspaceProjectView({
 					actions={
 						<button
 							type="button"
-							className="grid size-11 place-items-center rounded-full border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+							className="grid size-9 place-items-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
 							aria-label="Open project settings"
 							aria-expanded={settingsOpen}
 							onClick={() => {
@@ -325,17 +320,18 @@ export function CommonspaceProjectView({
 					}
 				/>
 				<nav
-					className="flex min-h-16 shrink-0 items-center gap-2.5 overflow-x-auto border-b px-5 py-2 whitespace-nowrap max-[780px]:px-3"
+					className="flex min-h-14 shrink-0 items-center gap-3 overflow-x-auto border-b px-8 py-1 whitespace-nowrap max-[780px]:px-3"
 					aria-label="Project views"
 				>
 					<Button
 						variant="ghost"
 						aria-label="Workspace"
 						onClick={onBack}
-						className="max-[480px]:size-10 max-[480px]:px-0"
+						size="icon-sm"
+						title="Back to workspace"
 					>
 						<ArrowLeftIcon data-icon="inline-start" aria-hidden="true" />
-						<span className="max-[480px]:sr-only">Workspace</span>
+						<span className="sr-only">Workspace</span>
 					</Button>
 					<TabsList variant="project" aria-label="Project views">
 						{(["conversations", "files", "changes"] as const).map((tab) => (
@@ -358,13 +354,10 @@ export function CommonspaceProjectView({
 						<FolderPlusIcon data-icon="inline-start" aria-hidden="true" />
 						{addingFolder ? "Choosing…" : "Add context folder"}
 					</Button>
-					<Badge variant="outline" className="max-[780px]:hidden">
-						Files read only
-					</Badge>
 				</nav>
 				<TabsContent
 					value="conversations"
-					className="min-h-0 flex-1 overflow-auto bg-muted p-6"
+					className="min-h-0 flex-1 overflow-auto bg-background px-8 py-3"
 				>
 					<ProjectConversations
 						bootstrap={bootstrap}
@@ -392,7 +385,7 @@ export function CommonspaceProjectView({
 				</TabsContent>
 				{settingsOpen && (
 					<ResizablePanelHandle
-						className="commonspace-settings-resizer absolute top-16 right-0 bottom-0 z-30 h-auto"
+						className="commonspace-settings-resizer absolute top-[72px] right-0 bottom-0 z-30 h-auto"
 						style={{ right: `max(340px, ${String(panelWidth)}%)` }}
 						ariaLabel="Resize settings"
 						value={panelWidth}
@@ -406,7 +399,7 @@ export function CommonspaceProjectView({
 				)}
 				{settingsOpen && (
 					<aside
-						className="commonspace-project-context-settings absolute top-16 right-0 bottom-0 z-20 flex min-w-[340px] max-w-full flex-col border-l bg-background shadow-[-20px_0_48px_color-mix(in_oklch,var(--foreground)_9%,transparent)]"
+						className="commonspace-project-context-settings absolute top-[72px] right-0 bottom-0 z-20 flex min-w-[340px] max-w-full flex-col border-l bg-background shadow-[-20px_0_48px_color-mix(in_oklch,var(--foreground)_9%,transparent)]"
 						style={settingsStyle}
 						aria-label="Project settings"
 					>
@@ -437,8 +430,8 @@ export function CommonspaceProjectView({
 								<h3 className="mb-3 font-heading text-sm font-bold">
 									Local context
 								</h3>
-								<div className="rounded-md border bg-muted p-4">
-									<strong className="block text-[13px]">
+								<div className="space-y-1">
+									<strong className="block text-sm">
 										{project.paths[0] === undefined
 											? "No working folder"
 											: `Working · ${project.paths[0].split("/").at(-1) ?? project.name}`}
@@ -461,8 +454,8 @@ export function CommonspaceProjectView({
 								<h3 className="mb-3 font-heading text-sm font-bold">
 									Connected work
 								</h3>
-								<div className="rounded-md border bg-muted p-4">
-									<strong className="block text-[13px]">
+								<div className="space-y-1">
+									<strong className="block text-sm">
 										{conversationCount}{" "}
 										{conversationCount === 1 ? "conversation" : "conversations"}
 									</strong>

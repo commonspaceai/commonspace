@@ -5,7 +5,13 @@ import {
 	type ConversationRef,
 	deriveCommonspaceInboxItems,
 } from "@commonspace/shared";
-import { ArrowRightIcon, PinIcon, SearchIcon } from "lucide-react";
+import {
+	FolderIcon,
+	HashIcon,
+	PinIcon,
+	SearchIcon,
+	UsersIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -14,6 +20,7 @@ import {
 	type CollectionActionMenuProps,
 	type CommonspaceCollectionKind,
 } from "@/design-system/CollectionActionMenu";
+import { CollectionToolbar } from "@/design-system/CollectionToolbar";
 import { WorkspaceHeader } from "@/design-system/WorkspaceHeader";
 import type { CommonspaceStore } from "./commonspace-store.ts";
 import { AgentAvatar } from "./design-system/AgentAvatar.tsx";
@@ -63,7 +70,7 @@ const directoryConfig = {
 		mark: "P",
 		kicker: "Projects directory",
 		heading: "All projects",
-		description: "Local folders available as conversation context.",
+		description: "Files and context for your conversations.",
 		singular: "project",
 		add: "Add project",
 		filter: "Filter projects",
@@ -73,8 +80,7 @@ const directoryConfig = {
 		mark: "#",
 		kicker: "Channels directory",
 		heading: "All channels",
-		description:
-			"Global shared rooms containing many independent conversations.",
+		description: "Shared conversations with your agents.",
 		singular: "channel",
 		add: "Add channel",
 		filter: "Filter channels",
@@ -84,8 +90,7 @@ const directoryConfig = {
 		mark: "@",
 		kicker: "Agents directory",
 		heading: "All agents",
-		description:
-			"Native harness profiles available for agent conversations and channel work.",
+		description: "Your agents, ready for direct messages and channels.",
 		singular: "agent",
 		add: "Add agent",
 		filter: "Filter agents",
@@ -277,30 +282,21 @@ export function CommonspaceDirectory({
 			className="flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground"
 			aria-label={`${config.title} directory`}
 		>
-			<WorkspaceHeader title={config.title} mark={config.mark} />
-			<header className="flex min-h-[132px] shrink-0 items-center justify-between gap-6 border-b px-8 py-6 max-[780px]:min-h-[112px] max-[780px]:px-5 max-[780px]:py-5 max-[480px]:items-start max-[480px]:flex-col max-[480px]:gap-3">
-				<div className="min-w-0">
-					<p className="mb-1 font-mono text-xs font-semibold tracking-[0.06em] text-muted-foreground uppercase">
-						{config.kicker}
-					</p>
-					<h2 className="font-heading text-[28px] font-bold tracking-[-0.02em]">
-						{config.heading}
-					</h2>
-					<p className="mt-1 text-[13px] text-muted-foreground">
-						{config.description}
-					</p>
-				</div>
-				<Button
-					className="shrink-0 max-[480px]:w-full"
-					onClick={() => {
-						onAdd(kind);
-					}}
-				>
-					{config.add}
-				</Button>
-			</header>
-			<div className="grid shrink-0 grid-cols-[minmax(220px,1fr)_auto] items-center gap-3 border-b bg-muted px-8 py-3 max-[780px]:px-5 max-[480px]:grid-cols-[minmax(0,1fr)] max-[480px]:px-3">
-				<label className="flex min-h-9 min-w-0 items-center gap-2 rounded-sm border bg-background px-3 text-muted-foreground focus-within:border-ring">
+			<WorkspaceHeader
+				title={config.title}
+				mark={
+					kind === "projects" ? (
+						<FolderIcon className="size-4" />
+					) : kind === "channels" ? (
+						<HashIcon className="size-4" />
+					) : (
+						<UsersIcon className="size-4" />
+					)
+				}
+				actions={<Button onClick={() => onAdd(kind)}>{config.add}</Button>}
+			/>
+			<CollectionToolbar className="shrink-0 gap-4">
+				<label className="flex min-h-9 w-full max-w-[360px] min-w-0 items-center gap-2 rounded-md border bg-background px-3 text-muted-foreground focus-within:border-ring">
 					<SearchIcon className="size-4" aria-hidden="true" />
 					<span className="sr-only">{config.filter}</span>
 					<input
@@ -315,6 +311,18 @@ export function CommonspaceDirectory({
 						}}
 					/>
 				</label>
+
+				<div className="mr-auto flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+					<strong className="font-normal">
+						{String(filteredItems.length)}{" "}
+						{filteredItems.length === 1 ? config.singular : kind}
+					</strong>
+					<span>
+						{query.trim() === ""
+							? `${String(pinnedCount)} pinned`
+							: `Filtered from ${String(allItems.length)} ${kind}`}
+					</span>
+				</div>
 				<label htmlFor="directory-sort">
 					<span className="sr-only">Sort directory</span>
 					<NativeSelect
@@ -335,19 +343,8 @@ export function CommonspaceDirectory({
 						<option value="name-desc">Name Z–A</option>
 					</NativeSelect>
 				</label>
-			</div>
+			</CollectionToolbar>
 			<div className="min-h-0 flex-1 overflow-y-auto px-8 pb-8 max-[780px]:px-5 max-[480px]:px-3 max-[480px]:pb-6">
-				<div className="sticky top-0 z-10 flex min-h-[54px] items-center justify-between gap-4 border-b bg-background text-xs text-muted-foreground max-[480px]:items-start max-[480px]:flex-col max-[480px]:justify-center max-[480px]:gap-0.5">
-					<strong className="text-foreground">
-						{String(filteredItems.length)}{" "}
-						{filteredItems.length === 1 ? config.singular : kind}
-					</strong>
-					<span>
-						{query.trim() === ""
-							? `${String(pinnedCount)} of ${String(allItems.length)} ${kind} pinned`
-							: `Filtered from ${String(allItems.length)} ${kind}`}
-					</span>
-				</div>
 				<ul className="m-0 list-none border-b p-0">
 					{visibleItems.map((item) => {
 						const pinned = effectivePinnedKeys.includes(
@@ -378,7 +375,7 @@ export function CommonspaceDirectory({
 						return (
 							<li
 								key={item.id}
-								className="group grid min-h-[72px] grid-cols-[minmax(0,1fr)_44px] items-stretch border-b border-border/70 bg-background last:border-b-0 hover:bg-surface"
+								className="group grid min-h-[72px] grid-cols-[minmax(0,1fr)_44px] items-stretch border-b border-border/50 bg-background last:border-b-0 hover:bg-hover"
 							>
 								<button
 									type="button"
@@ -389,41 +386,38 @@ export function CommonspaceDirectory({
 									}}
 								>
 									{item.kind === "agent" ? (
-										<AgentAvatar
-											agent={item.agent}
-											size="md"
-											className="rounded-full text-[13px]"
-										/>
+										<AgentAvatar agent={item.agent} size="md" />
 									) : (
 										<span
-											className="grid size-9 place-items-center rounded-sm border bg-muted font-mono text-[13px] font-semibold"
+											className="grid size-9 place-items-center rounded-lg bg-muted text-muted-foreground"
 											aria-hidden="true"
 										>
-											{item.mark}
+											{item.kind === "project" ? (
+												<FolderIcon className="size-[18px]" />
+											) : (
+												<HashIcon className="size-[18px]" />
+											)}
 										</span>
 									)}
 									<span className="min-w-0">
-										<strong className="block truncate text-[13px]">
+										<strong className="block truncate text-[15px] font-medium">
 											{item.name}
 										</strong>
 										<small className="mt-1 block truncate text-xs text-muted-foreground">
 											{item.description}
 										</small>
 									</span>
-									<span className="text-right font-mono text-xs text-muted-foreground max-[480px]:col-start-2 max-[480px]:text-left">
-										{item.meta}
+									<span className="text-right text-xs text-muted-foreground max-[480px]:col-start-2 max-[480px]:text-left">
+										{item.kind === "channel" && item.unread === 0
+											? null
+											: item.meta}
 									</span>
 									{pinned ? (
 										<PinIcon
 											className="size-4 fill-current text-primary"
 											aria-label="Pinned"
 										/>
-									) : (
-										<ArrowRightIcon
-											className="size-4 text-muted-foreground"
-											aria-hidden="true"
-										/>
-									)}
+									) : null}
 								</button>
 								<CollectionActionMenu
 									kind={item.kind}
@@ -460,12 +454,27 @@ export function CommonspaceDirectory({
 				</ul>
 				{filteredItems.length === 0 && (
 					<div className="px-4 py-16 text-center">
-						<h3 className="font-heading text-lg font-bold">
-							No matching {kind}
-						</h3>
+						<h2 className="font-heading text-lg font-bold">
+							{allItems.length === 0 ? `No ${kind} yet` : `No matching ${kind}`}
+						</h2>
 						<p className="mt-1 text-[13px] text-muted-foreground">
-							Try a different name or clear the filter.
+							{allItems.length === 0
+								? `Add your first ${config.singular} to get started.`
+								: "Try a different name or clear the filter."}
 						</p>
+						<Button
+							className="mt-5"
+							variant="outline"
+							onClick={() => {
+								if (allItems.length === 0) onAdd(kind);
+								else {
+									setQuery("");
+									setPage(1);
+								}
+							}}
+						>
+							{allItems.length === 0 ? config.add : "Clear filter"}
+						</Button>
 					</div>
 				)}
 				{visibleItems.length < filteredItems.length && (

@@ -2,23 +2,27 @@ import {
 	AGENT_ADAPTER_KINDS,
 	AGENT_ADAPTERS,
 	type AgentAdapterKind,
+	COMMONSPACE_REASONING_VALUES,
 	type CommonspaceAgentProfile,
 	type CommonspaceDiagnostics,
 	type CommonspaceMutation,
 	type CommonspaceNotificationSettings,
 	type CommonspaceNotificationVerification,
-	type CommonspaceReasoning,
-	type CommonspaceRoutingProvider,
+	CommonspaceReasoning,
+	CommonspaceRoutingProvider,
 	type CommonspaceSearchResult,
+	type ConfiguredRoutingProvider,
 	type ConversationRef,
+	CredentialSource,
 	DEFAULT_COMMONSPACE_NOTIFICATION_SETTINGS,
 	deriveCommonspaceInboxItems,
+	isCommonspaceReasoning,
 	type UpdateRoutingConfigurationRequest,
 } from "@commonspace/shared";
 import {
 	ArrowRightIcon,
 	CheckIcon,
-	ChevronDownIcon,
+	FolderIcon,
 	GripVerticalIcon,
 	InboxIcon,
 	MessagesSquareIcon,
@@ -37,6 +41,7 @@ import {
 	useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
+import { Button } from "@/components/ui/button";
 import {
 	Dialog,
 	DialogContent,
@@ -45,15 +50,22 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { NativeSelect } from "@/components/ui/native-select";
+import { AppearanceSettings } from "@/design-system/AppearanceSettings";
 import {
 	CollectionActionButton,
 	CollectionActionMenu,
 	type CommonspaceCollectionKind,
 } from "@/design-system/CollectionActionMenu";
 import { CommonspaceLogo } from "@/design-system/CommonspaceLogo";
+import {
+	NavigationItem,
+	NavigationItemGroup,
+} from "@/design-system/NavigationItem";
+import { NavigationSection } from "@/design-system/NavigationSection";
 import { SidebarSortControl } from "@/design-system/SidebarSortControl";
 import { UnreadCount } from "@/design-system/UnreadCount";
 import { WorkspaceHeader } from "@/design-system/WorkspaceHeader";
+import { WorkspaceSettingsLayout } from "@/design-system/WorkspaceSettingsLayout";
 import { cn } from "@/lib/utils";
 import type { CommonspaceDirectoryKind } from "./CommonspaceDirectory.tsx";
 import { CommonspaceSearchDialog } from "./CommonspaceSearch.tsx";
@@ -67,7 +79,12 @@ import {
 } from "./channel-sorting.ts";
 import type { CommonspaceStore } from "./commonspace-store.ts";
 import { AgentAvatar } from "./design-system/AgentAvatar.tsx";
+import { WorkspaceErrorNotice } from "./design-system/WorkspaceErrorNotice";
 import { folderName } from "./project-files-api.ts";
+import {
+	type SettingsOperation,
+	SettingsOperationStatus,
+} from "./settings-operation";
 import {
 	collectionKey,
 	type SidebarCollectionKind,
@@ -79,20 +96,6 @@ import {
 	parseWorkspaceImport,
 	type WorkspaceImportCandidate,
 } from "./workspace-import.ts";
-
-const reasoningValues: ReadonlySet<string> = new Set([
-	"none",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-]);
-
-function isReasoning(value: string): value is CommonspaceReasoning {
-	return reasoningValues.has(value);
-}
 
 export interface CommonspaceSidebarProps {
 	wide: boolean;
@@ -126,58 +129,6 @@ export interface CommonspaceSidebarProps {
 	) => void;
 }
 
-function Section(props: {
-	title: string;
-	open: boolean;
-	onOpenChange: (open: boolean) => void;
-	onAdd?: () => void;
-	actions?: React.ReactNode;
-	children: React.ReactNode;
-}) {
-	return (
-		<section className="mt-3 first:mt-1">
-			<div className="flex items-center">
-				<button
-					type="button"
-					className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 rounded-sm border-0 bg-transparent px-2 text-left text-xs font-semibold text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-					aria-expanded={props.open}
-					onClick={() => {
-						props.onOpenChange(!props.open);
-					}}
-				>
-					<ChevronDownIcon
-						className={`size-4 transition-transform ${props.open ? "" : "-rotate-90"}`}
-						aria-hidden="true"
-					/>
-					<span>{props.title}</span>
-				</button>
-				{props.actions}
-				{props.onAdd !== undefined && (
-					<button
-						type="button"
-						className="grid size-7 place-items-center rounded-sm border-0 bg-transparent text-lg text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-						aria-label={`Add ${props.title.slice(0, -1).toLowerCase()}`}
-						onClick={props.onAdd}
-					>
-						+
-					</button>
-				)}
-			</div>
-			{props.open && (
-				<div className="grid gap-0.5 pt-0.5">{props.children}</div>
-			)}
-		</section>
-	);
-}
-
-function NavGroupLabel({ label }: { label: string }) {
-	return (
-		<p className="mt-2 mb-1 ml-[30px] px-1 text-[10px] font-medium text-muted-foreground">
-			{label}
-		</p>
-	);
-}
-
 function BrowseButton({
 	label,
 	ariaLabel = label,
@@ -190,7 +141,7 @@ function BrowseButton({
 	return (
 		<button
 			type="button"
-			className="mt-0.5 flex min-h-8 w-full items-center justify-between gap-2 rounded-sm border-0 border-t-0 bg-transparent px-2 py-0 text-left text-[11px] font-medium text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+			className="mt-0.5 flex min-h-8 w-full items-center justify-between gap-2 rounded-sm border-0 border-t-0 bg-transparent px-2 py-0 text-left text-[11px] font-medium text-sidebar-foreground/55 hover:text-sidebar-foreground"
 			aria-label={ariaLabel}
 			onClick={onClick}
 		>
@@ -211,11 +162,13 @@ function SettingsSectionHeading({
 	description: string;
 }) {
 	return (
-		<div className="mb-5 border-b border-border/70 pb-4">
-			<h2 className="font-heading text-[17px] font-bold tracking-[-0.01em]">
+		<div className="mb-5">
+			<h2 className="font-heading text-lg font-semibold tracking-[-0.01em]">
 				{title}
 			</h2>
-			<p className="mt-1 text-xs text-muted-foreground">{description}</p>
+			<p className="mt-1 text-sm leading-6 text-muted-foreground">
+				{description}
+			</p>
 		</div>
 	);
 }
@@ -278,7 +231,7 @@ function SettingsCheckbox({
 				}}
 			/>
 			<span
-				className="grid size-5 place-items-center rounded-sm border border-border bg-background text-transparent transition-colors peer-checked:border-primary peer-checked:bg-primary peer-checked:text-primary-foreground peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ring"
+				className="grid size-5 place-items-center rounded-sm border border-input bg-background text-transparent transition-colors peer-checked:border-primary peer-checked:bg-primary peer-checked:text-primary-foreground peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ring"
 				aria-hidden="true"
 			>
 				<CheckIcon className="size-3.5" />
@@ -323,10 +276,12 @@ const NOTIFICATION_OPTIONS = [
 function SidebarDialog({
 	title,
 	description,
+	size = "form",
 	onClose,
 	children,
 }: {
 	title: string;
+	size?: "compact" | "form";
 	description?: string;
 	onClose: () => void;
 	children: React.ReactNode;
@@ -355,15 +310,18 @@ function SidebarDialog({
 			<DialogContent
 				closeLabel={`Close ${title}`}
 				aria-describedby={undefined}
-				className="top-[10vh] max-h-[80vh] -translate-y-0 sm:max-w-[640px]"
+				className={cn(
+					"top-[10vh] max-h-[80vh] -translate-y-0",
+					size === "compact" ? "sm:max-w-[440px]" : "sm:max-w-[520px]",
+				)}
 			>
-				<DialogHeader className="border-b px-[18px] py-4">
+				<DialogHeader className="border-b px-6 py-5">
 					<DialogTitle>{title}</DialogTitle>
 					{description === undefined ? null : (
 						<DialogDescription>{description}</DialogDescription>
 					)}
 				</DialogHeader>
-				<div className="min-h-0 overflow-y-auto p-[18px]">{children}</div>
+				<div className="min-h-0 overflow-y-auto p-6">{children}</div>
 			</DialogContent>
 		</Dialog>
 	);
@@ -459,17 +417,18 @@ export function CommonspaceSidebar({
 		null,
 	);
 	const [settingsOpen, setSettingsOpen] = useState(false);
-	const [settingsError, setSettingsError] = useState<string | null>(null);
-	const settingsPanelRef = useRef<HTMLFormElement>(null);
+	const settingsPanelRef = useRef<HTMLElement>(null);
 	const settingsTriggerRef = useRef<HTMLButtonElement>(null);
 	const settingsCloseRef = useRef<HTMLButtonElement>(null);
 	const [defaultModel, setDefaultModel] = useState("");
 	const [defaultReasoning, setDefaultReasoning] =
-		useState<CommonspaceReasoning>("max");
+		useState<CommonspaceReasoning>(CommonspaceReasoning.Native);
 	const [defaultMaxAgents, setDefaultMaxAgents] = useState(4);
 	const [defaultMemoryThreads, setDefaultMemoryThreads] = useState(12);
 	const [routingProvider, setRoutingProvider] =
-		useState<CommonspaceRoutingProvider>("openai-compatible");
+		useState<ConfiguredRoutingProvider>(
+			CommonspaceRoutingProvider.OpenAiCompatible,
+		);
 	const [routingHarnessAgentId, setRoutingHarnessAgentId] = useState("");
 	const [routingModel, setRoutingModel] = useState("");
 	const [routingBaseUrl, setRoutingBaseUrl] = useState(
@@ -481,16 +440,32 @@ export function CommonspaceSidebar({
 	const [jevApiKey, setJevApiKey] = useState("");
 	const [clearJevApiKey, setClearJevApiKey] = useState(false);
 	const [clearRoutingApiKey, setClearRoutingApiKey] = useState(false);
-	const [savingInference, setSavingInference] = useState(false);
+	const [runSettingsSave, setRunSettingsSave] = useState<SettingsOperation>({
+		status: SettingsOperationStatus.Idle,
+	});
+	const [inferenceSave, setInferenceSave] = useState<SettingsOperation>({
+		status: SettingsOperationStatus.Idle,
+	});
+	const savingInference =
+		inferenceSave.status === SettingsOperationStatus.Running;
+	const settingsError =
+		inferenceSave.status === SettingsOperationStatus.Failed
+			? inferenceSave.message
+			: null;
 	const [searchOpen, setSearchOpen] = useState(false);
 	const [diagnostics, setDiagnostics] = useState<CommonspaceDiagnostics | null>(
 		null,
 	);
 	const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
-	const [inferenceChecking, setInferenceChecking] = useState(false);
-	const [inferenceCheckStatus, setInferenceCheckStatus] = useState<
-		string | null
-	>(null);
+	const [inferenceCheck, setInferenceCheck] = useState<SettingsOperation>({
+		status: SettingsOperationStatus.Idle,
+	});
+	const inferenceChecking =
+		inferenceCheck.status === SettingsOperationStatus.Running;
+	const inferenceCheckStatus =
+		inferenceCheck.status === SettingsOperationStatus.Idle
+			? null
+			: inferenceCheck.message;
 	const [importArchive, setImportArchive] =
 		useState<WorkspaceImportCandidate | null>(null);
 	const [importMappings, setImportMappings] = useState<
@@ -501,11 +476,17 @@ export function CommonspaceSidebar({
 		useState<CommonspaceNotificationSettings>({
 			...DEFAULT_COMMONSPACE_NOTIFICATION_SETTINGS,
 		});
-	const [savingNotifications, setSavingNotifications] = useState(false);
-	const [notificationsSaved, setNotificationsSaved] = useState(false);
-	const [notificationSaveError, setNotificationSaveError] = useState<
-		string | null
-	>(null);
+	const [notificationSave, setNotificationSave] = useState<SettingsOperation>({
+		status: SettingsOperationStatus.Idle,
+	});
+	const savingNotifications =
+		notificationSave.status === SettingsOperationStatus.Running;
+	const notificationsSaved =
+		notificationSave.status === SettingsOperationStatus.Succeeded;
+	const notificationSaveError =
+		notificationSave.status === SettingsOperationStatus.Failed
+			? notificationSave.message
+			: null;
 	const [verifyingNotifications, setVerifyingNotifications] = useState(false);
 	const [notificationVerification, setNotificationVerification] =
 		useState<CommonspaceNotificationVerification | null>(null);
@@ -579,6 +560,21 @@ export function CommonspaceSidebar({
 	}, [onOpenSearch]);
 	const bootstrap = snapshot.bootstrap;
 	const state = bootstrap?.state;
+	const savedRouting = bootstrap?.routing;
+	const configuredRouting =
+		savedRouting?.provider === CommonspaceRoutingProvider.Unconfigured
+			? undefined
+			: savedRouting;
+	const savedApiRouting =
+		configuredRouting?.provider === CommonspaceRoutingProvider.OpenAiCompatible
+			? configuredRouting
+			: undefined;
+	const savedJev = configuredRouting?.jev;
+	const savedApiKeyAppliesToDraft =
+		savedApiRouting !== undefined &&
+		URL.canParse(routingBaseUrl) &&
+		new URL(routingBaseUrl).toString().replace(/\/$/u, "") ===
+			savedApiRouting.baseUrl;
 	const inboxItems = useMemo(
 		() => (state === undefined ? [] : deriveCommonspaceInboxItems(state)),
 		[state],
@@ -1002,73 +998,126 @@ export function CommonspaceSidebar({
 	};
 
 	const routingUpdateRequest = (): UpdateRoutingConfigurationRequest => {
-		const request: UpdateRoutingConfigurationRequest =
-			routingProvider === "harness"
-				? { provider: "harness", harnessAgentId: routingHarnessAgentId }
-				: {
-						provider: "openai-compatible",
-						model: routingModel,
-						baseUrl: routingBaseUrl,
-					};
-		if (request.provider === "openai-compatible") {
-			if (clearRoutingApiKey) request.apiKey = null;
-			else if (routingApiKey.trim()) request.apiKey = routingApiKey;
+		const jev = jevEnabled
+			? {
+					model: jevModel,
+					...(clearJevApiKey
+						? { apiKey: null }
+						: jevApiKey.trim()
+							? { apiKey: jevApiKey }
+							: {}),
+				}
+			: null;
+		switch (routingProvider) {
+			case CommonspaceRoutingProvider.Harness:
+				return {
+					provider: routingProvider,
+					harnessAgentId: routingHarnessAgentId,
+					jev,
+				};
+			case CommonspaceRoutingProvider.OpenAiCompatible:
+				return {
+					provider: routingProvider,
+					model: routingModel,
+					baseUrl: routingBaseUrl,
+					jev,
+					...(clearRoutingApiKey
+						? { apiKey: null }
+						: routingApiKey.trim()
+							? { apiKey: routingApiKey }
+							: {}),
+				};
+			default: {
+				const unhandled: never = routingProvider;
+				throw new Error(`Unsupported routing provider: ${unhandled}`);
+			}
 		}
-		request.jev = jevEnabled ? { model: jevModel } : null;
-		if (request.jev !== null) {
-			if (clearJevApiKey) request.jev.apiKey = null;
-			else if (jevApiKey.trim()) request.jev.apiKey = jevApiKey;
-		}
-		return request;
 	};
 
-	const saveDefaults = async (event: FormEvent) => {
+	const saveInferenceSettings = async (event: FormEvent) => {
 		event.preventDefault();
 		if (savingInference) return;
-		const request = {
-			routing: routingUpdateRequest(),
-			defaults: {
-				model: defaultModel || null,
+		setInferenceSave({
+			status: SettingsOperationStatus.Running,
+			message: "Saving inference settings…",
+		});
+		try {
+			await store.updateRoutingConfiguration(routingUpdateRequest());
+			setInferenceSave({
+				status: SettingsOperationStatus.Succeeded,
+				message: "Inference settings saved.",
+			});
+			setSettingsOpen(false);
+		} catch (error) {
+			setInferenceSave({
+				status: SettingsOperationStatus.Failed,
+				message: error instanceof Error ? error.message : String(error),
+			});
+		}
+	};
+
+	const saveRunSettings = async () => {
+		if (runSettingsSave.status === SettingsOperationStatus.Running) return;
+		if (
+			!Number.isInteger(defaultMaxAgents) ||
+			defaultMaxAgents < 1 ||
+			defaultMaxAgents > 8 ||
+			!Number.isInteger(defaultMemoryThreads) ||
+			defaultMemoryThreads < 1 ||
+			defaultMemoryThreads > 50
+		) {
+			setRunSettingsSave({
+				status: SettingsOperationStatus.Failed,
+				message:
+					"Max agents must be a whole number from 1 to 8; memory threads must be a whole number from 1 to 50.",
+			});
+			return;
+		}
+		setRunSettingsSave({
+			status: SettingsOperationStatus.Running,
+			message: "Saving agent run settings…",
+		});
+		try {
+			await store.mutate({
+				action: "set-defaults",
+				model: defaultModel.trim() || null,
 				reasoning: defaultReasoning,
 				maxAgentsPerTurn: defaultMaxAgents,
 				memoryThreads: defaultMemoryThreads,
-			},
-		};
-		setSavingInference(true);
-		setSettingsError(null);
-		try {
-			if (typeof store.updateWorkspaceSettings === "function") {
-				await store.updateWorkspaceSettings(request);
-			} else {
-				await store.updateRoutingConfiguration(request.routing);
-				await store.mutate({ action: "set-defaults", ...request.defaults });
-			}
-			setSettingsOpen(false);
+			});
+			setRunSettingsSave({
+				status: SettingsOperationStatus.Succeeded,
+				message: "Agent run settings saved.",
+			});
 		} catch (error) {
-			setSettingsError(error instanceof Error ? error.message : String(error));
-		} finally {
-			setSavingInference(false);
+			setRunSettingsSave({
+				status: SettingsOperationStatus.Failed,
+				message: error instanceof Error ? error.message : String(error),
+			});
 		}
 	};
 
 	const saveNotifications = async () => {
 		if (savingNotifications) return;
-		setSavingNotifications(true);
-		setNotificationsSaved(false);
-		setNotificationSaveError(null);
+		setNotificationSave({
+			status: SettingsOperationStatus.Running,
+			message: "Saving notification settings…",
+		});
 		setNotificationVerification(null);
 		try {
 			await store.mutate({
 				action: "set-notifications",
 				notifications: notificationSettings,
 			});
-			setNotificationsSaved(true);
+			setNotificationSave({
+				status: SettingsOperationStatus.Succeeded,
+				message: "Notification settings saved.",
+			});
 		} catch (error) {
-			setNotificationSaveError(
-				error instanceof Error ? error.message : String(error),
-			);
-		} finally {
-			setSavingNotifications(false);
+			setNotificationSave({
+				status: SettingsOperationStatus.Failed,
+				message: error instanceof Error ? error.message : String(error),
+			});
 		}
 	};
 
@@ -1101,19 +1150,23 @@ export function CommonspaceSidebar({
 
 	const checkInferenceConfiguration = async () => {
 		if (inferenceChecking) return;
-		setInferenceChecking(true);
-		setInferenceCheckStatus("Checking configuration…");
+		setInferenceCheck({
+			status: SettingsOperationStatus.Running,
+			message: "Checking saved configuration…",
+		});
 		try {
 			const result = await store.diagnostics();
-			setInferenceCheckStatus(
-				result.inference.configured
-					? `Configuration verified · ${result.inference.provider}`
-					: "Configuration needs attention",
-			);
+			setInferenceCheck({
+				status: SettingsOperationStatus.Succeeded,
+				message: result.inference.configured
+					? "Saved configuration is present. Provider connectivity has not been tested."
+					: "Saved configuration needs attention. Provider connectivity has not been tested.",
+			});
 		} catch {
-			setInferenceCheckStatus("Configuration check failed");
-		} finally {
-			setInferenceChecking(false);
+			setInferenceCheck({
+				status: SettingsOperationStatus.Failed,
+				message: "Configuration check failed",
+			});
 		}
 	};
 
@@ -1227,7 +1280,7 @@ export function CommonspaceSidebar({
 
 	return (
 		<section
-			className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground"
+			className="flex h-full min-h-0 flex-col overflow-hidden border-r bg-sidebar text-sidebar-foreground"
 			aria-label="Commonspace browser"
 		>
 			{onOpenSearch === undefined && (
@@ -1235,8 +1288,8 @@ export function CommonspaceSidebar({
 					<div className="grid min-h-11 grid-cols-[28px_minmax(0,1fr)_24px] items-center gap-2 px-2 text-left text-sidebar-foreground">
 						<CommonspaceLogo decorative className="size-6" />
 						<span className="min-w-0">
-							<strong className="block truncate text-[13px]">Workspace</strong>
-							<small className="block truncate text-xs text-sidebar-foreground/60">
+							<strong className="block truncate text-sm">Workspace</strong>
+							<small className="block truncate text-xs text-muted-foreground">
 								Commonspace
 							</small>
 						</span>
@@ -1268,14 +1321,12 @@ export function CommonspaceSidebar({
 			)}
 
 			{snapshot.loading && bootstrap === null && (
-				<div className="p-4 text-xs text-sidebar-foreground/60">
-					Loading agents…
-				</div>
+				<div className="p-4 text-xs text-muted-foreground">Loading agents…</div>
 			)}
 			{settingsOpen &&
 				state !== undefined &&
 				createPortal(
-					<form
+					<section
 						ref={settingsPanelRef}
 						aria-label="Workspace settings"
 						onKeyDown={(event) => {
@@ -1284,10 +1335,7 @@ export function CommonspaceSidebar({
 								setSettingsOpen(false);
 							}
 						}}
-						className="fixed top-[52px] right-0 bottom-0 left-[260px] z-40 flex min-h-0 flex-col overflow-hidden bg-background text-foreground max-[780px]:left-0"
-						onSubmit={(event) => {
-							void saveDefaults(event);
-						}}
+						className="fixed top-[64px] right-0 bottom-0 left-[var(--navigation-width)] z-40 flex min-h-0 flex-col overflow-hidden bg-background text-foreground max-[780px]:left-0"
 					>
 						<WorkspaceHeader
 							title="Workspace settings"
@@ -1307,873 +1355,907 @@ export function CommonspaceSidebar({
 								</button>
 							}
 						/>
-						<div className="min-h-0 flex-1 overflow-y-auto">
-							<div className="mx-auto grid w-full max-w-[860px] gap-0 px-0 py-12 pb-20 max-[920px]:px-6 max-[640px]:px-4 [&_button:not([data-slot])]:min-h-9 [&_button:not([data-slot])]:rounded-sm [&_button:not([data-slot])]:border [&_button:not([data-slot])]:px-3 [&_fieldset]:min-w-0 [&_input:not([type=checkbox]):not([type=radio])]:min-h-9 [&_input:not([type=checkbox]):not([type=radio])]:w-full [&_input:not([type=checkbox]):not([type=radio])]:rounded-sm [&_input:not([type=checkbox]):not([type=radio])]:border [&_input:not([type=checkbox]):not([type=radio])]:bg-background [&_input:not([type=checkbox]):not([type=radio])]:px-3 [&_label]:grid [&_label]:gap-1.5 [&_select]:min-h-9 [&_select]:w-full [&_select]:rounded-sm [&_select]:border [&_select]:bg-background  [&_textarea]:min-h-24 [&_textarea]:w-full [&_textarea]:rounded-md [&_textarea]:border [&_textarea]:bg-background [&_textarea]:p-3">
-								<section
-									className="mb-10 rounded-md border bg-card p-5"
-									aria-labelledby="workspace-appearance-title"
-								>
-									<div className="flex items-start justify-between gap-6 max-[640px]:grid">
-										<div>
-											<span className="font-mono text-xs tracking-[0.06em] text-primary">
-												Appearance
-											</span>
-											<h2
-												id="workspace-appearance-title"
-												className="mt-2 font-heading text-2xl font-bold tracking-[-0.02em]"
-											>
-												Choose your color mode
+						{snapshot.error !== null && (
+							<WorkspaceErrorNotice
+								error={snapshot.error}
+								loading={snapshot.loading}
+								onDismiss={() => store.dismissError()}
+								onRefresh={() => {
+									void store.refresh();
+								}}
+							/>
+						)}
+						<WorkspaceSettingsLayout
+							sections={{
+								appearance: (
+									<AppearanceSettings
+										value={colorMode}
+										{...(onSetColorMode === undefined
+											? {}
+											: { onChange: onSetColorMode })}
+									/>
+								),
+								intelligence: (
+									<>
+										<div className="relative pb-5">
+											<h2 className="max-w-[700px] font-heading text-xl leading-tight font-semibold">
+												Routing and context
 											</h2>
+											<span className="mt-2 block text-xs text-muted-foreground">
+												Saved router:{" "}
+												{savedJev?.enabled === true
+													? "Jev"
+													: bootstrap?.routing?.provider ===
+															CommonspaceRoutingProvider.Harness
+														? "Native agent"
+														: bootstrap?.routing?.provider ===
+																CommonspaceRoutingProvider.OpenAiCompatible
+															? "OpenAI-compatible API"
+															: "Not configured"}
+											</span>
+											<p className="mt-2 max-w-[780px] text-sm leading-6 text-muted-foreground">
+												Choose who receives messages and how shared context is
+												summarized.
+											</p>
 										</div>
-										<span className="inline-flex min-h-[30px] shrink-0 items-center rounded-full border bg-muted px-2.5 font-mono text-xs text-muted-foreground">
-											{colorMode === "dark"
-												? "Dark mode"
-												: colorMode === "system"
-													? "System mode"
-													: "Light mode"}
-										</span>
-									</div>
-									<fieldset className="mt-5 grid grid-cols-3 gap-3 max-[640px]:grid-cols-1">
-										<legend className="sr-only">Color mode</legend>
-										<label
-											className={cn(
-												"grid min-h-16 cursor-pointer gap-1 rounded-sm border bg-background px-4 py-2 text-left hover:bg-muted has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring",
-												colorMode === "light" && "border-primary bg-primary/10",
-											)}
+										<form
+											aria-label="Inference settings"
+											onSubmit={(event) => {
+												void saveInferenceSettings(event);
+											}}
 										>
-											<input
-												className="sr-only"
-												type="radio"
-												name="commonspace-color-mode"
-												value="light"
-												checked={colorMode === "light"}
-												onChange={() => {
-													onSetColorMode?.("light");
-												}}
-											/>
-											<strong>Light</strong>
-											<span className="text-xs font-normal text-muted-foreground">
-												Bright canvas and soft neutral surfaces
-											</span>
-										</label>
-										<label
-											className={cn(
-												"grid min-h-16 cursor-pointer gap-1 rounded-sm border bg-background px-4 py-2 text-left hover:bg-muted has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring",
-												colorMode === "dark" && "border-primary bg-primary/10",
-											)}
-										>
-											<input
-												className="sr-only"
-												type="radio"
-												name="commonspace-color-mode"
-												value="dark"
-												checked={colorMode === "dark"}
-												onChange={() => {
-													onSetColorMode?.("dark");
-												}}
-											/>
-											<strong>Dark</strong>
-											<span className="text-xs font-normal text-muted-foreground">
-												Low-glare canvas and deeper surfaces
-											</span>
-										</label>
-										<label
-											className={cn(
-												"grid min-h-16 cursor-pointer gap-1 rounded-sm border bg-background px-4 py-2 text-left hover:bg-muted has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring",
-												colorMode === "system" &&
-													"border-primary bg-primary/10",
-											)}
-										>
-											<input
-												className="sr-only"
-												type="radio"
-												name="commonspace-color-mode"
-												value="system"
-												checked={colorMode === "system"}
-												onChange={() => {
-													onSetColorMode?.("system");
-												}}
-											/>
-											<strong>System</strong>
-											<span className="text-xs font-normal text-muted-foreground">
-												Follow your operating system preference
-											</span>
-										</label>
-									</fieldset>
-								</section>
-								<div className="relative pb-5">
-									<span className="font-mono text-xs tracking-[0.06em] text-primary">
-										Workspace intelligence
-									</span>
-									<span className="absolute top-0 right-0 inline-flex min-h-[30px] items-center gap-2 rounded-full border px-2.5 font-mono text-xs text-muted-foreground">
-										<i
-											className="size-[7px] rounded-full bg-[var(--status-success)]"
-											aria-hidden="true"
-										/>
-										Configured
-									</span>
-									<h2 className="mt-2 max-w-[700px] font-heading text-[36px] leading-[1.12] font-bold tracking-[-0.025em]">
-										Configure routing and context
-									</h2>
-									<p className="mt-2 max-w-[780px] text-sm leading-6 text-muted-foreground">
-										Choose how Commonspace routes messages and compacts shared
-										context. Native agent profiles keep their own model
-										settings.
-									</p>
-								</div>
-								<section className="pt-2">
-									<SettingsSectionHeading
-										title="Fast routing with Jev"
-										description="Jev chooses participants, Projects, and delivery order from relevant conversation context. Selected agents receive the original message. Text generation handles context compaction."
-									/>
-									<div className="mb-8 grid gap-3 rounded-md border bg-card p-4">
-										<div className="flex items-center justify-between gap-4">
-											<strong className="text-[13px]">
-												Use Jev for routing
-											</strong>
-											<SettingsCheckbox
-												label="Use Jev for routing"
-												checked={jevEnabled}
-												onCheckedChange={setJevEnabled}
-											/>
-										</div>
-										{jevEnabled && (
-											<>
-												<p className="text-xs text-muted-foreground">
-													Sends message text, relevant conversation passages,
-													context notes, and Agent and Project labels to
-													TypeSafe.
-												</p>
-												<label>
-													Jev model
-													<input
-														aria-label="Jev model"
-														required
-														value={jevModel}
-														onChange={(event) =>
-															setJevModel(event.target.value)
-														}
-													/>
-												</label>
-												<label>
-													TypeSafe API key
-													<input
-														aria-label="TypeSafe API key"
-														type="password"
-														autoComplete="new-password"
-														value={jevApiKey}
-														placeholder={
-															bootstrap?.routing?.jev?.apiKeyConfigured
-																? "Configured — leave blank to keep"
-																: "API key or TYPESAFE_API_KEY on the server"
-														}
-														onChange={(event) => {
-															setJevApiKey(event.target.value);
-															setClearJevApiKey(false);
-														}}
-													/>
-												</label>
-												{bootstrap?.routing?.jev?.apiKeyConfigured && (
-													<div className="flex items-center justify-between gap-4">
-														<div>
-															<strong className="text-[13px]">
-																Clear saved TypeSafe API key
-															</strong>
-															<p className="text-xs text-muted-foreground">
-																A key set on the server still applies.
-															</p>
+											<fieldset
+												disabled={savingInference}
+												className="min-w-0 border-0 p-0"
+											>
+												<legend className="sr-only">
+													Inference configuration
+												</legend>
+												{savedRouting?.provider ===
+													CommonspaceRoutingProvider.Unconfigured && (
+													<p
+														role="alert"
+														className="my-4 rounded-md border p-3"
+													>
+														{savedRouting.message}
+													</p>
+												)}
+												<section className="pt-2">
+													<div className="mb-8 grid gap-3">
+														<div className="flex items-center gap-3">
+															<h2 className="text-base font-semibold">
+																Use Jev for routing
+															</h2>
+															<SettingsCheckbox
+																label="Use Jev for routing"
+																checked={jevEnabled}
+																onCheckedChange={setJevEnabled}
+															/>
 														</div>
-														<SettingsCheckbox
-															label="Clear saved TypeSafe API key"
-															checked={clearJevApiKey}
-															onCheckedChange={setClearJevApiKey}
-														/>
+														<p className="text-sm leading-6 text-muted-foreground">
+															Jev selects agents, projects, and delivery order.
+															Each agent receives your original message.
+														</p>
+														<p className="text-xs text-muted-foreground">
+															{jevEnabled
+																? "Save inference settings to apply changes. Disabling Jev keeps its saved key and model. Saving does not test the connection."
+																: "While Jev is off, the provider below handles routing too."}
+														</p>
+														<fieldset
+															disabled={!jevEnabled}
+															hidden={!jevEnabled}
+															className="m-0 grid min-w-0 gap-3 border-0 p-0 disabled:opacity-60 hidden:hidden"
+														>
+															<legend className="sr-only">
+																Jev connection
+															</legend>
+															<p className="text-xs text-muted-foreground">
+																Sends message text, relevant conversation
+																passages, context notes, and Agent and Project
+																labels to TypeSafe.
+															</p>
+															<label>
+																Jev model
+																<input
+																	aria-label="Jev model"
+																	required
+																	value={jevModel}
+																	onChange={(event) =>
+																		setJevModel(event.target.value)
+																	}
+																/>
+															</label>
+															<label>
+																TypeSafe API key
+																<input
+																	aria-label="TypeSafe API key"
+																	type="password"
+																	autoComplete="new-password"
+																	value={jevApiKey}
+																	placeholder={
+																		savedJev?.apiKeySource ===
+																		CredentialSource.Saved
+																			? "Saved key — leave blank to keep"
+																			: savedJev?.apiKeySource ===
+																					CredentialSource.Environment
+																				? "Using TYPESAFE_API_KEY from the server"
+																				: "Enter a TypeSafe API key"
+																	}
+																	onChange={(event) => {
+																		setJevApiKey(event.target.value);
+																		setClearJevApiKey(false);
+																	}}
+																/>
+															</label>
+															{savedJev?.apiKeySource ===
+																CredentialSource.Saved && (
+																<div className="flex items-center justify-between gap-4">
+																	<div>
+																		<strong className="text-sm">
+																			Clear saved TypeSafe API key
+																		</strong>
+																		<p className="text-xs text-muted-foreground">
+																			A key set on the server still applies.
+																		</p>
+																	</div>
+																	<SettingsCheckbox
+																		label="Clear saved TypeSafe API key"
+																		checked={clearJevApiKey}
+																		onCheckedChange={setClearJevApiKey}
+																	/>
+																</div>
+															)}
+														</fieldset>
 													</div>
-												)}
-											</>
-										)}
-									</div>
-									<SettingsSectionHeading
-										title="Routing source"
-										description={
-											jevEnabled
-												? "Choose the text provider for context compaction."
-												: "Choose where Commonspace gets routing and context decisions."
-										}
-									/>
-									<fieldset className="m-0 grid min-w-0 grid-cols-2 gap-3 border-0 p-0 max-[640px]:grid-cols-1">
-										<legend className="sr-only">Routing engine</legend>
-										<label
-											className={cn(
-												"relative grid min-h-[104px] cursor-pointer grid-cols-[20px_minmax(0,1fr)] items-start gap-3 rounded-md border bg-card p-4 text-left transition-colors hover:bg-muted/50 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring",
-												routingProvider === "openai-compatible" &&
-													"border-2 border-primary bg-[color-mix(in_oklch,var(--primary)_3%,var(--background))]",
-											)}
-										>
-											<input
-												className="sr-only"
-												type="radio"
-												name="commonspace-routing-engine"
-												value="openai-compatible"
-												checked={routingProvider === "openai-compatible"}
-												onChange={() => {
-													setRoutingProvider("openai-compatible");
-													setRoutingHarnessAgentId("");
-												}}
-											/>
-											<span
-												className={cn(
-													"mt-0.5 size-[18px] rounded-full border before:m-auto before:block before:size-2 before:translate-y-1 before:rounded-full",
-													routingProvider === "openai-compatible" &&
-														"border-primary before:bg-primary",
-												)}
-												aria-hidden="true"
-											/>
-											<span>
-												<strong className="block text-[13px]">
-													OpenAI-compatible API
-												</strong>
-												<small className="mt-2 block text-xs text-muted-foreground">
-													Connect any compatible local or remote provider.
-												</small>
-											</span>
-											{routingProvider === "openai-compatible" && (
-												<em className="absolute top-4 right-4 text-xs font-semibold not-italic text-primary">
-													Selected
-												</em>
-											)}
-										</label>
-										<label
-											className={cn(
-												"relative grid min-h-[104px] cursor-pointer grid-cols-[20px_minmax(0,1fr)] items-start gap-3 rounded-md border bg-card p-4 text-left transition-colors hover:bg-muted/50 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring",
-												routingProvider === "harness" &&
-													"border-2 border-primary bg-[color-mix(in_oklch,var(--primary)_3%,var(--background))]",
-											)}
-										>
-											<input
-												className="sr-only"
-												type="radio"
-												name="commonspace-routing-engine"
-												value="harness"
-												checked={routingProvider === "harness"}
-												onChange={() => {
-													setRoutingProvider("harness");
-													if (routingHarnessAgentId === "")
-														setRoutingHarnessAgentId(agents[0]?.id ?? "");
-												}}
-											/>
-											<span
-												className={cn(
-													"mt-0.5 size-[18px] rounded-full border before:m-auto before:block before:size-2 before:translate-y-1 before:rounded-full",
-													routingProvider === "harness" &&
-														"border-primary before:bg-primary",
-												)}
-												aria-hidden="true"
-											/>
-											<span>
-												<strong className="block text-[13px]">
-													Native agent
-												</strong>
-												<small className="mt-2 block text-xs text-muted-foreground">
-													Use one of your installed harness profiles.
-												</small>
-											</span>
-											{routingProvider === "harness" && (
-												<em className="absolute top-4 right-4 text-xs font-semibold not-italic text-primary">
-													Selected
-												</em>
-											)}
-										</label>
-									</fieldset>
-									{routingProvider === "harness" && (
-										<fieldset className="mt-3 grid gap-2 rounded-md border bg-muted/50 p-3">
-											<legend className="sr-only">Routing agent</legend>
-											{agents.map((agent) => (
-												<label
-													key={agent.id}
-													className={cn(
-														"grid min-h-[58px] cursor-pointer grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 rounded-sm border bg-background px-4 text-left transition-colors hover:bg-muted/50 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring",
-														routingHarnessAgentId === agent.id &&
-															"border-primary",
-													)}
-												>
-													<input
-														className="sr-only"
-														type="radio"
-														name="commonspace-routing-agent"
-														value={agent.id}
-														checked={routingHarnessAgentId === agent.id}
-														onChange={() => {
-															setRoutingHarnessAgentId(agent.id);
-														}}
+													<SettingsSectionHeading
+														title={
+															jevEnabled
+																? "Context compaction provider"
+																: "Routing and context provider"
+														}
+														description={
+															jevEnabled
+																? "Choose the text provider for context compaction."
+																: "Choose where Commonspace gets routing and context decisions."
+														}
 													/>
-													<AgentAvatar agent={agent} />
-													<span>
-														<strong className="block text-[13px]">
-															{agent.displayName}
-														</strong>
-														<small className="text-xs text-muted-foreground">
-															{runtimeLabel(agent.adapter)} ·{" "}
-															{agent.model ?? "harness default"}
-														</small>
-													</span>
-													{routingHarnessAgentId === agent.id && (
-														<span className="text-xs font-semibold text-primary">
-															Routing agent
-														</span>
+													<fieldset className="m-0 grid min-w-0 grid-cols-2 gap-x-6 gap-y-1 border-0 p-0 @max-[640px]/settings:grid-cols-1">
+														<legend className="sr-only">Routing engine</legend>
+														<label
+															className={cn(
+																"relative grid min-h-14 cursor-pointer grid-cols-[20px_minmax(0,1fr)] items-start gap-3 rounded-md py-3 text-left has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring",
+															)}
+														>
+															<input
+																className="sr-only"
+																type="radio"
+																name="commonspace-routing-engine"
+																value="openai-compatible"
+																checked={
+																	routingProvider ===
+																	CommonspaceRoutingProvider.OpenAiCompatible
+																}
+																onChange={() => {
+																	setRoutingProvider(
+																		CommonspaceRoutingProvider.OpenAiCompatible,
+																	);
+																	setRoutingHarnessAgentId("");
+																}}
+															/>
+															<span
+																className={cn(
+																	"mt-0.5 size-[18px] rounded-full border before:m-auto before:block before:size-2 before:translate-y-1 before:rounded-full",
+																	routingProvider ===
+																		CommonspaceRoutingProvider.OpenAiCompatible &&
+																		"border-primary before:bg-primary",
+																)}
+																aria-hidden="true"
+															/>
+															<span>
+																<strong className="block text-sm">
+																	OpenAI-compatible API
+																</strong>
+																<small className="mt-2 block text-xs text-muted-foreground">
+																	Connect any compatible local or remote
+																	provider.
+																</small>
+															</span>
+														</label>
+														<label
+															className={cn(
+																"relative grid min-h-14 cursor-pointer grid-cols-[20px_minmax(0,1fr)] items-start gap-3 rounded-md py-3 text-left has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring",
+															)}
+														>
+															<input
+																className="sr-only"
+																type="radio"
+																name="commonspace-routing-engine"
+																value="harness"
+																checked={
+																	routingProvider ===
+																	CommonspaceRoutingProvider.Harness
+																}
+																onChange={() => {
+																	setRoutingProvider(
+																		CommonspaceRoutingProvider.Harness,
+																	);
+																	if (routingHarnessAgentId === "")
+																		setRoutingHarnessAgentId(
+																			agents[0]?.id ?? "",
+																		);
+																}}
+															/>
+															<span
+																className={cn(
+																	"mt-0.5 size-[18px] rounded-full border before:m-auto before:block before:size-2 before:translate-y-1 before:rounded-full",
+																	routingProvider ===
+																		CommonspaceRoutingProvider.Harness &&
+																		"border-primary before:bg-primary",
+																)}
+																aria-hidden="true"
+															/>
+															<span>
+																<strong className="block text-sm">
+																	Native agent
+																</strong>
+																<small className="mt-2 block text-xs text-muted-foreground">
+																	Use one of your installed harness profiles.
+																</small>
+															</span>
+														</label>
+													</fieldset>
+													{routingProvider ===
+														CommonspaceRoutingProvider.Harness && (
+														<fieldset className="mt-3 grid border-t pt-2">
+															<legend className="sr-only">Routing agent</legend>
+															{agents.map((agent) => (
+																<label
+																	key={agent.id}
+																	className={cn(
+																		"grid min-h-[58px] cursor-pointer grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 rounded-sm px-1 text-left has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring",
+																		routingHarnessAgentId === agent.id &&
+																			"border-primary",
+																	)}
+																>
+																	<input
+																		className="sr-only"
+																		type="radio"
+																		name="commonspace-routing-agent"
+																		value={agent.id}
+																		checked={routingHarnessAgentId === agent.id}
+																		onChange={() => {
+																			setRoutingHarnessAgentId(agent.id);
+																		}}
+																	/>
+																	<AgentAvatar agent={agent} />
+																	<span>
+																		<strong className="block text-sm">
+																			{agent.displayName}
+																		</strong>
+																		<small className="text-xs text-muted-foreground">
+																			{runtimeLabel(agent.adapter)} ·{" "}
+																			{agent.model ?? "harness default"}
+																		</small>
+																	</span>
+																	{routingHarnessAgentId === agent.id && (
+																		<span className="text-xs font-semibold text-primary">
+																			Routing agent
+																		</span>
+																	)}
+																</label>
+															))}
+														</fieldset>
 													)}
-												</label>
-											))}
-										</fieldset>
-									)}
-								</section>
+												</section>
 
-								{routingProvider === "openai-compatible" && (
-									<section className="mt-8 border-t pt-8">
-										<SettingsSectionHeading
-											title="Connection"
-											description="Credentials stay on this device and are never included in public workspace configuration."
-										/>
-										<div className="overflow-hidden rounded-md border bg-card">
-											<div className="grid grid-cols-2 gap-3 p-4 max-[640px]:grid-cols-1">
+												{routingProvider ===
+													CommonspaceRoutingProvider.OpenAiCompatible && (
+													<section className="mt-8 border-t pt-8">
+														<SettingsSectionHeading
+															title="Connection"
+															description="Credentials stay on this device and are never included in public workspace configuration."
+														/>
+														<div className="overflow-hidden rounded-md border bg-card">
+															<div className="grid grid-cols-2 gap-3 p-4 max-[640px]:grid-cols-1">
+																<label>
+																	<span className="text-xs font-semibold text-muted-foreground">
+																		Model ID
+																	</span>
+																	<input
+																		aria-label="Routing model"
+																		placeholder="gpt-4.1-mini"
+																		value={routingModel}
+																		onChange={(event) => {
+																			setRoutingModel(event.target.value);
+																		}}
+																	/>
+																</label>
+																<label>
+																	<span className="text-xs font-semibold text-muted-foreground">
+																		API base URL
+																	</span>
+																	<input
+																		aria-label="Routing API base URL"
+																		type="url"
+																		value={routingBaseUrl}
+																		onChange={(event) => {
+																			setRoutingBaseUrl(event.target.value);
+																		}}
+																	/>
+																</label>
+															</div>
+															<label className="border-t p-4">
+																<span className="text-xs font-semibold text-muted-foreground">
+																	API key
+																</span>
+																<input
+																	aria-label="Routing API key"
+																	type="password"
+																	autoComplete="new-password"
+																	placeholder={
+																		savedApiKeyAppliesToDraft &&
+																		savedApiRouting?.apiKeySource ===
+																			CredentialSource.Saved
+																			? "Saved — leave blank to keep"
+																			: savedApiKeyAppliesToDraft &&
+																					savedApiRouting?.apiKeySource ===
+																						CredentialSource.Environment
+																				? "Using OPENAI_API_KEY from the server"
+																				: "Optional for providers without authentication"
+																	}
+																	value={routingApiKey}
+																	onChange={(event) => {
+																		setRoutingApiKey(event.target.value);
+																		setClearRoutingApiKey(false);
+																	}}
+																/>
+																<p className="mt-1 text-xs text-muted-foreground">
+																	Changing the API base URL clears its saved
+																	key. Enter the new provider’s key before
+																	saving if it requires authentication.
+																</p>
+															</label>
+															{savedApiKeyAppliesToDraft &&
+																savedApiRouting?.apiKeySource ===
+																	CredentialSource.Saved && (
+																	<div className="flex min-h-[62px] items-center justify-between gap-4 border-t px-4 py-3">
+																		<div>
+																			<strong className="block text-sm">
+																				Clear saved API key
+																			</strong>
+																			<p className="mt-1 text-xs text-muted-foreground">
+																				Removes the stored credential when you
+																				save.
+																			</p>
+																		</div>
+																		<SettingsCheckbox
+																			label="Clear routing API key"
+																			checked={clearRoutingApiKey}
+																			onCheckedChange={setClearRoutingApiKey}
+																		/>
+																	</div>
+																)}
+															<div className="flex min-h-[76px] items-center justify-between gap-4 border-t bg-muted/30 p-4 max-[640px]:grid">
+																<div>
+																	<strong className="block text-sm">
+																		Used by Commonspace
+																	</strong>
+																	<p className="mt-1 text-xs text-muted-foreground">
+																		{jevEnabled
+																			? "Context compaction · workspace utilities"
+																			: "Message routing · context compaction · workspace utilities"}
+																	</p>
+																</div>
+																<button
+																	type="button"
+																	disabled={inferenceChecking}
+																	onClick={() => {
+																		void checkInferenceConfiguration();
+																	}}
+																>
+																	{inferenceChecking
+																		? "Checking…"
+																		: "Check saved configuration"}
+																</button>
+															</div>
+															{inferenceCheckStatus !== null && (
+																<p
+																	className="border-t px-4 py-3 text-xs text-muted-foreground"
+																	role="status"
+																	aria-live="polite"
+																	aria-label="Inference configuration status"
+																>
+																	{inferenceCheckStatus}
+																</p>
+															)}
+														</div>
+													</section>
+												)}
+
+												{settingsError !== null && (
+													<p
+														role="alert"
+														className="mt-4 rounded-md border border-destructive/30 bg-muted p-3 text-sm text-destructive"
+													>
+														{settingsError}
+													</p>
+												)}
+												<div className="mt-6 flex items-center justify-between gap-6 border-t pt-4 max-[640px]:grid">
+													<p className="text-xs leading-5 text-muted-foreground">
+														Saves only routing and context-provider settings.
+														Agent run defaults have their own save button.
+													</p>
+													<button
+														type="submit"
+														className="shrink-0 border-primary bg-primary font-semibold text-primary-foreground hover:bg-[color-mix(in_srgb,var(--primary)_88%,black)] disabled:cursor-wait disabled:opacity-60"
+														disabled={savingInference}
+													>
+														{savingInference
+															? "Saving inference…"
+															: "Save inference settings"}
+													</button>
+												</div>
+											</fieldset>
+										</form>
+									</>
+								),
+								runs: (
+									<form
+										aria-label="Agent run settings"
+										onSubmit={(event) => {
+											event.preventDefault();
+											void saveRunSettings();
+										}}
+									>
+										<fieldset
+											disabled={
+												runSettingsSave.status ===
+												SettingsOperationStatus.Running
+											}
+										>
+											<legend className="sr-only">
+												Workspace agent run settings
+											</legend>
+											<SettingsSectionHeading
+												title="Workspace agent run settings"
+												description="Overrides apply to Channel and DM replies. Unsupported overrides fail before the prompt is sent; choose native session settings to leave each runtime in control. Existing sessions retain their native settings."
+											/>
+											<div className="grid grid-cols-2 gap-4 max-[640px]:grid-cols-1">
 												<label>
 													<span className="text-xs font-semibold text-muted-foreground">
-														Model ID
+														Workspace model
 													</span>
 													<input
-														aria-label="Routing model"
-														placeholder="gpt-4.1-mini"
-														value={routingModel}
+														aria-label="Workspace model"
+														list="commonspace-models"
+														placeholder="Use native session settings"
+														value={defaultModel}
 														onChange={(event) => {
-															setRoutingModel(event.target.value);
+															setDefaultModel(event.target.value);
+															setRunSettingsSave({
+																status: SettingsOperationStatus.Idle,
+															});
+														}}
+													/>
+												</label>
+												<datalist id="commonspace-models">
+													{models.map((model) => (
+														<option key={model} value={model} />
+													))}
+												</datalist>
+												<label htmlFor="workspace-reasoning">
+													<span className="text-xs font-semibold text-muted-foreground">
+														Reasoning
+													</span>
+													<NativeSelect
+														id="workspace-reasoning"
+														aria-label="Workspace reasoning"
+														value={defaultReasoning}
+														onChange={(event) => {
+															if (isCommonspaceReasoning(event.target.value))
+																setDefaultReasoning(event.target.value);
+															setRunSettingsSave({
+																status: SettingsOperationStatus.Idle,
+															});
+														}}
+													>
+														{COMMONSPACE_REASONING_VALUES.map((value) => (
+															<option key={value} value={value}>
+																{value === CommonspaceReasoning.Native
+																	? "Use native session settings"
+																	: value}
+															</option>
+														))}
+													</NativeSelect>
+												</label>
+												<label>
+													<span className="text-xs font-semibold text-muted-foreground">
+														Max agents per turn
+													</span>
+													<input
+														aria-label="Default max agents"
+														type="number"
+														min="1"
+														max="8"
+														value={defaultMaxAgents}
+														onChange={(event) => {
+															setDefaultMaxAgents(Number(event.target.value));
+															setRunSettingsSave({
+																status: SettingsOperationStatus.Idle,
+															});
 														}}
 													/>
 												</label>
 												<label>
 													<span className="text-xs font-semibold text-muted-foreground">
-														API base URL
+														Memory thread window
 													</span>
 													<input
-														aria-label="Routing API base URL"
-														type="url"
-														value={routingBaseUrl}
+														aria-label="Default memory threads"
+														type="number"
+														min="1"
+														max="50"
+														value={defaultMemoryThreads}
 														onChange={(event) => {
-															setRoutingBaseUrl(event.target.value);
+															setDefaultMemoryThreads(
+																Number(event.target.value),
+															);
+															setRunSettingsSave({
+																status: SettingsOperationStatus.Idle,
+															});
 														}}
 													/>
 												</label>
 											</div>
-											<label className="border-t p-4">
-												<span className="text-xs font-semibold text-muted-foreground">
-													API key
-												</span>
-												<input
-													aria-label="Routing API key"
-													type="password"
-													autoComplete="new-password"
-													placeholder={
-														bootstrap?.routing?.apiKeyConfigured === true
-															? "Saved — leave blank to keep"
-															: "Optional for local compatible APIs"
-													}
-													value={routingApiKey}
-													onChange={(event) => {
-														setRoutingApiKey(event.target.value);
-														setClearRoutingApiKey(false);
+										</fieldset>
+										<div className="mt-3 flex items-center gap-3">
+											<button
+												type="submit"
+												disabled={
+													runSettingsSave.status ===
+													SettingsOperationStatus.Running
+												}
+											>
+												{" "}
+												{runSettingsSave.status ===
+												SettingsOperationStatus.Running
+													? "Saving run settings…"
+													: "Save agent run settings"}
+											</button>
+											{runSettingsSave.status ===
+												SettingsOperationStatus.Succeeded && (
+												<p role="status">Agent run settings saved.</p>
+											)}
+											{runSettingsSave.status ===
+												SettingsOperationStatus.Failed && (
+												<p role="alert">{runSettingsSave.message}</p>
+											)}
+										</div>
+									</form>
+								),
+								notifications: (
+									<fieldset className="mt-8 border-t pt-8">
+										<legend className="sr-only">OS notifications</legend>
+										<SettingsSectionHeading
+											title="OS notifications"
+											description="Choose which durable Inbox events also appear as native alerts on this Mac."
+										/>
+										<div className="overflow-hidden rounded-md border bg-card">
+											<div className="flex min-h-[80px] items-center justify-between gap-6 bg-muted/20 px-4 py-3">
+												<div>
+													<strong className="block text-sm">
+														Allow native notifications
+													</strong>
+													<p className="mt-1 text-xs leading-5 text-muted-foreground">
+														Show selected Inbox events as macOS alerts. Inbox
+														delivery is always preserved.
+													</p>
+												</div>
+												<SettingsSwitch
+													label="Allow native notifications"
+													disabled={savingNotifications}
+													checked={notificationSettings.enabled}
+													onCheckedChange={(enabled) => {
+														setNotificationSave({
+															status: SettingsOperationStatus.Idle,
+														});
+														setNotificationSettings((current) => ({
+															...current,
+															enabled,
+														}));
 													}}
 												/>
-											</label>
-											{bootstrap?.routing?.apiKeyConfigured === true && (
-												<div className="flex min-h-[62px] items-center justify-between gap-4 border-t px-4 py-3">
-													<div>
-														<strong className="block text-[13px]">
-															Clear saved API key
-														</strong>
-														<p className="mt-1 text-xs text-muted-foreground">
-															Removes the stored credential when you save.
-														</p>
+											</div>
+											{NOTIFICATION_OPTIONS.map(
+												([key, label, description, ariaLabel]) => (
+													<div
+														key={key}
+														className={cn(
+															"flex min-h-[68px] items-center justify-between gap-6 border-t px-4 py-3 transition-colors",
+															!notificationSettings.enabled && "bg-muted/20",
+														)}
+													>
+														<div>
+															<strong className="block text-sm">{label}</strong>
+															<p className="mt-1 text-xs leading-5 text-muted-foreground">
+																{description}
+															</p>
+														</div>
+														<SettingsSwitch
+															label={ariaLabel}
+															disabled={
+																savingNotifications ||
+																!notificationSettings.enabled
+															}
+															checked={notificationSettings[key]}
+															onCheckedChange={(checked) => {
+																setNotificationSave({
+																	status: SettingsOperationStatus.Idle,
+																});
+																setNotificationSettings((current) => ({
+																	...current,
+																	[key]: checked,
+																}));
+															}}
+														/>
 													</div>
-													<SettingsCheckbox
-														label="Clear routing API key"
-														checked={clearRoutingApiKey}
-														onCheckedChange={setClearRoutingApiKey}
-													/>
-												</div>
+												),
 											)}
-											<div className="flex min-h-[76px] items-center justify-between gap-4 border-t bg-muted/30 p-4 max-[640px]:grid">
+										</div>
+										<div className="mt-4 flex min-h-11 items-center justify-between gap-4 max-[640px]:items-start">
+											<p
+												className={cn(
+													"text-xs",
+													notificationSaveError !== null ||
+														notificationVerification?.status === "failed"
+														? "text-destructive"
+														: "text-[var(--status-success)]",
+												)}
+												role={
+													notificationSaveError === null ? "status" : "alert"
+												}
+												aria-live="polite"
+											>
+												{notificationSaveError ??
+													notificationVerification?.message ??
+													(notificationsSaved
+														? "Notification settings saved."
+														: "")}
+											</p>
+											<div className="flex shrink-0 gap-2 max-[640px]:flex-col">
+												<button
+													type="button"
+													disabled={verifyingNotifications}
+													onClick={() => {
+														void verifyNotifications();
+													}}
+												>
+													{verifyingNotifications
+														? "Sending test…"
+														: "Send test notification"}
+												</button>
+												<button
+													type="button"
+													aria-label="Save notification settings"
+													disabled={savingNotifications}
+													className="border-primary bg-primary font-semibold text-primary-foreground hover:bg-[color-mix(in_srgb,var(--primary)_88%,black)] disabled:cursor-wait disabled:opacity-60"
+													onClick={() => {
+														void saveNotifications();
+													}}
+												>
+													{savingNotifications
+														? "Saving…"
+														: "Save notifications"}
+												</button>
+											</div>
+										</div>
+									</fieldset>
+								),
+								diagnostics: (
+									<section
+										className="mt-8 border-t pt-8"
+										aria-label="Runtime diagnostics"
+									>
+										<SettingsSectionHeading
+											title="Runtime diagnostics"
+											description="Check the local services and connections Commonspace needs to run agents."
+										/>
+										<div className="overflow-hidden rounded-md border bg-card">
+											<div className="flex items-center justify-between gap-6 px-4 py-4 max-[640px]:grid">
 												<div>
-													<strong className="block text-[13px]">
-														Used by Commonspace
-													</strong>
-													<p className="mt-1 text-xs text-muted-foreground">
-														Message routing · context compaction · workspace
-														utilities
+													<strong className="text-sm">System readiness</strong>
+													<p className="mt-1 text-xs leading-5 text-muted-foreground">
+														Inspect installed harnesses, storage, and inference
+														data flow.
 													</p>
 												</div>
 												<button
 													type="button"
-													disabled={inferenceChecking}
+													className="shrink-0"
+													aria-label="Run runtime diagnostics"
+													disabled={diagnosticsLoading}
 													onClick={() => {
-														void checkInferenceConfiguration();
+														void runDiagnostics();
 													}}
 												>
-													{inferenceChecking
-														? "Checking…"
-														: "Check configuration"}
+													{diagnosticsLoading ? "Checking…" : "Run diagnostics"}
 												</button>
 											</div>
-											{inferenceCheckStatus !== null && (
-												<p
-													className={cn(
-														"flex items-center gap-2 border-t px-4 py-3 text-xs",
-														inferenceChecking
-															? "text-muted-foreground"
-															: inferenceCheckStatus.startsWith(
-																		"Configuration verified",
-																	)
-																? "text-[var(--status-success)]"
-																: "text-destructive",
-													)}
-													role="status"
-													aria-live="polite"
-													aria-label="Inference configuration status"
-												>
-													<span aria-hidden="true">
-														{inferenceChecking
-															? "…"
-															: inferenceCheckStatus.startsWith(
-																		"Configuration verified",
-																	)
-																? "✓"
-																: "!"}
-													</span>
-													{inferenceCheckStatus}
-												</p>
+											{diagnostics !== null && (
+												<div className="grid gap-4 border-t px-4 py-4 text-xs">
+													<div>
+														<strong className="text-sm">
+															{diagnostics.inference.location === "remote"
+																? "Remote inference"
+																: diagnostics.inference.location === "local"
+																	? "Local endpoint"
+																	: diagnostics.inference.location ===
+																			"runtime-managed"
+																		? "Native runtime controls provider traffic"
+																		: "Inference not configured"}
+														</strong>
+														<p className="mt-1 text-muted-foreground">
+															{diagnostics.inference.provider} ·{" "}
+															{diagnostics.inference.configured
+																? "configured"
+																: "needs configuration"}
+														</p>
+														<p className="mt-1 text-muted-foreground">
+															Sends {diagnostics.inference.sends.join(" · ")}
+														</p>
+													</div>
+													<ul className="grid gap-2">
+														{diagnostics.harnesses.map((harness) => (
+															<li
+																key={harness.adapter}
+																className="rounded-sm border bg-muted/40 px-3 py-2"
+															>
+																<strong>{runtimeLabel(harness.adapter)}</strong>
+																<span className="ml-2 text-muted-foreground">
+																	{harness.installed
+																		? "Installed"
+																		: "Not installed"}{" "}
+																	· {harness.rostered ? "Added" : "Not added"} ·{" "}
+																	{
+																		{
+																			"has-replies": "Recorded replies",
+																			"no-recorded-runs": "No recorded runs",
+																			"has-failures": "Recorded failures",
+																		}[harness.recordedRunStatus]
+																	}
+																</span>
+																<small className="mt-1 block text-muted-foreground">
+																	{harness.recovery}
+																</small>
+															</li>
+														))}
+													</ul>
+												</div>
 											)}
 										</div>
 									</section>
-								)}
-
-								<fieldset className="mt-8 border-t pt-8">
-									<legend className="sr-only">
-										Workspace agent run settings
-									</legend>
-									<SettingsSectionHeading
-										title="Workspace agent run settings"
-										description="Model and reasoning apply workspace-wide to every Channel and DM."
-									/>
-									<div className="grid grid-cols-2 gap-4 rounded-md border bg-card p-4 max-[640px]:grid-cols-1">
-										<label>
-											<span className="text-xs font-semibold text-muted-foreground">
-												Workspace model
-											</span>
-											<input
-												aria-label="Workspace model"
-												list="commonspace-models"
-												placeholder="Use each harness default"
-												value={defaultModel}
-												onChange={(event) => {
-													setDefaultModel(event.target.value);
-												}}
-											/>
-										</label>
-										<datalist id="commonspace-models">
-											{models.map((model) => (
-												<option key={model} value={model} />
-											))}
-										</datalist>
-										<label htmlFor="workspace-reasoning">
-											<span className="text-xs font-semibold text-muted-foreground">
-												Reasoning
-											</span>
-											<NativeSelect
-												id="workspace-reasoning"
-												aria-label="Workspace reasoning"
-												value={defaultReasoning}
-												onChange={(event) => {
-													if (isReasoning(event.target.value))
-														setDefaultReasoning(event.target.value);
-												}}
-											>
-												{[
-													"none",
-													"minimal",
-													"low",
-													"medium",
-													"high",
-													"xhigh",
-													"max",
-												].map((value) => (
-													<option key={value} value={value}>
-														{value}
-													</option>
-												))}
-											</NativeSelect>
-										</label>
-										<label>
-											<span className="text-xs font-semibold text-muted-foreground">
-												Max agents per turn
-											</span>
-											<input
-												aria-label="Default max agents"
-												type="number"
-												min="1"
-												max="8"
-												value={defaultMaxAgents}
-												onChange={(event) => {
-													setDefaultMaxAgents(Number(event.target.value));
-												}}
-											/>
-										</label>
-										<label>
-											<span className="text-xs font-semibold text-muted-foreground">
-												Memory thread window
-											</span>
-											<input
-												aria-label="Default memory threads"
-												type="number"
-												min="1"
-												max="50"
-												value={defaultMemoryThreads}
-												onChange={(event) => {
-													setDefaultMemoryThreads(Number(event.target.value));
-												}}
-											/>
-										</label>
-									</div>
-								</fieldset>
-								{settingsError !== null && (
-									<p
-										role="alert"
-										className="mt-4 rounded-md border border-destructive/30 bg-muted p-3 text-sm text-destructive"
+								),
+								data: (
+									<section
+										className="mt-8 border-t pt-8"
+										aria-label="Workspace data management"
 									>
-										{settingsError}
-									</p>
-								)}
-								<div className="mt-4 flex items-center justify-between gap-6 rounded-md border bg-muted/30 p-4 max-[640px]:grid">
-									<p className="text-xs leading-5 text-muted-foreground">
-										Saves the routing source, connection, and run defaults
-										together.
-									</p>
-									<button
-										type="submit"
-										className="shrink-0 border-primary bg-primary font-semibold text-primary-foreground hover:bg-[color-mix(in_srgb,var(--primary)_88%,black)] disabled:cursor-wait disabled:opacity-60"
-										disabled={savingInference}
-									>
-										{savingInference
-											? "Saving inference…"
-											: "Save inference settings"}
-									</button>
-								</div>
-								<fieldset className="mt-8 border-t pt-8">
-									<legend className="sr-only">OS notifications</legend>
-									<SettingsSectionHeading
-										title="OS notifications"
-										description="Choose which durable Inbox events also appear as native alerts on this Mac."
-									/>
-									<div className="overflow-hidden rounded-md border bg-card">
-										<div className="flex min-h-[80px] items-center justify-between gap-6 bg-muted/20 px-4 py-3">
-											<div>
-												<strong className="block text-[13px]">
-													Allow native notifications
-												</strong>
-												<p className="mt-1 text-xs leading-5 text-muted-foreground">
-													Show selected Inbox events as macOS alerts. Inbox
-													delivery is always preserved.
-												</p>
-											</div>
-											<SettingsSwitch
-												label="Allow native notifications"
-												checked={notificationSettings.enabled}
-												onCheckedChange={(enabled) => {
-													setNotificationsSaved(false);
-													setNotificationSettings((current) => ({
-														...current,
-														enabled,
-													}));
-												}}
-											/>
-										</div>
-										{NOTIFICATION_OPTIONS.map(
-											([key, label, description, ariaLabel]) => (
-												<div
-													key={key}
-													className={cn(
-														"flex min-h-[68px] items-center justify-between gap-6 border-t px-4 py-3 transition-colors",
-														!notificationSettings.enabled && "bg-muted/20",
-													)}
-												>
-													<div
-														className={cn(
-															!notificationSettings.enabled && "opacity-80",
-														)}
-													>
-														<strong className="block text-[13px]">
-															{label}
-														</strong>
-														<p className="mt-1 text-xs leading-5 text-muted-foreground">
-															{description}
-														</p>
-													</div>
-													<SettingsSwitch
-														label={ariaLabel}
-														disabled={!notificationSettings.enabled}
-														checked={notificationSettings[key]}
-														onCheckedChange={(checked) => {
-															setNotificationsSaved(false);
-															setNotificationSettings((current) => ({
-																...current,
-																[key]: checked,
-															}));
-														}}
-													/>
-												</div>
-											),
-										)}
-									</div>
-									<div className="mt-4 flex min-h-11 items-center justify-between gap-4 max-[640px]:items-start">
-										<p
-											className={cn(
-												"text-xs",
-												notificationSaveError !== null ||
-													notificationVerification?.status === "failed"
-													? "text-destructive"
-													: "text-[var(--status-success)]",
-											)}
-											role={notificationSaveError === null ? "status" : "alert"}
-											aria-live="polite"
-										>
-											{notificationSaveError ??
-												notificationVerification?.message ??
-												(notificationsSaved
-													? "Notification settings saved."
-													: "")}
-										</p>
-										<div className="flex shrink-0 gap-2 max-[640px]:flex-col">
-											<button
-												type="button"
-												disabled={verifyingNotifications}
-												onClick={() => {
-													void verifyNotifications();
-												}}
-											>
-												{verifyingNotifications
-													? "Sending test…"
-													: "Send test notification"}
-											</button>
-											<button
-												type="button"
-												aria-label="Save notification settings"
-												disabled={savingNotifications}
-												className="border-primary bg-primary font-semibold text-primary-foreground hover:bg-[color-mix(in_srgb,var(--primary)_88%,black)] disabled:cursor-wait disabled:opacity-60"
-												onClick={() => {
-													void saveNotifications();
-												}}
-											>
-												{savingNotifications ? "Saving…" : "Save notifications"}
-											</button>
-										</div>
-									</div>
-								</fieldset>
-								<section
-									className="mt-8 border-t pt-8"
-									aria-label="Runtime diagnostics"
-								>
-									<SettingsSectionHeading
-										title="Runtime diagnostics"
-										description="Check the local services and connections Commonspace needs to run agents."
-									/>
-									<div className="overflow-hidden rounded-md border bg-card">
-										<div className="flex items-center justify-between gap-6 px-4 py-4 max-[640px]:grid">
-											<div>
-												<strong className="text-[13px]">
-													System readiness
-												</strong>
-												<p className="mt-1 text-xs leading-5 text-muted-foreground">
-													Inspect installed harnesses, storage, and inference
-													data flow.
-												</p>
-											</div>
-											<button
-												type="button"
-												className="shrink-0"
-												aria-label="Run runtime diagnostics"
-												disabled={diagnosticsLoading}
-												onClick={() => {
-													void runDiagnostics();
-												}}
-											>
-												{diagnosticsLoading ? "Checking…" : "Run diagnostics"}
-											</button>
-										</div>
-										{diagnostics !== null && (
-											<div className="grid gap-4 border-t px-4 py-4 text-xs">
+										<SettingsSectionHeading
+											title="Workspace data"
+											description="Move local Commonspace data or selectively remove conversation history."
+										/>
+										<div className="overflow-hidden rounded-md border bg-card">
+											<div className="flex items-center justify-between gap-6 px-4 py-4 max-[640px]:grid">
 												<div>
-													<strong className="text-[13px]">
-														{diagnostics.inference.location === "remote"
-															? "Remote inference"
-															: "Local inference"}
-													</strong>
-													<p className="mt-1 text-muted-foreground">
-														{diagnostics.inference.provider} ·{" "}
-														{diagnostics.inference.configured
-															? "configured"
-															: "needs configuration"}
-													</p>
-													<p className="mt-1 text-muted-foreground">
-														Sends {diagnostics.inference.sends.join(" · ")}
+													<strong className="text-sm">Export workspace</strong>
+													<p className="mt-1 text-xs leading-5 text-muted-foreground">
+														Download a portable JSON archive of workspace data.
 													</p>
 												</div>
-												<ul className="grid gap-2">
-													{diagnostics.harnesses.map((harness) => (
-														<li
-															key={harness.adapter}
-															className="rounded-sm border bg-muted/40 px-3 py-2"
-														>
-															<strong>{runtimeLabel(harness.adapter)}</strong>
-															<span className="ml-2 text-muted-foreground">
-																{harness.installed
-																	? "Installed"
-																	: "Not installed"}{" "}
-																· {harness.rostered ? "Added" : "Not added"} ·{" "}
-																{harness.runReadiness}
-															</span>
-															<small className="mt-1 block text-muted-foreground">
-																{harness.recovery}
-															</small>
-														</li>
-													))}
-												</ul>
+												<button
+													type="button"
+													className="shrink-0"
+													aria-label="Export workspace data"
+													onClick={() => {
+														void exportWorkspace();
+													}}
+												>
+													Export
+												</button>
 											</div>
-										)}
-									</div>
-								</section>
-								<section
-									className="mt-8 border-t pt-8"
-									aria-label="Workspace data management"
-								>
-									<SettingsSectionHeading
-										title="Workspace data"
-										description="Move local Commonspace data or selectively remove conversation history."
-									/>
-									<div className="overflow-hidden rounded-md border bg-card">
-										<div className="flex items-center justify-between gap-6 px-4 py-4 max-[640px]:grid">
-											<div>
-												<strong className="text-[13px]">
-													Export workspace
-												</strong>
-												<p className="mt-1 text-xs leading-5 text-muted-foreground">
-													Download a portable JSON archive of workspace data.
-												</p>
-											</div>
-											<button
-												type="button"
-												className="shrink-0"
-												aria-label="Export workspace data"
-												onClick={() => {
-													void exportWorkspace();
-												}}
-											>
-												Export
-											</button>
+											<label className="border-t px-4 py-4">
+												<strong className="text-sm">Import archive</strong>
+												<span className="text-xs leading-5 text-muted-foreground">
+													Restore data from a Commonspace JSON export.
+												</span>
+												<input
+													className="mt-2 cursor-pointer text-xs text-muted-foreground file:mr-3 file:rounded-sm file:border-0 file:bg-muted file:px-3 file:py-2 file:text-xs file:font-semibold file:text-foreground"
+													type="file"
+													accept="application/json,.json"
+													aria-label="Import workspace archive"
+													onChange={(event) => {
+														selectImportArchive(event.target.files?.[0]);
+														event.target.value = "";
+													}}
+												/>
+											</label>
 										</div>
-										<label className="border-t px-4 py-4">
-											<strong className="text-[13px]">Import archive</strong>
-											<span className="text-xs leading-5 text-muted-foreground">
-												Restore data from a Commonspace JSON export.
-											</span>
-											<input
-												className="mt-2 cursor-pointer text-xs text-muted-foreground file:mr-3 file:rounded-sm file:border-0 file:bg-muted file:px-3 file:py-2 file:text-xs file:font-semibold file:text-foreground"
-												type="file"
-												accept="application/json,.json"
-												aria-label="Import workspace archive"
-												onChange={(event) => {
-													selectImportArchive(event.target.files?.[0]);
-													event.target.value = "";
-												}}
-											/>
-										</label>
-									</div>
-									{importArchive !== null && (
-										<section aria-label="Import Project mappings">
-											<p>
-												Map every exported Project root to a local folder.
-												Import works only in an empty workspace.
-											</p>
-											{importArchive.projects.map((project) => (
-												<fieldset key={project.id}>
-													<legend>{project.name}</legend>
-													{Array.from(
-														{ length: project.rootCount },
-														(_, rootIndex) => ({
-															key: `${project.id}:root:${String(rootIndex)}`,
-															rootIndex,
-														}),
-													).map(({ key, rootIndex }) => (
-														<div key={key}>
-															<span>
-																{importMappings[project.id]?.[rootIndex] ||
-																	`Root ${String(rootIndex + 1)} not mapped`}
-															</span>
-															<button
-																type="button"
-																aria-label={`Choose root ${String(rootIndex + 1)} for ${project.name}`}
-																onClick={() => {
-																	void chooseImportRoot(project.id, rootIndex);
-																}}
-															>
-																Choose
-															</button>
-														</div>
-													))}
-												</fieldset>
-											))}
-											<button
-												type="button"
-												aria-label="Import workspace data"
-												disabled={
-													importingWorkspace ||
-													Object.values(importMappings).some((paths) =>
-														paths.some((path) => path === ""),
-													)
-												}
-												onClick={() => {
-													void importWorkspace();
-												}}
-											>
-												{importingWorkspace ? "Importing…" : "Import workspace"}
-											</button>
-										</section>
-									)}
-									<ConversationRetention
-										store={store}
-										channels={channels}
-										agents={agents}
-									/>
-								</section>
-								<div className="flex justify-end border-t pt-5">
-									<button
-										type="button"
-										onClick={() => {
-											setSettingsOpen(false);
-										}}
-									>
-										Close settings
-									</button>
-								</div>
-							</div>
-						</div>
-					</form>,
+										{importArchive !== null && (
+											<section aria-label="Import Project mappings">
+												<p>
+													Map every exported Project root to a local folder.
+													Import works only in an empty workspace.
+												</p>
+												{importArchive.projects.map((project) => (
+													<fieldset key={project.id}>
+														<legend>{project.name}</legend>
+														{Array.from(
+															{ length: project.rootCount },
+															(_, rootIndex) => ({
+																key: `${project.id}:root:${String(rootIndex)}`,
+																rootIndex,
+															}),
+														).map(({ key, rootIndex }) => (
+															<div key={key}>
+																<span>
+																	{importMappings[project.id]?.[rootIndex] ||
+																		`Root ${String(rootIndex + 1)} not mapped`}
+																</span>
+																<button
+																	type="button"
+																	aria-label={`Choose root ${String(rootIndex + 1)} for ${project.name}`}
+																	onClick={() => {
+																		void chooseImportRoot(
+																			project.id,
+																			rootIndex,
+																		);
+																	}}
+																>
+																	Choose
+																</button>
+															</div>
+														))}
+													</fieldset>
+												))}
+												<button
+													type="button"
+													aria-label="Import workspace data"
+													disabled={
+														importingWorkspace ||
+														Object.values(importMappings).some((paths) =>
+															paths.some((path) => path === ""),
+														)
+													}
+													onClick={() => {
+														void importWorkspace();
+													}}
+												>
+													{importingWorkspace
+														? "Importing…"
+														: "Import workspace"}
+												</button>
+											</section>
+										)}
+										<ConversationRetention
+											store={store}
+											channels={channels}
+											agents={agents}
+										/>
+									</section>
+								),
+							}}
+						/>
+					</section>,
 					document.body,
 				)}
 
 			<nav
-				className="grid gap-0.5 px-2 pt-2 pb-1"
+				className="grid gap-1 px-3 pt-5 pb-2"
 				aria-label="Workspace destinations"
 			>
-				<button
+				<NavigationItem
 					type="button"
-					className="relative grid min-h-9 w-full grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2 rounded-sm border-0 bg-transparent pl-2 pr-9 text-left text-sidebar-foreground/80 hover:bg-sidebar-accent aria-pressed:bg-[color-mix(in_srgb,var(--sidebar-foreground)_8%,transparent)]"
+					className="pr-9"
 					aria-label={`Open Inbox${inboxUnreadCount === 0 ? "" : `, ${String(inboxUnreadCount)} unread`}`}
 					aria-pressed={inboxActive}
 					onClick={() => {
@@ -2187,12 +2269,12 @@ export function CommonspaceSidebar({
 					>
 						<InboxIcon className="size-[15px]" />
 					</span>
-					<span className="text-[13px] font-medium">Inbox</span>
+					<span className="text-sm font-medium">Inbox</span>
 					{inboxUnreadCount > 0 && <UnreadCount count={inboxUnreadCount} />}
-				</button>
-				<button
+				</NavigationItem>
+				<NavigationItem
 					type="button"
-					className="relative grid min-h-9 w-full grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2 rounded-sm border-0 bg-transparent pl-2 pr-9 text-left text-sidebar-foreground/80 hover:bg-sidebar-accent aria-pressed:bg-[color-mix(in_srgb,var(--sidebar-foreground)_8%,transparent)]"
+					className="pr-9"
 					aria-label={`Open Threads${threadUnreadCount === 0 ? "" : `, ${String(threadUnreadCount)} unread`}`}
 					aria-pressed={threadsActive}
 					onClick={() => {
@@ -2206,276 +2288,19 @@ export function CommonspaceSidebar({
 					>
 						<MessagesSquareIcon className="size-[15px]" />
 					</span>
-					<span className="text-[13px] font-medium">Threads</span>
+					<span className="text-sm font-medium">Threads</span>
 					{threadUnreadCount > 0 && <UnreadCount count={threadUnreadCount} />}
-				</button>
+				</NavigationItem>
 			</nav>
 
-			<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 [scrollbar-color:color-mix(in_srgb,var(--sidebar-foreground)_20%,transparent)_transparent] [scrollbar-width:thin]">
-				<Section
-					title="Projects"
-					actions={
-						projects.length > 1 && (
-							<SidebarSortControl
-								kind="project"
-								mode={preferences.sortModes.project}
-								onModeChange={(mode) => {
-									setCollectionSortMode(
-										"project",
-										mode,
-										[
-											...projectSections.pinned,
-											...projectSections.unpinned,
-										].map((project) => project.id),
-									);
-								}}
-							/>
-						)
-					}
-					open={!preferences.collapsedSections.includes("project")}
-					onOpenChange={(open) => {
-						sidebarPreferencesStore.setSectionCollapsed("project", !open);
-					}}
-					onAdd={() => {
-						setForm("project");
-						setFormError(null);
-					}}
-				>
-					{form === "project" && (
-						<SidebarDialog
-							title="Add a project"
-							description="Bind conversations to local folders."
-							onClose={() => {
-								setForm(null);
-							}}
-						>
-							<form
-								className="grid gap-3 [&_button:not([data-slot])]:min-h-9 [&_button:not([data-slot])]:rounded-sm [&_button:not([data-slot])]:border [&_button:not([data-slot])]:px-3 [&_input]:min-h-11 [&_input]:rounded-md [&_input]:border [&_input]:px-3"
-								onSubmit={(event) => {
-									void submit(event);
-								}}
-							>
-								<label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-									Project name
-									<input
-										aria-label="Project name"
-										placeholder="Project name"
-										value={name}
-										required
-										onChange={(event) => {
-											setName(event.target.value);
-											setFormError(null);
-										}}
-									/>
-								</label>
-								<label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-									Local folder
-									<span className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-										<input
-											aria-label="Project path"
-											placeholder="Choose a local folder"
-											value={path}
-											required
-											onChange={(event) => {
-												setPath(event.target.value);
-												setFormError(null);
-											}}
-										/>
-										<button
-											type="button"
-											aria-label="Choose project folder"
-											disabled={selectingPath}
-											onClick={() => {
-												void chooseProjectDirectory();
-											}}
-										>
-											{selectingPath ? "Opening…" : "Browse folders"}
-										</button>
-									</span>
-								</label>
-								<div className="mt-2 flex items-end justify-end gap-2 border-t pt-3">
-									<FormError message={formError} />
-									<button
-										type="button"
-										onClick={() => {
-											setForm(null);
-										}}
-									>
-										Cancel
-									</button>
-									<button
-										type="submit"
-										disabled={name.trim() === "" || path.trim() === ""}
-										className="border-primary bg-primary text-primary-foreground"
-									>
-										Create project
-									</button>
-								</div>
-							</form>
-						</SidebarDialog>
-					)}
-
-					{projectItems.pinnedCount > 0 &&
-						projectItems.pinnedCount < projectItems.items.length && (
-							<NavGroupLabel label="Pinned" />
-						)}
-					{projectItems.items.map((project, index) => {
-						const active = !settingsOpen && activeProjectViewId === project.id;
-						const folderSummary =
-							project.paths.length === 1
-								? "1 folder · working directory"
-								: `${String(project.paths.length)} folders · working + references`;
-						return (
-							<div
-								key={project.id}
-								className={cn(
-									"grid gap-0.5",
-									draggedCollectionItem?.kind === "project" &&
-										draggedCollectionItem.id === project.id &&
-										"opacity-50",
-								)}
-							>
-								{projectItems.pinnedCount > 0 &&
-									index === projectItems.pinnedCount && (
-										<NavGroupLabel label="Unpinned" />
-									)}
-								<div className="group grid grid-cols-[minmax(0,1fr)_28px] items-center rounded-sm hover:bg-sidebar-accent focus-within:bg-sidebar-accent has-[button[aria-pressed=true]]:bg-[color-mix(in_srgb,var(--sidebar-foreground)_8%,transparent)]">
-									<button
-										type="button"
-										{...sortableCollectionButtonProps("project", project.id)}
-										className={cn(
-											"relative grid min-h-8 w-full min-w-0 grid-cols-[20px_minmax(0,1fr)] items-center gap-2 rounded-l-sm border-0 bg-transparent px-2 text-left text-sidebar-foreground/80 aria-pressed:text-sidebar-foreground",
-											preferences.sortModes.project === "custom" &&
-												"cursor-grab pr-6 active:cursor-grabbing",
-										)}
-										aria-label={`Select project ${project.name}`}
-										aria-pressed={active}
-										onClick={() => {
-											setSettingsOpen(false);
-											touchRecent("project", project.id);
-											store.selectProject(project.id);
-											onOpenProject?.(project.id);
-										}}
-									>
-										<span
-											className="grid size-5 place-items-center rounded-sm font-mono text-xs text-sidebar-foreground/55"
-											aria-hidden="true"
-										>
-											{project.name.slice(0, 1).toLocaleUpperCase()}
-										</span>
-										<span className="min-w-0">
-											<strong className="block truncate text-[13px] font-medium">
-												{project.name}
-											</strong>
-											<small className="hidden">{folderSummary}</small>
-										</span>
-										{preferences.sortModes.project === "custom" && (
-											<GripVerticalIcon
-												aria-hidden="true"
-												className="pointer-events-none absolute top-1/2 right-1 size-3 -translate-y-1/2 text-sidebar-foreground/45 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-											/>
-										)}
-									</button>
-									{onOpenContextSettings === undefined ? (
-										<CollectionActionButton
-											label={`Add local folder to project ${project.name}`}
-											onClick={() => {
-												touchRecent("project", project.id);
-												store.selectProject(project.id);
-												setPathProjectId(project.id);
-												setPathDraft("");
-											}}
-										/>
-									) : (
-										<CollectionActionMenu
-											kind="project"
-											label={project.name}
-											meta={folderSummary}
-											pinned={collectionPinned("project", project.id)}
-											onOpen={() => {
-												setSettingsOpen(false);
-												touchRecent("project", project.id);
-												store.selectProject(project.id);
-												onOpenProject?.(project.id);
-											}}
-											onSettings={() => {
-												if (onOpenContextSettings === undefined) {
-													store.selectProject(project.id);
-													onOpenProject?.(project.id);
-												} else onOpenContextSettings("project", project.id);
-											}}
-											onAddFolder={() => {
-												void addProjectFolder(project.id);
-											}}
-											onCopy={() => copyText(project.name)}
-											copyLabel="Copy project name"
-											onTogglePinned={() => {
-												toggleCollectionPinned("project", project.id);
-											}}
-											onRemove={() =>
-												store.mutate({
-													action: "remove-project",
-													projectId: project.id,
-												})
-											}
-										/>
-									)}
-								</div>
-
-								{pathProjectId === project.id && (
-									<div className="p-2">
-										<form
-											className="grid gap-2 [&_button]:min-h-10 [&_button:not([data-slot])]:rounded-sm [&_button:not([data-slot])]:border [&_button]:px-3 [&_input]:min-h-10 [&_input]:rounded-sm [&_input]:border [&_input]:px-3"
-											onSubmit={(event) => {
-												void submitPath(event, project.id);
-											}}
-										>
-											<input
-												aria-label={`Workspace path for ${project.name}`}
-												placeholder="/absolute/local/path"
-												value={pathDraft}
-												onChange={(event) => {
-													setPathDraft(event.target.value);
-												}}
-											/>
-											<div>
-												<button type="submit">Add</button>
-												<button
-													type="button"
-													onClick={() => {
-														setPathProjectId(null);
-													}}
-												>
-													Cancel
-												</button>
-											</div>
-										</form>
-									</div>
-								)}
-							</div>
-						);
-					})}
-					{projects.length === 0 && form !== "project" && (
-						<div className="px-2 py-4 text-xs text-sidebar-foreground/60">
-							Add a local filesystem project.
-						</div>
-					)}
-					{projects.length > projectItems.items.length && (
-						<BrowseButton
-							label="View all"
-							ariaLabel="Browse all projects"
-							onClick={() => {
-								setSettingsOpen(false);
-								if (onOpenDirectory !== undefined) onOpenDirectory("projects");
-								else if (onOpenSearch === undefined) setSearchOpen(true);
-								else onOpenSearch();
-							}}
-						/>
-					)}
-				</Section>
-
-				<Section
+			<div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 [scrollbar-color:color-mix(in_srgb,var(--sidebar-foreground)_20%,transparent)_transparent] [scrollbar-width:thin]">
+				<NavigationSection
 					title="Channels"
+					onNavigate={
+						onOpenDirectory === undefined
+							? undefined
+							: () => onOpenDirectory("channels")
+					}
 					actions={
 						channels.length > 1 && (
 							<SidebarSortControl
@@ -2515,7 +2340,7 @@ export function CommonspaceSidebar({
 							}}
 						>
 							<form
-								className="grid gap-3 [&_button:not([data-slot])]:min-h-9 [&_button:not([data-slot])]:rounded-sm [&_button:not([data-slot])]:border [&_button:not([data-slot])]:px-3 [&_fieldset]:grid [&_fieldset]:gap-2 [&_input]:min-h-11 [&_input]:rounded-md [&_input]:border [&_input]:px-3"
+								className="grid gap-3 [&_button:not([data-slot])]:min-h-9 [&_button:not([data-slot])]:rounded-sm [&_button:not([data-slot])]:border [&_button:not([data-slot])]:px-3 [&>fieldset]:grid [&>fieldset]:gap-2 [&_input]:min-h-11 [&_input]:rounded-md [&_input]:border [&_input]:px-3"
 								onSubmit={(event) => {
 									void submit(event);
 								}}
@@ -2533,7 +2358,7 @@ export function CommonspaceSidebar({
 										}}
 									/>
 								</label>
-								<fieldset className="rounded-md border p-3">
+								<fieldset className="min-w-0 border-0 p-0">
 									<legend className="px-1 font-heading text-sm font-bold">
 										Agents
 									</legend>
@@ -2559,17 +2384,19 @@ export function CommonspaceSidebar({
 										aria-label="Filter available agents"
 									>
 										{(["all", "selected"] as const).map((value) => (
-											<button
+											<Button
 												key={value}
 												type="button"
-												className="min-h-9 rounded-full border px-3 text-xs font-semibold capitalize aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground"
+												variant="filter"
+												size="compact"
+												className="capitalize"
 												aria-pressed={channelAgentFilter === value}
 												onClick={() => {
 													setChannelAgentFilter(value);
 												}}
 											>
 												{value}
-											</button>
+											</Button>
 										))}
 									</fieldset>
 									<div className="mt-2 max-h-[260px] overflow-y-auto">
@@ -2591,7 +2418,7 @@ export function CommonspaceSidebar({
 												/>
 												<AgentAvatar agent={agent} />
 												<span>
-													<strong className="block text-[13px] text-foreground">
+													<strong className="block text-sm text-foreground">
 														{agent.displayName}
 													</strong>
 													<small className="block text-xs font-normal text-muted-foreground">
@@ -2629,11 +2456,7 @@ export function CommonspaceSidebar({
 						</SidebarDialog>
 					)}
 
-					{channelItems.pinnedCount > 0 &&
-						channelItems.pinnedCount < channelItems.items.length && (
-							<NavGroupLabel label="Pinned" />
-						)}
-					{channelItems.items.map((channel, index) => {
+					{channelItems.items.map((channel) => {
 						const unreadCount = channelUnreadCounts.get(channel.id) ?? 0;
 						const latestChannelMessage =
 							state?.messages[`channel:${channel.id}`]?.at(-1);
@@ -2653,16 +2476,12 @@ export function CommonspaceSidebar({
 										"opacity-50",
 								)}
 							>
-								{channelItems.pinnedCount > 0 &&
-									index === channelItems.pinnedCount && (
-										<NavGroupLabel label="Unpinned" />
-									)}
-								<div className="group grid grid-cols-[minmax(0,1fr)_28px] items-center rounded-sm hover:bg-sidebar-accent focus-within:bg-sidebar-accent has-[button[aria-pressed=true]]:bg-[color-mix(in_srgb,var(--sidebar-foreground)_8%,transparent)]">
-									<button
+								<NavigationItemGroup>
+									<NavigationItem
 										type="button"
 										{...sortableCollectionButtonProps("channel", channel.id)}
 										className={cn(
-											"relative grid min-h-8 w-full min-w-0 grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2 rounded-l-sm border-0 bg-transparent px-2 text-left text-sidebar-foreground/80 aria-pressed:text-sidebar-foreground",
+											"",
 											preferences.sortModes.channel === "custom" &&
 												"cursor-grab active:cursor-grabbing",
 										)}
@@ -2697,7 +2516,7 @@ export function CommonspaceSidebar({
 										<span className="min-w-0">
 											<strong
 												className={cn(
-													"block truncate text-[13px]",
+													"block truncate text-sm",
 													unreadCount > 0 ? "font-semibold" : "font-medium",
 												)}
 											>
@@ -2715,7 +2534,7 @@ export function CommonspaceSidebar({
 												className="pointer-events-none absolute top-1/2 left-3 size-3 -translate-y-1/2 text-sidebar-foreground/45 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
 											/>
 										)}
-									</button>
+									</NavigationItem>
 									{onOpenContextSettings === undefined ? (
 										<CollectionActionButton
 											label={`Manage agents in channel ${channel.name}`}
@@ -2800,7 +2619,7 @@ export function CommonspaceSidebar({
 											}
 										/>
 									)}
-								</div>
+								</NavigationItemGroup>
 								{editingChannelId === channel.id && (
 									<form
 										className="grid gap-3 rounded-md bg-sidebar-deep p-3 text-sidebar-foreground [&_button]:min-h-10 [&_button:not([data-slot])]:rounded-sm [&_button:not([data-slot])]:border [&_button]:px-3 [&_fieldset]:grid [&_fieldset]:gap-2 [&_input]:min-h-10 [&_input]:rounded-sm [&_input]:border [&_input]:bg-background [&_input]:px-3 [&_select]:min-h-10 [&_select]:rounded-sm [&_select]:border [&_select]:bg-background  [&_textarea]:min-h-24 [&_textarea]:rounded-sm [&_textarea]:border [&_textarea]:bg-background [&_textarea]:p-3"
@@ -2963,7 +2782,7 @@ export function CommonspaceSidebar({
 						);
 					})}
 					{channels.length === 0 && form !== "channel" && (
-						<div className="px-2 py-4 text-xs text-sidebar-foreground/60">
+						<div className="px-2 py-4 text-xs text-muted-foreground">
 							Create a channel and seat agents.
 						</div>
 					)}
@@ -2979,10 +2798,15 @@ export function CommonspaceSidebar({
 							}}
 						/>
 					)}
-				</Section>
+				</NavigationSection>
 
-				<Section
+				<NavigationSection
 					title="Agents"
+					onNavigate={
+						onOpenDirectory === undefined
+							? undefined
+							: () => onOpenDirectory("agents")
+					}
 					actions={
 						agents.length > 1 && (
 							<SidebarSortControl
@@ -3013,7 +2837,8 @@ export function CommonspaceSidebar({
 					{form === "agent" && (
 						<SidebarDialog
 							title="Add an agent"
-							description="Choose an installed harness to represent in Commonspace."
+							size={agentAdapter === null ? "compact" : "form"}
+							description="Choose an installed coding agent. Credentials stay in its native app."
 							onClose={() => {
 								setForm(null);
 							}}
@@ -3023,24 +2848,21 @@ export function CommonspaceSidebar({
 									<button
 										key={adapter}
 										type="button"
-										className="grid min-h-[68px] grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 rounded-md border bg-background px-3 text-left hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary/5"
+										className="grid min-h-12 grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 text-left aria-pressed:bg-selection hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
 										aria-label={`Choose ${runtimeLabel(adapter)} harness`}
 										aria-pressed={agentAdapter === adapter}
 										onClick={() => {
 											selectAgentHarness(adapter);
 										}}
 									>
-										<span className="grid size-10 place-items-center rounded-sm border bg-muted font-mono font-semibold">
+										<span className="grid size-8 place-items-center rounded-md bg-muted font-mono font-semibold">
 											{AGENT_ADAPTERS[adapter].monogram}
 										</span>
 										<span>
 											<strong className="block">{runtimeLabel(adapter)}</strong>
-											<small className="block text-xs text-muted-foreground">
-												Installed harness · credentials stay native
-											</small>
 										</span>
 										<span className="text-xs text-muted-foreground">
-											{agentAdapter === adapter ? "Selected" : "Choose"}
+											{agentAdapter === adapter ? "Selected" : null}
 										</span>
 									</button>
 								))}
@@ -3194,7 +3016,14 @@ export function CommonspaceSidebar({
 											<input
 												type="checkbox"
 												className="mt-0.5 size-4"
-												checked={agentProfileFullAccess}
+												checked={
+													editingAgent.permissionPolicy?.source === "server"
+														? editingAgent.permissionPolicy.fullAccess
+														: agentProfileFullAccess
+												}
+												disabled={
+													editingAgent.permissionPolicy?.source === "server"
+												}
 												onChange={(event) => {
 													setAgentProfileFullAccess(event.target.checked);
 												}}
@@ -3202,17 +3031,18 @@ export function CommonspaceSidebar({
 											<span>
 												<strong className="block text-sm">Full access</strong>
 												<small className="block text-xs leading-5 text-muted-foreground">
-													Bypass approval prompts for this agent's Commonspace
-													runs.
+													{editingAgent.permissionPolicy?.source === "server"
+														? "Full access is enabled by server configuration and cannot be disabled here."
+														: "Bypass approval prompts for this agent’s Commonspace runs."}
 												</small>
 											</span>
 										</label>
 										<p className="text-xs text-muted-foreground">
-											The installed {runtimeLabel(editingAgent.adapter)}{" "}
-											harness, routing, and sessions stay unchanged.
+											Changing access stops active work; future turns keep their
+											native session references.
 										</p>
 										<div>
-											<button type="submit">Save appearance</button>
+											<button type="submit">Save agent settings</button>
 											{state?.agents.some(
 												(candidate) => candidate.id === editingAgent.id,
 											) === true && (
@@ -3236,11 +3066,7 @@ export function CommonspaceSidebar({
 							);
 						})()}
 
-					{agentItems.pinnedCount > 0 &&
-						agentItems.pinnedCount < agentItems.items.length && (
-							<NavGroupLabel label="Pinned" />
-						)}
-					{agentItems.items.map((agent, index) => {
+					{agentItems.items.map((agent) => {
 						const effectiveStatus = activeAgentIds.has(agent.id)
 							? "running"
 							: agent.status;
@@ -3254,16 +3080,12 @@ export function CommonspaceSidebar({
 										"opacity-50",
 								)}
 							>
-								{agentItems.pinnedCount > 0 &&
-									index === agentItems.pinnedCount && (
-										<NavGroupLabel label="Unpinned" />
-									)}
-								<div className="group grid grid-cols-[minmax(0,1fr)_28px] items-center rounded-sm hover:bg-sidebar-accent focus-within:bg-sidebar-accent has-[button[aria-pressed=true]]:bg-[color-mix(in_srgb,var(--sidebar-foreground)_8%,transparent)]">
-									<button
+								<NavigationItemGroup>
+									<NavigationItem
 										type="button"
 										{...sortableCollectionButtonProps("agent", agent.id)}
 										className={cn(
-											"relative grid min-h-10 w-full min-w-0 grid-cols-[20px_minmax(0,1fr)] items-center gap-2 rounded-l-sm border-0 bg-transparent px-2 text-left text-sidebar-foreground/80 aria-pressed:text-sidebar-foreground",
+											"",
 											preferences.sortModes.agent === "custom" &&
 												"cursor-grab pr-6 active:cursor-grabbing",
 										)}
@@ -3284,17 +3106,16 @@ export function CommonspaceSidebar({
 											agent={agent}
 											size="sm"
 											status={effectiveStatus}
-											showStatus
+											showStatus={effectiveStatus === "running"}
 											statusClassName="border-sidebar"
-											className="text-sidebar-foreground/55"
 										/>
 										<span className="min-w-0">
-											<strong className="block truncate text-[13px] font-medium">
+											<strong className="block truncate text-sm font-medium">
 												{agent.displayName}
 											</strong>
 											<small
 												id={`agent-${agent.id}-model`}
-												className="block truncate text-[11px] leading-4 text-sidebar-foreground/70"
+												className="sr-only"
 												title={agent.model ?? "Profile default"}
 											>
 												{agent.model ?? "Profile default"}
@@ -3306,7 +3127,7 @@ export function CommonspaceSidebar({
 												className="pointer-events-none absolute top-1/2 right-1 size-3 -translate-y-1/2 text-sidebar-foreground/45 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
 											/>
 										)}
-									</button>
+									</NavigationItem>
 									{onOpenContextSettings === undefined ? (
 										<CollectionActionButton
 											label={`Customize agent ${agent.displayName}`}
@@ -3369,7 +3190,7 @@ export function CommonspaceSidebar({
 											}
 										/>
 									)}
-								</div>
+								</NavigationItemGroup>
 							</div>
 						);
 					})}
@@ -3385,15 +3206,271 @@ export function CommonspaceSidebar({
 							}}
 						/>
 					)}
-				</Section>
+				</NavigationSection>
+
+				<NavigationSection
+					title="Projects"
+					onNavigate={
+						onOpenDirectory === undefined
+							? undefined
+							: () => onOpenDirectory("projects")
+					}
+					actions={
+						projects.length > 1 && (
+							<SidebarSortControl
+								kind="project"
+								mode={preferences.sortModes.project}
+								onModeChange={(mode) => {
+									setCollectionSortMode(
+										"project",
+										mode,
+										[
+											...projectSections.pinned,
+											...projectSections.unpinned,
+										].map((project) => project.id),
+									);
+								}}
+							/>
+						)
+					}
+					open={!preferences.collapsedSections.includes("project")}
+					onOpenChange={(open) => {
+						sidebarPreferencesStore.setSectionCollapsed("project", !open);
+					}}
+					onAdd={() => {
+						setForm("project");
+						setFormError(null);
+					}}
+				>
+					{form === "project" && (
+						<SidebarDialog
+							title="Add a project"
+							description="Bind conversations to local folders."
+							onClose={() => {
+								setForm(null);
+							}}
+						>
+							<form
+								className="grid gap-3 [&_button:not([data-slot])]:min-h-9 [&_button:not([data-slot])]:rounded-sm [&_button:not([data-slot])]:border [&_button:not([data-slot])]:px-3 [&_input]:min-h-11 [&_input]:rounded-md [&_input]:border [&_input]:px-3"
+								onSubmit={(event) => {
+									void submit(event);
+								}}
+							>
+								<label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
+									Project name
+									<input
+										aria-label="Project name"
+										placeholder="Project name"
+										value={name}
+										required
+										onChange={(event) => {
+											setName(event.target.value);
+											setFormError(null);
+										}}
+									/>
+								</label>
+								<label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
+									Local folder
+									<span className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+										<input
+											aria-label="Project path"
+											placeholder="Choose a local folder"
+											value={path}
+											required
+											onChange={(event) => {
+												setPath(event.target.value);
+												setFormError(null);
+											}}
+										/>
+										<button
+											type="button"
+											aria-label="Choose project folder"
+											disabled={selectingPath}
+											onClick={() => {
+												void chooseProjectDirectory();
+											}}
+										>
+											{selectingPath ? "Opening…" : "Browse folders"}
+										</button>
+									</span>
+								</label>
+								<div className="mt-2 flex items-end justify-end gap-2 border-t pt-3">
+									<FormError message={formError} />
+									<button
+										type="button"
+										onClick={() => {
+											setForm(null);
+										}}
+									>
+										Cancel
+									</button>
+									<button
+										type="submit"
+										disabled={name.trim() === "" || path.trim() === ""}
+										className="border-primary bg-primary text-primary-foreground"
+									>
+										Create project
+									</button>
+								</div>
+							</form>
+						</SidebarDialog>
+					)}
+
+					{projectItems.items.map((project) => {
+						const active = !settingsOpen && activeProjectViewId === project.id;
+						const folderSummary =
+							project.paths.length === 1
+								? "1 folder · working directory"
+								: `${String(project.paths.length)} folders · working + references`;
+						return (
+							<div
+								key={project.id}
+								className={cn(
+									"grid gap-0.5",
+									draggedCollectionItem?.kind === "project" &&
+										draggedCollectionItem.id === project.id &&
+										"opacity-50",
+								)}
+							>
+								<NavigationItemGroup>
+									<NavigationItem
+										type="button"
+										{...sortableCollectionButtonProps("project", project.id)}
+										className={cn(
+											"",
+											preferences.sortModes.project === "custom" &&
+												"cursor-grab pr-6 active:cursor-grabbing",
+										)}
+										aria-label={`Select project ${project.name}`}
+										aria-pressed={active}
+										onClick={() => {
+											setSettingsOpen(false);
+											touchRecent("project", project.id);
+											store.selectProject(project.id);
+											onOpenProject?.(project.id);
+										}}
+									>
+										<span
+											className="grid size-5 place-items-center rounded-sm font-mono text-xs text-sidebar-foreground/55"
+											aria-hidden="true"
+										>
+											<FolderIcon className="size-[18px]" aria-hidden="true" />
+										</span>
+										<span className="min-w-0">
+											<strong className="block truncate text-sm font-medium">
+												{project.name}
+											</strong>
+											<small className="hidden">{folderSummary}</small>
+										</span>
+										{preferences.sortModes.project === "custom" && (
+											<GripVerticalIcon
+												aria-hidden="true"
+												className="pointer-events-none absolute top-1/2 right-1 size-3 -translate-y-1/2 text-sidebar-foreground/45 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+											/>
+										)}
+									</NavigationItem>
+									{onOpenContextSettings === undefined ? (
+										<CollectionActionButton
+											label={`Add local folder to project ${project.name}`}
+											onClick={() => {
+												touchRecent("project", project.id);
+												store.selectProject(project.id);
+												setPathProjectId(project.id);
+												setPathDraft("");
+											}}
+										/>
+									) : (
+										<CollectionActionMenu
+											kind="project"
+											label={project.name}
+											meta={folderSummary}
+											pinned={collectionPinned("project", project.id)}
+											onOpen={() => {
+												setSettingsOpen(false);
+												touchRecent("project", project.id);
+												store.selectProject(project.id);
+												onOpenProject?.(project.id);
+											}}
+											onSettings={() => {
+												if (onOpenContextSettings === undefined) {
+													store.selectProject(project.id);
+													onOpenProject?.(project.id);
+												} else onOpenContextSettings("project", project.id);
+											}}
+											onAddFolder={() => {
+												void addProjectFolder(project.id);
+											}}
+											onCopy={() => copyText(project.name)}
+											copyLabel="Copy project name"
+											onTogglePinned={() => {
+												toggleCollectionPinned("project", project.id);
+											}}
+											onRemove={() =>
+												store.mutate({
+													action: "remove-project",
+													projectId: project.id,
+												})
+											}
+										/>
+									)}
+								</NavigationItemGroup>
+
+								{pathProjectId === project.id && (
+									<div className="p-2">
+										<form
+											className="grid gap-2 [&_button]:min-h-10 [&_button:not([data-slot])]:rounded-sm [&_button:not([data-slot])]:border [&_button]:px-3 [&_input]:min-h-10 [&_input]:rounded-sm [&_input]:border [&_input]:px-3"
+											onSubmit={(event) => {
+												void submitPath(event, project.id);
+											}}
+										>
+											<input
+												aria-label={`Workspace path for ${project.name}`}
+												placeholder="/absolute/local/path"
+												value={pathDraft}
+												onChange={(event) => {
+													setPathDraft(event.target.value);
+												}}
+											/>
+											<div>
+												<button type="submit">Add</button>
+												<button
+													type="button"
+													onClick={() => {
+														setPathProjectId(null);
+													}}
+												>
+													Cancel
+												</button>
+											</div>
+										</form>
+									</div>
+								)}
+							</div>
+						);
+					})}
+					{projects.length === 0 && form !== "project" && (
+						<div className="px-2 py-4 text-xs text-muted-foreground">
+							Add a local filesystem project.
+						</div>
+					)}
+					{projects.length > projectItems.items.length && (
+						<BrowseButton
+							label="View all"
+							ariaLabel="Browse all projects"
+							onClick={() => {
+								setSettingsOpen(false);
+								if (onOpenDirectory !== undefined) onOpenDirectory("projects");
+								else if (onOpenSearch === undefined) setSearchOpen(true);
+								else onOpenSearch();
+							}}
+						/>
+					)}
+				</NavigationSection>
 			</div>
-			<div className="flex min-h-[60px] items-center gap-1.5 border-t border-sidebar-border bg-sidebar-deep py-2 pr-2.5 pl-[18px]">
-				<span className="mr-auto text-xs text-sidebar-foreground/65">
-					On this Mac
-				</span>
+			<div className="flex min-h-[64px] items-center gap-1.5 bg-sidebar py-2 pr-2.5 pl-[18px]">
 				<button
 					type="button"
-					className="grid size-11 place-items-center rounded-full border-0 bg-transparent text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+					className="grid size-11 place-items-center rounded-full border-0 bg-transparent text-sidebar-foreground/80 hover:text-sidebar-foreground"
 					aria-label="Refresh Commonspace"
 					onClick={() => {
 						void store.refresh();
@@ -3403,41 +3480,73 @@ export function CommonspaceSidebar({
 				</button>
 				<button
 					type="button"
-					className="grid size-11 place-items-center rounded-full border-0 bg-transparent text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground aria-[current=page]:bg-[color-mix(in_srgb,var(--sidebar-foreground)_8%,transparent)]"
+					className="order-first flex min-h-9 flex-1 items-center gap-3 rounded-md border-0 bg-transparent px-2 text-sm text-muted-foreground hover:text-sidebar-foreground aria-[current=page]:bg-selection"
 					aria-label="Commonspace settings"
 					ref={settingsTriggerRef}
 					aria-current={settingsOpen ? "page" : undefined}
 					onClick={() => {
 						const defaults = state?.defaults;
-						if (defaults !== undefined) {
+						if (
+							defaults !== undefined &&
+							runSettingsSave.status !== SettingsOperationStatus.Running
+						) {
+							setRunSettingsSave({ status: SettingsOperationStatus.Idle });
 							setDefaultModel(defaults.model ?? "");
 							setDefaultReasoning(defaults.reasoning);
 							setDefaultMaxAgents(defaults.maxAgentsPerTurn);
 							setDefaultMemoryThreads(defaults.memoryThreads);
 						}
-						const routing = bootstrap?.routing;
-						setRoutingProvider(routing?.provider ?? "openai-compatible");
-						setRoutingHarnessAgentId(routing?.harnessAgentId ?? "");
-						setRoutingModel(routing?.model ?? "");
-						setJevEnabled(routing?.jev !== undefined);
-						setJevModel(routing?.jev?.model ?? "jev-1.13.0");
-						setJevApiKey("");
-						setClearJevApiKey(false);
-						setRoutingBaseUrl(routing?.baseUrl ?? "https://api.openai.com/v1");
-						setRoutingApiKey("");
-						setClearRoutingApiKey(false);
-						setInferenceCheckStatus(null);
-						setSettingsError(null);
-						setNotificationsSaved(false);
-						setNotificationSaveError(null);
-						setNotificationSettings({
-							...(state?.notifications ??
-								DEFAULT_COMMONSPACE_NOTIFICATION_SETTINGS),
-						});
+						if (!savingInference) {
+							const routing = bootstrap?.routing;
+							setRoutingProvider(
+								routing === undefined ||
+									routing.provider === CommonspaceRoutingProvider.Unconfigured
+									? CommonspaceRoutingProvider.OpenAiCompatible
+									: routing.provider,
+							);
+							setRoutingHarnessAgentId(
+								routing?.provider === CommonspaceRoutingProvider.Harness
+									? routing.harnessAgentId
+									: "",
+							);
+							setRoutingModel(
+								routing?.provider ===
+									CommonspaceRoutingProvider.OpenAiCompatible
+									? routing.model
+									: "",
+							);
+							setJevEnabled(savedJev?.enabled === true);
+							setJevModel(savedJev?.model ?? "jev-1.13.0");
+							setJevApiKey("");
+							setClearJevApiKey(false);
+							setRoutingBaseUrl(
+								routing?.provider ===
+									CommonspaceRoutingProvider.OpenAiCompatible
+									? routing.baseUrl
+									: "https://api.openai.com/v1",
+							);
+							setRoutingApiKey("");
+							setClearRoutingApiKey(false);
+							setInferenceSave({ status: SettingsOperationStatus.Idle });
+						}
+						setInferenceCheck((current) =>
+							current.status === SettingsOperationStatus.Running
+								? current
+								: { status: SettingsOperationStatus.Idle },
+						);
+						if (!savingNotifications) {
+							setNotificationSave({ status: SettingsOperationStatus.Idle });
+							setNotificationSettings({
+								...(state?.notifications ??
+									DEFAULT_COMMONSPACE_NOTIFICATION_SETTINGS),
+							});
+						}
+
 						setSettingsOpen((value) => !value);
 					}}
 				>
 					<SettingsIcon className="size-[18px]" aria-hidden="true" />
+					<span>Settings</span>
 				</button>
 			</div>
 		</section>

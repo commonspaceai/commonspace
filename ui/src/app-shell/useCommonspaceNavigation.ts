@@ -463,6 +463,9 @@ export function useCommonspaceNavigation(
 	const openThread = (threadId: string | null) => {
 		const conversation = store.getSnapshot().activeConversation;
 		if (conversation === null) return;
+		// A send can open a thread without changing the URL. Closing it must
+		// update selection even when navigation resolves to the current route.
+		store.selectThread(threadId);
 		navigate(conversationRoute(conversation, threadId ?? undefined));
 	};
 

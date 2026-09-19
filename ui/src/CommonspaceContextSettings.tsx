@@ -6,7 +6,6 @@ import type {
 } from "@commonspace/shared";
 import { AGENT_ADAPTERS } from "@commonspace/shared";
 import {
-	CheckIcon,
 	ChevronDownIcon,
 	LoaderCircleIcon,
 	RefreshCwIcon,
@@ -22,6 +21,7 @@ import {
 	useState,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { AgentAvatar } from "@/design-system/AgentAvatar";
 import { ConfirmActionDialog } from "@/design-system/ConfirmActionDialog";
 import { cn } from "@/lib/utils";
 import { ChannelContextBrief } from "./ChannelContextBrief.tsx";
@@ -57,31 +57,6 @@ function useSettingsDraftValue<Value extends string | boolean | string[]>(
 
 function runtimeLabel(agent: CommonspaceAgentProfile): string {
 	return AGENT_ADAPTERS[agent.adapter].label;
-}
-
-function AgentMark({
-	agent,
-	large = false,
-}: {
-	agent: CommonspaceAgentProfile;
-	large?: boolean;
-}) {
-	return (
-		<span
-			className={cn(
-				"grid shrink-0 place-items-center border bg-muted font-mono font-semibold",
-				large ? "size-16 rounded-md text-2xl" : "size-9 rounded-md text-xs",
-			)}
-			style={
-				agent.accentColor === undefined
-					? undefined
-					: { backgroundColor: agent.accentColor, color: "#fff" }
-			}
-			aria-hidden="true"
-		>
-			{agent.avatarEmoji ?? agent.displayName.slice(0, 1).toLocaleUpperCase()}
-		</span>
-	);
 }
 
 const AVATAR_EMOJIS = [
@@ -146,7 +121,7 @@ function AvatarEmojiPicker({
 		<div ref={picker} className="relative">
 			<button
 				type="button"
-				className="flex min-h-11 w-full items-center justify-between rounded-sm border bg-background px-3 text-left text-xl hover:bg-muted"
+				className="flex min-h-9 w-full items-center justify-between rounded-sm border bg-background px-3 text-left text-xl hover:bg-muted"
 				aria-label="Choose avatar emoji"
 				aria-expanded={open}
 				onClick={() => {
@@ -311,12 +286,12 @@ function ChannelSettingsEditor({
 
 	return (
 		<aside
-			className="commonspace-context-settings flex min-h-0 min-w-[340px] flex-col border-l bg-background"
+			className="commonspace-context-settings flex min-h-0 min-w-[340px] flex-col border-l bg-card"
 			aria-label="Channel settings"
 		>
-			<header className="flex min-h-[70px] items-center gap-3 border-b py-2.5 pr-3.5 pl-5">
+			<header className="flex min-h-[72px] items-center gap-3 border-b py-2.5 pr-3.5 pl-5">
 				<div className="min-w-0 flex-1">
-					<h2 className="truncate font-heading text-[17px] font-bold">
+					<h2 className="truncate font-heading text-base font-semibold">
 						# {channel.name}
 					</h2>
 					<p className="mt-0.5 text-xs text-muted-foreground">
@@ -340,7 +315,7 @@ function ChannelSettingsEditor({
 			>
 				<fieldset
 					disabled={saving}
-					className="min-h-0 min-w-0 flex-1 overflow-y-auto border-0 p-5"
+					className="min-h-0 min-w-0 flex-1 overflow-y-auto border-0 p-6"
 				>
 					<section aria-labelledby="channel-members-heading">
 						<header className="mb-4 flex items-start justify-between gap-3">
@@ -355,13 +330,13 @@ function ChannelSettingsEditor({
 									Choose which agents can be mentioned in this channel.
 								</p>
 							</div>
-							<span className="shrink-0 rounded-full border px-2 py-1 font-mono text-[11px] text-muted-foreground">
+							<span className="shrink-0 rounded-full border px-2 py-1 text-xs text-muted-foreground">
 								{String(agentIds.length)} of {String(agents.length)} included
 							</span>
 						</header>
 						<div className="overflow-hidden rounded-md border">
 							<div className="border-b bg-muted p-3">
-								<label className="flex min-h-11 items-center gap-2 rounded-sm border bg-background px-3 text-muted-foreground focus-within:border-primary">
+								<label className="flex min-h-9 items-center gap-2 rounded-sm border bg-background px-3 text-muted-foreground focus-within:border-primary">
 									<SearchIcon className="size-4" aria-hidden="true" />
 									<span className="sr-only">Search agents</span>
 									<input
@@ -383,7 +358,7 @@ function ChannelSettingsEditor({
 										<button
 											key={value}
 											type="button"
-											className="min-h-9 rounded-full border px-3 text-xs font-semibold capitalize aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground"
+											className="min-h-9 rounded-md border-0 px-3 text-xs font-medium capitalize text-muted-foreground aria-pressed:bg-muted aria-pressed:text-foreground"
 											aria-pressed={filter === value}
 											onClick={() => {
 												setFilter(value);
@@ -394,7 +369,7 @@ function ChannelSettingsEditor({
 									))}
 								</fieldset>
 							</div>
-							<div className="flex min-h-11 items-center justify-between gap-3 border-b px-3 text-xs text-muted-foreground">
+							<div className="flex min-h-9 items-center justify-between gap-3 border-b px-3 text-xs text-muted-foreground">
 								<span>
 									{String(visibleAgents.length)}{" "}
 									{visibleAgents.length === 1 ? "agent" : "agents"}
@@ -441,7 +416,7 @@ function ChannelSettingsEditor({
 													);
 												}}
 											/>
-											<AgentMark agent={agent} />
+											<AgentAvatar agent={agent} />
 											<span className="min-w-0">
 												<strong className="block truncate text-[13px]">
 													{agent.displayName}
@@ -489,7 +464,7 @@ function ChannelSettingsEditor({
 							>
 								Pinned messages & notes
 							</h3>
-							<span className="font-mono text-xs text-muted-foreground">
+							<span className="text-xs text-muted-foreground">
 								{pins.length}
 							</span>
 						</div>
@@ -553,7 +528,7 @@ function ChannelSettingsEditor({
 							})}
 							<div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
 								<input
-									className="min-h-11 rounded-sm border px-3 text-[13px]"
+									className="min-h-9 rounded-sm border px-3 text-[13px]"
 									aria-label="New channel pin note"
 									placeholder="Pin a channel note"
 									value={pinNote}
@@ -881,9 +856,7 @@ function AgentSettingsEditor({
 		agent.fullAccess === true,
 	);
 	const [saving, setSaving] = useState(false);
-	const [saveState, setSaveState] = useState(
-		"Unsaved changes stay local until verified.",
-	);
+	const [saveState, setSaveState] = useState("Changes apply after saving.");
 	const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
 	const agentAdapter = agent.adapter;
 
@@ -915,8 +888,10 @@ function AgentSettingsEditor({
 			acceptAccentColor(accentColor);
 			acceptFullAccess(fullAccess);
 			setSaveState(
-				"Workspace identity saved. Native harness profile verified unchanged.",
+				"Agent settings saved. Native runtime connectivity has not been tested.",
 			);
+		} catch (error) {
+			setSaveState(error instanceof Error ? error.message : String(error));
 		} finally {
 			setSaving(false);
 		}
@@ -924,11 +899,11 @@ function AgentSettingsEditor({
 
 	return (
 		<aside
-			className="commonspace-context-settings flex min-h-0 min-w-[420px] flex-col border-l bg-background"
+			className="commonspace-context-settings flex min-h-0 min-w-[420px] flex-col border-l bg-card"
 			aria-label="Agent profile"
 		>
 			<header className="flex min-h-[76px] items-center gap-3 border-b bg-muted px-4 py-2.5">
-				<AgentMark agent={previewAgent} />
+				<AgentAvatar agent={previewAgent} />
 				<span className="min-w-0 flex-1">
 					<h2 className="block truncate text-[13px] font-bold">
 						{previewAgent.displayName}
@@ -964,19 +939,19 @@ function AgentSettingsEditor({
 							<p className="font-mono text-[10px] tracking-[0.06em] text-muted-foreground uppercase">
 								Commonspace identity
 							</p>
-							<h3 className="font-heading text-[17px] font-bold">
+							<h3 className="font-heading text-base font-semibold">
 								Workspace configuration
 							</h3>
 						</div>
-						<span className="font-mono text-xs">Local</span>
+						<span className="text-xs">Local</span>
 					</header>
 					<p className="text-xs leading-5 text-muted-foreground">
 						Customize how this agent appears in Commonspace. These settings do
 						not change the native harness profile.
 					</p>
-					<div className="mt-4 grid gap-3 [&_input]:min-h-11 [&_input]:rounded-sm [&_input]:border [&_input]:px-3 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-xs [&_label]:font-semibold">
+					<div className="mt-4 grid gap-3 [&_input]:min-h-9 [&_input]:rounded-sm [&_input]:border [&_input]:px-3 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-xs [&_label]:font-semibold">
 						<div className="grid grid-cols-[64px_minmax(0,1fr)] items-center gap-4">
-							<AgentMark agent={previewAgent} large />
+							<AgentAvatar agent={previewAgent} size="profile" />
 							<label>
 								Workspace name
 								<input
@@ -984,7 +959,7 @@ function AgentSettingsEditor({
 									value={displayName}
 									onChange={(event) => {
 										setDisplayName(event.target.value);
-										setSaveState("Unsaved changes stay local until verified.");
+										setSaveState("Changes apply after saving.");
 									}}
 								/>
 							</label>
@@ -996,7 +971,7 @@ function AgentSettingsEditor({
 									value={avatarEmoji}
 									onChange={(value) => {
 										setAvatarEmoji(value);
-										setSaveState("Unsaved changes stay local until verified.");
+										setSaveState("Changes apply after saving.");
 									}}
 								/>
 							</div>
@@ -1010,17 +985,17 @@ function AgentSettingsEditor({
 										value={accentColor}
 										onChange={(event) => {
 											setAccentColor(event.target.value);
-											setSaveState(
-												"Unsaved changes stay local until verified.",
-											);
+											setSaveState("Changes apply after saving.");
 										}}
 									/>
 									<input
 										aria-label="Avatar background hex value"
 										value={accentColor.toLocaleUpperCase()}
 										onChange={(event) => {
-											if (/^#[0-9a-f]{6}$/iu.test(event.target.value))
+											if (/^#[0-9a-f]{6}$/iu.test(event.target.value)) {
 												setAccentColor(event.target.value);
+												setSaveState("Changes apply after saving.");
+											}
 										}}
 									/>
 								</span>
@@ -1035,7 +1010,7 @@ function AgentSettingsEditor({
 							<p className="font-mono text-[10px] tracking-[0.06em] text-muted-foreground uppercase">
 								Harness profile
 							</p>
-							<h3 className="font-heading text-[17px] font-bold">
+							<h3 className="font-heading text-base font-semibold">
 								Harness configuration
 							</h3>
 						</div>
@@ -1047,7 +1022,7 @@ function AgentSettingsEditor({
 						Model, reasoning, and credentials stay owned by the selected native
 						profile. Access mode below applies only to Commonspace runs.
 					</p>
-					<div className="mt-4 grid grid-cols-2 gap-3 [&_input]:min-h-11 [&_input]:rounded-sm [&_input]:border [&_input]:bg-muted [&_input]:px-3 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-xs [&_label]:font-semibold">
+					<div className="mt-4 grid grid-cols-2 gap-3 [&_input]:min-h-9 [&_input]:rounded-sm [&_input]:border [&_input]:bg-muted [&_input]:px-3 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-xs [&_label]:font-semibold">
 						<label>
 							Model
 							<input
@@ -1069,24 +1044,31 @@ function AgentSettingsEditor({
 						<input
 							type="checkbox"
 							className="mt-0.5 size-4"
-							checked={fullAccess}
+							checked={
+								agent.permissionPolicy?.source === "server"
+									? agent.permissionPolicy.fullAccess
+									: fullAccess
+							}
+							disabled={agent.permissionPolicy?.source === "server"}
 							onChange={(event) => {
 								setFullAccess(event.target.checked);
-								setSaveState("Unsaved changes stay local until verified.");
+								setSaveState("Changes apply after saving.");
 							}}
 						/>
 						<span>
 							<strong className="block text-sm">Full access</strong>
 							<small className="block text-xs leading-5 text-muted-foreground">
+								{agent.permissionPolicy?.source === "server" &&
+									"Full access is enabled by server configuration and cannot be disabled here. "}
 								Bypass approval prompts for this agent's Commonspace runs. The
 								agent can execute commands and modify files without asking
 								first.
 							</small>
 						</span>
 					</label>
-					<p className="mt-3 inline-flex items-center gap-2 text-xs text-[var(--status-success)]">
-						<CheckIcon className="size-4" aria-hidden="true" />
-						Configuration verified from the native profile
+					<p className="mt-3 inline-flex items-center gap-2 text-xs text-muted-foreground">
+						Native model information comes from discovery; it does not verify
+						this session or model access.
 					</p>
 				</section>
 
@@ -1096,11 +1078,11 @@ function AgentSettingsEditor({
 							<p className="font-mono text-[10px] tracking-[0.06em] text-muted-foreground uppercase">
 								Harness inventory
 							</p>
-							<h3 className="font-heading text-[17px] font-bold">
+							<h3 className="font-heading text-base font-semibold">
 								Capabilities
 							</h3>
 						</div>
-						<span className="font-mono text-xs">Native</span>
+						<span className="text-xs">Native</span>
 					</header>
 					<p className="text-xs leading-5 text-muted-foreground">
 						Commonspace shows capability ownership without recreating a second
@@ -1137,7 +1119,7 @@ function AgentSettingsEditor({
 						void save();
 					}}
 				>
-					{saving ? "Saving…" : "Save and verify"}
+					{saving ? "Saving…" : "Save agent settings"}
 				</Button>
 			</footer>
 			<ConfirmActionDialog

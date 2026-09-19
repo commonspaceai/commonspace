@@ -14,6 +14,7 @@ import {
 	MessageSquareTextIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Button } from "@/components/ui/button";
 import {
 	Empty,
 	EmptyDescription,
@@ -21,6 +22,8 @@ import {
 	EmptyMedia,
 	EmptyTitle,
 } from "@/components/ui/empty";
+import { AgentAvatar } from "@/design-system/AgentAvatar";
+import { CollectionToolbar } from "@/design-system/CollectionToolbar";
 import { WorkspaceHeader } from "@/design-system/WorkspaceHeader";
 import { cn } from "@/lib/utils";
 import type { CommonspaceStore } from "./commonspace-store.ts";
@@ -126,6 +129,10 @@ export function CommonspaceInbox({
 		if (viewRequest !== null) setView(viewRequest.view);
 	}, [viewRequest]);
 	const state = snapshot.bootstrap?.state;
+	const agentsById = useMemo(
+		() => new Map(snapshot.bootstrap?.agents.map((agent) => [agent.id, agent])),
+		[snapshot.bootstrap?.agents],
+	);
 	const items = useMemo(
 		() => (state === undefined ? [] : deriveCommonspaceInboxItems(state)),
 		[state],
@@ -200,9 +207,9 @@ export function CommonspaceInbox({
 				mark={<InboxIcon className="size-[17px]" />}
 				actions={
 					view !== "sessions" ? (
-						<button
+						<Button
 							type="button"
-							className="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-sm border bg-background px-3 text-[11px] font-medium hover:bg-muted disabled:text-muted-foreground max-[480px]:size-11 max-[480px]:justify-center max-[480px]:px-0"
+							variant="outline"
 							disabled={unreadCount === 0 || markingRead}
 							onClick={() => {
 								void markAllRead().catch(() => undefined);
@@ -212,58 +219,61 @@ export function CommonspaceInbox({
 							<span className="max-[480px]:sr-only">
 								{markingRead ? "Marking read…" : "Mark all read"}
 							</span>
-						</button>
+						</Button>
 					) : undefined
 				}
 			/>
 
-			<div className="mx-auto flex min-h-12 w-full max-w-[1020px] items-center justify-between gap-3 border-b px-9 max-[780px]:overflow-x-auto max-[780px]:px-5 max-[480px]:px-3">
+			<CollectionToolbar>
 				<fieldset
 					aria-label="Inbox view"
 					className="m-0 flex min-w-0 items-center gap-0.5 border-0 p-0"
 				>
-					<button
+					<Button
 						type="button"
 						aria-pressed={view === "attention"}
 						onClick={() => {
 							setView("attention");
 						}}
-						className="inline-flex min-h-9 items-center gap-1.5 rounded-sm border border-transparent px-2.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground aria-pressed:border-border aria-pressed:bg-muted aria-pressed:text-foreground"
+						variant="tab"
+						size="compact"
 					>
 						<InboxIcon className="size-4" aria-hidden="true" />
 						Attention{" "}
-						<span className="grid size-5 place-items-center rounded-full border bg-background font-mono">
+						<span className="text-muted-foreground tabular-nums">
 							{String(attentionItems.length)}
 						</span>
-					</button>
-					<button
+					</Button>
+					<Button
 						type="button"
 						aria-pressed={view === "activity"}
 						onClick={() => {
 							setView("activity");
 						}}
-						className="inline-flex min-h-9 items-center gap-1.5 rounded-sm border border-transparent px-2.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground aria-pressed:border-border aria-pressed:bg-muted aria-pressed:text-foreground"
+						variant="tab"
+						size="compact"
 					>
 						<MessageSquareTextIcon className="size-4" aria-hidden="true" />
 						Activity{" "}
-						<span className="grid size-5 place-items-center rounded-full border bg-background font-mono">
+						<span className="text-muted-foreground tabular-nums">
 							{String(activityItems.length)}
 						</span>
-					</button>
-					<button
+					</Button>
+					<Button
 						type="button"
 						aria-pressed={view === "sessions"}
 						onClick={() => {
 							setView("sessions");
 						}}
-						className="inline-flex min-h-9 items-center gap-1.5 rounded-sm border border-transparent px-2.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground aria-pressed:border-border aria-pressed:bg-muted aria-pressed:text-foreground"
+						variant="tab"
+						size="compact"
 					>
 						<Clock3Icon className="size-4" aria-hidden="true" />
 						Sessions{" "}
-						<span className="grid size-5 place-items-center rounded-full border bg-background font-mono">
+						<span className="text-muted-foreground tabular-nums">
 							{String(sessions.length)}
 						</span>
-					</button>
+					</Button>
 				</fieldset>
 				{view !== "sessions" ? (
 					<fieldset
@@ -271,14 +281,15 @@ export function CommonspaceInbox({
 						className="m-0 flex min-w-0 items-center gap-0.5 border-0 p-0"
 					>
 						{(["all", "unread", "saved"] as const).map((value) => (
-							<button
+							<Button
 								key={value}
 								type="button"
 								aria-pressed={filter === value}
 								onClick={() => {
 									setFilter(value);
 								}}
-								className="inline-flex min-h-9 items-center gap-1.5 rounded-sm border border-transparent px-2.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground aria-pressed:border-border aria-pressed:bg-muted aria-pressed:text-foreground"
+								variant="filter"
+								size="compact"
 							>
 								{value === "all" ? (
 									"All"
@@ -290,7 +301,7 @@ export function CommonspaceInbox({
 										Saved
 									</>
 								)}
-							</button>
+							</Button>
 						))}
 					</fieldset>
 				) : (
@@ -300,26 +311,27 @@ export function CommonspaceInbox({
 					>
 						{(["all", "running", "needs-attention", "completed"] as const).map(
 							(value) => (
-								<button
+								<Button
 									key={value}
 									type="button"
 									aria-pressed={sessionFilter === value}
 									onClick={() => {
 										setSessionFilter(value);
 									}}
-									className="inline-flex min-h-9 items-center rounded-sm border border-transparent px-2.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground aria-pressed:border-border aria-pressed:bg-muted aria-pressed:text-foreground"
+									variant="filter"
+									size="compact"
 								>
 									{value === "all"
 										? "All"
 										: value === "needs-attention"
 											? "Needs attention"
 											: `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}`}
-								</button>
+								</Button>
 							),
 						)}
 					</fieldset>
 				)}
-			</div>
+			</CollectionToolbar>
 
 			<div className="min-h-0 flex-1 overflow-y-auto" aria-live="polite">
 				{view !== "sessions" ? (
@@ -330,25 +342,38 @@ export function CommonspaceInbox({
 									<CheckCheckIcon aria-hidden="true" />
 								</EmptyMedia>
 								<EmptyTitle>
-									{view === "activity"
-										? "No replies yet."
-										: "You’re all caught up."}
+									{filter !== "all"
+										? "No matching updates"
+										: view === "activity"
+											? "No replies yet"
+											: "You’re all caught up"}
 								</EmptyTitle>
 								<EmptyDescription>
-									{view === "activity"
-										? "Agent replies will appear here."
-										: "New requests and failures will appear here."}
+									{filter !== "all"
+										? "Try another filter to see more of your activity."
+										: view === "activity"
+											? "Agent replies will appear here."
+											: "New requests and failures will appear here."}
 								</EmptyDescription>
 							</EmptyHeader>
+							{filter !== "all" ? (
+								<Button variant="outline" onClick={() => setFilter("all")}>
+									Clear filter
+								</Button>
+							) : view === "attention" && activityItems.length > 0 ? (
+								<Button variant="outline" onClick={() => setView("activity")}>
+									View activity
+								</Button>
+							) : null}
 						</Empty>
 					) : (
-						<ol className="mx-auto w-full max-w-[1020px] px-7 pb-10 max-[780px]:px-3">
+						<ol className="mx-auto w-full max-w-[1280px] px-8 py-3 pb-10 max-[780px]:px-3">
 							{visibleItems.map((item) => {
 								const label = kindLabel(item);
 								return (
 									<li
 										key={item.id}
-										className="group relative grid min-h-[88px] grid-cols-[minmax(0,1fr)_44px] items-center border-b border-border/70 bg-background transition-colors [contain-intrinsic-size:88px] [content-visibility:auto] hover:bg-surface focus-within:bg-surface"
+										className="group relative grid min-h-[88px] grid-cols-[minmax(0,1fr)_44px] items-center border-b border-border/50 bg-background transition-colors [contain-intrinsic-size:88px] [content-visibility:auto] hover:bg-hover"
 									>
 										<button
 											className="relative grid min-h-[88px] min-w-0 grid-cols-[40px_minmax(0,1fr)_18px] items-center gap-[13px] rounded-sm border-0 bg-transparent px-2.5 py-3 text-left hover:bg-transparent focus-visible:outline-0 focus-visible:ring-2 focus-visible:ring-ring/50 max-[480px]:grid-cols-[36px_minmax(0,1fr)] max-[480px]:gap-2.5 max-[480px]:px-2"
@@ -360,48 +385,35 @@ export function CommonspaceInbox({
 										>
 											{item.unread && (
 												<span
-													className="absolute left-px size-1.5 rounded-full bg-destructive"
+													className="absolute left-px size-1.5 rounded-full bg-foreground"
 													aria-hidden="true"
 												/>
 											)}
-											<span className="relative grid size-10 place-items-center rounded-md border bg-background font-mono text-xs font-semibold max-[480px]:size-9">
-												{item.actorName.slice(0, 1).toLocaleUpperCase()}
-												<span
-													className={cn(
-														"absolute right-[-2px] bottom-[-2px] size-2 rounded-full border-2 border-background bg-muted-foreground",
-														label === "Mention" && "bg-primary",
-														(label === "Needs input" ||
-															label === "May need input" ||
-															label === "Permission" ||
-															label === "Timed out") &&
-															"bg-[var(--status-warning)]",
-														label === "Failed" && "bg-destructive",
-													)}
-													aria-hidden="true"
-												/>
-											</span>
+											<AgentAvatar
+												agent={agentsById.get(item.actorId)}
+												fallbackName={item.actorName}
+												size="lg"
+											/>
 											<span className="min-w-0">
 												<span className="flex min-w-0 items-center gap-[7px]">
-													<strong className="shrink-0 text-sm tracking-[-0.006em]">
+													<strong className="shrink-0 text-[15px] tracking-[-0.006em]">
 														{item.actorName}
 													</strong>
-													<span className="truncate text-xs text-muted-foreground">
-														{item.conversationName}
-													</span>
+
 													<time
-														className="ml-auto shrink-0 font-mono text-xs text-muted-foreground"
+														className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground"
 														dateTime={item.createdAt}
 													>
 														{formattedTime(item.createdAt)}
 													</time>
 												</span>
-												<span className="mt-1 block truncate text-[13px]">
+												<span className="mt-1.5 block truncate text-sm">
 													{item.text}
 												</span>
 												<span className="mt-1 flex min-w-0 items-center gap-2 text-xs">
 													<span
 														className={cn(
-															"inline-flex min-h-5 items-center gap-1.5 font-mono text-xs font-semibold",
+															"inline-flex min-h-5 items-center gap-1.5 text-xs tabular-nums font-semibold",
 															statusClass(label),
 														)}
 													>
@@ -417,9 +429,11 @@ export function CommonspaceInbox({
 												aria-hidden="true"
 											/>
 										</button>
-										<button
+										<Button
 											type="button"
-											className="grid size-11 place-items-center rounded-sm border-0 bg-transparent text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100 focus:opacity-100 max-[480px]:opacity-100 aria-pressed:bg-[color-mix(in_oklch,var(--primary)_9%,var(--background))] aria-pressed:text-primary"
+											variant="ghost"
+											size="icon-lg"
+											className="opacity-0 group-hover:opacity-100 focus:opacity-100 max-[480px]:opacity-100"
 											aria-label={
 												item.saved ? "Remove from saved" : "Save for later"
 											}
@@ -439,7 +453,7 @@ export function CommonspaceInbox({
 												fill={item.saved ? "currentColor" : "none"}
 												aria-hidden="true"
 											/>
-										</button>
+										</Button>
 									</li>
 								);
 							})}
@@ -458,13 +472,13 @@ export function CommonspaceInbox({
 						</EmptyHeader>
 					</Empty>
 				) : (
-					<ol className="mx-auto w-full max-w-[1020px] px-7 pb-10">
+					<ol className="mx-auto w-full max-w-[1280px] px-8 py-3 pb-10">
 						{visibleSessions.map((session) => {
 							const label = sessionStatusLabel(session);
 							return (
 								<li
 									key={session.id}
-									className="group relative grid min-h-[88px] grid-cols-[minmax(0,1fr)_auto] items-center border-b border-border/70 bg-background transition-colors [contain-intrinsic-size:88px] [content-visibility:auto] hover:bg-surface focus-within:bg-surface"
+									className="group relative grid min-h-[88px] grid-cols-[minmax(0,1fr)_auto] items-center border-b border-border/50 bg-background transition-colors [contain-intrinsic-size:88px] [content-visibility:auto] hover:bg-hover"
 								>
 									<button
 										className="grid min-h-[88px] min-w-0 grid-cols-[40px_minmax(0,1fr)_18px] items-center gap-[13px] rounded-sm border-0 bg-transparent px-2.5 py-3 text-left hover:bg-transparent focus-visible:outline-0 focus-visible:ring-2 focus-visible:ring-ring/50 max-[480px]:grid-cols-[36px_minmax(0,1fr)] max-[480px]:gap-2.5 max-[480px]:px-2"
@@ -474,19 +488,11 @@ export function CommonspaceInbox({
 											openSession(session);
 										}}
 									>
-										<span className="relative grid size-10 place-items-center rounded-md border bg-background font-mono text-xs font-semibold max-[480px]:size-9">
-											{session.agentName.slice(0, 1).toLocaleUpperCase()}
-											<span
-												className={cn(
-													"absolute right-[-2px] bottom-[-2px] size-2 rounded-full border-2 border-background bg-muted-foreground",
-													session.status === "running" &&
-														"bg-[var(--status-success)]",
-													session.status === "needs-attention" &&
-														"bg-[var(--status-warning)]",
-												)}
-												aria-hidden="true"
-											/>
-										</span>
+										<AgentAvatar
+											agent={agentsById.get(session.agentId)}
+											fallbackName={session.agentName}
+											size="lg"
+										/>
 										<span className="min-w-0">
 											<span className="flex min-w-0 items-center gap-[7px]">
 												<strong className="shrink-0 text-sm">
@@ -498,18 +504,18 @@ export function CommonspaceInbox({
 														: `${session.projectName} · ${session.conversationName}`}
 												</span>
 												<time
-													className="ml-auto shrink-0 font-mono text-xs text-muted-foreground"
+													className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground"
 													dateTime={session.updatedAt}
 												>
 													{formattedTime(session.updatedAt)}
 												</time>
 											</span>
-											<span className="mt-1 block truncate text-[13px]">
+											<span className="mt-1.5 block truncate text-sm">
 												{session.summary}
 											</span>
 											<span
 												className={cn(
-													"mt-1 block font-mono text-xs font-semibold",
+													"mt-1 block text-xs tabular-nums font-semibold",
 													statusClass(label),
 												)}
 											>
@@ -522,9 +528,10 @@ export function CommonspaceInbox({
 										/>
 									</button>
 									<div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 max-[780px]:opacity-100">
-										<button
+										<Button
 											type="button"
-											className="min-h-11 rounded-sm border-0 bg-transparent px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+											variant="filter"
+											size="compact"
 											aria-pressed={session.followed}
 											onClick={() => {
 												void store
@@ -537,10 +544,11 @@ export function CommonspaceInbox({
 											}}
 										>
 											{session.followed ? "Following" : "Follow"}
-										</button>
-										<button
+										</Button>
+										<Button
 											type="button"
-											className="min-h-11 rounded-sm border-0 bg-transparent px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+											variant="filter"
+											size="compact"
 											aria-pressed={session.muted}
 											onClick={() => {
 												void store
@@ -553,7 +561,7 @@ export function CommonspaceInbox({
 											}}
 										>
 											{session.muted ? "Muted" : "Mute"}
-										</button>
+										</Button>
 									</div>
 								</li>
 							);

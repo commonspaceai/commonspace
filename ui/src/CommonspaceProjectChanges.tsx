@@ -148,16 +148,16 @@ export function CommonspaceProjectChanges({
 
 	return (
 		<section
-			className="grid h-full min-h-0 min-w-0 grid-cols-[330px_minmax(0,1fr)] max-[780px]:grid-cols-1 max-[780px]:grid-rows-[minmax(300px,42dvh)_minmax(360px,1fr)]"
+			className="grid h-full min-h-0 min-w-0 grid-cols-[280px_minmax(0,1fr)] max-[780px]:grid-cols-1 max-[780px]:grid-rows-[minmax(300px,42dvh)_minmax(360px,1fr)]"
 			aria-label="Project changes"
 		>
-			<aside className="min-h-0 min-w-0 overflow-y-auto border-r bg-[color-mix(in_oklch,var(--background)_55%,var(--muted))] max-[780px]:border-r-0 max-[780px]:border-b">
-				<header className="flex min-h-[66px] items-center gap-3 border-b px-3 py-2">
+			<aside className="min-h-0 min-w-0 overflow-y-auto border-r bg-card max-[780px]:border-r-0 max-[780px]:border-b">
+				<header className="flex min-h-14 items-center gap-3 border-b px-3 py-2">
 					<div className="min-w-0 flex-1">
 						<strong className="block truncate text-[13px]">
 							Working changes
 						</strong>
-						<small className="block truncate text-xs text-muted-foreground">
+						<small className="block truncate text-[13px] text-muted-foreground">
 							{status?.available === true ? (
 								<>
 									<span>{status.branch ?? "Detached HEAD"}</span> ·{" "}
@@ -170,7 +170,7 @@ export function CommonspaceProjectChanges({
 					</div>
 					<button
 						type="button"
-						className="grid size-11 place-items-center rounded-full border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+						className="grid size-9 place-items-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
 						aria-label="Refresh changes"
 						onClick={() => {
 							setRefresh((value) => value + 1);
@@ -179,7 +179,7 @@ export function CommonspaceProjectChanges({
 						↻
 					</button>
 				</header>
-				<div className="m-2.5 rounded-md border bg-muted px-4 py-3.5">
+				<div className="border-b px-4 py-3">
 					{status?.available === true && (
 						<>
 							<strong className="block text-[13px]">
@@ -223,7 +223,7 @@ export function CommonspaceProjectChanges({
 							<button
 								key={`${change.oldPath ?? ""}:${change.path}`}
 								type="button"
-								className="grid min-h-12 w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 border-0 border-b bg-transparent px-3 py-1 text-left hover:bg-muted aria-pressed:bg-muted"
+								className="grid min-h-11 w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 border-0 bg-transparent px-3 py-1 text-left hover:bg-hover aria-pressed:bg-selection"
 								aria-label={`Open change ${change.path}`}
 								aria-pressed={selected?.path === change.path}
 								onClick={() => {
@@ -237,10 +237,10 @@ export function CommonspaceProjectChanges({
 									{statusMark(change)}
 								</span>
 								<span className="min-w-0">
-									<strong className="block truncate text-xs">
+									<strong className="block truncate text-[13px]">
 										{change.path.split("/").at(-1)}
 									</strong>
-									<small className="block truncate text-xs text-muted-foreground">
+									<small className="block truncate text-[13px] text-muted-foreground">
 										{change.oldPath === undefined
 											? change.path
 											: `${change.oldPath} → ${change.path}`}
@@ -292,12 +292,12 @@ export function CommonspaceProjectChanges({
 					</div>
 				) : (
 					<>
-						<header className="flex min-h-[66px] items-center justify-between gap-3 border-b px-3 py-2">
+						<header className="flex min-h-14 items-center justify-between gap-3 border-b px-3 py-2">
 							<div className="min-w-0">
 								<strong className="block truncate text-[13px]">
 									{selected.path}
 								</strong>
-								<small className="block truncate text-xs text-muted-foreground">
+								<small className="block truncate text-[13px] text-muted-foreground">
 									{selected.status} · working tree vs HEAD
 								</small>
 							</div>

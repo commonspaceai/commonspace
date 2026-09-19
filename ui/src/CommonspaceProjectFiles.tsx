@@ -157,11 +157,11 @@ export function CommonspaceProjectFiles({
 
 	return (
 		<section
-			className="grid h-full min-h-0 min-w-0 text-foreground grid-cols-[330px_minmax(0,1fr)] max-[780px]:grid-cols-1 max-[780px]:grid-rows-[minmax(300px,42dvh)_minmax(360px,1fr)]"
+			className="grid h-full min-h-0 min-w-0 text-foreground grid-cols-[280px_minmax(0,1fr)] max-[780px]:grid-cols-1 max-[780px]:grid-rows-[minmax(300px,42dvh)_minmax(360px,1fr)]"
 			aria-label="Project files"
 		>
-			<aside className="min-h-0 min-w-0 overflow-y-auto border-r bg-[color-mix(in_oklch,var(--background)_55%,var(--muted))] max-[780px]:border-r-0 max-[780px]:border-b">
-				<header className="grid min-h-[58px] grid-cols-[48px_minmax(0,1fr)] items-center gap-2 border-b px-3 py-2">
+			<aside className="min-h-0 min-w-0 overflow-y-auto border-r bg-card max-[780px]:border-r-0 max-[780px]:border-b">
+				<header className="grid min-h-14 grid-cols-[48px_minmax(0,1fr)] items-center gap-2 border-b px-3 py-2">
 					<div>
 						<strong className="block text-[13px]">Files</strong>
 						<small className="hidden">Read-only project browser</small>
@@ -185,11 +185,11 @@ export function CommonspaceProjectFiles({
 				</header>
 
 				<nav
-					className="flex min-h-[54px] items-center gap-1 overflow-x-auto border-b px-3 text-xs whitespace-nowrap"
+					className="flex min-h-10 items-center gap-1 overflow-x-auto border-b px-3 text-xs whitespace-nowrap"
 					aria-label="File path"
 				>
 					<button
-						className="min-h-10 rounded-sm border-0 bg-transparent px-2 hover:bg-muted aria-[current=page]:bg-muted"
+						className="min-h-10 rounded-sm border-0 bg-transparent px-2 hover:text-foreground aria-[current=page]:text-foreground"
 						type="button"
 						aria-current={directoryPath === "" ? "page" : undefined}
 						onClick={() => {
@@ -207,7 +207,7 @@ export function CommonspaceProjectFiles({
 								/
 							</i>
 							<button
-								className="min-h-10 rounded-sm border-0 bg-transparent px-2 hover:bg-muted aria-[current=page]:bg-muted"
+								className="min-h-10 rounded-sm border-0 bg-transparent px-2 hover:text-foreground aria-[current=page]:text-foreground"
 								type="button"
 								aria-current={crumb.path === directoryPath ? "page" : undefined}
 								onClick={() => {
@@ -237,11 +237,11 @@ export function CommonspaceProjectFiles({
 						return (
 							<div
 								key={entry.path}
-								className="group grid grid-cols-[minmax(0,1fr)_44px] items-center border-b"
+								className="group grid grid-cols-[minmax(0,1fr)_32px] items-center"
 							>
 								<button
 									type="button"
-									className="grid min-h-12 w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 border-0 bg-transparent px-3 py-1 text-left hover:bg-muted aria-pressed:bg-muted"
+									className="grid min-h-11 w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 border-0 bg-transparent px-3 py-1 text-left hover:bg-hover aria-pressed:bg-selection"
 									aria-label={`${entry.kind === "directory" ? "Open folder" : "Open file"} ${entry.name}`}
 									aria-pressed={
 										entry.kind === "file" && selected?.path === entry.path
@@ -249,12 +249,12 @@ export function CommonspaceProjectFiles({
 									onClick={openEntry}
 								>
 									<span
-										className="grid size-7 place-items-center rounded-sm bg-muted text-muted-foreground [&_svg]:size-4"
+										className="grid size-7 place-items-center rounded-sm bg-transparent text-muted-foreground [&_svg]:size-4"
 										aria-hidden="true"
 									>
 										{entryIcon(entry)}
 									</span>
-									<span className="truncate text-xs font-semibold">
+									<span className="truncate text-[13px] font-medium">
 										{entry.name}
 									</span>
 									<small className="text-xs text-muted-foreground">
@@ -292,28 +292,28 @@ export function CommonspaceProjectFiles({
 
 			<div className="min-h-0 min-w-0 overflow-auto bg-background">
 				{selected === null ? (
-					<Empty className="min-h-full rounded-none border-0 bg-[radial-gradient(circle_at_center,color-mix(in_oklch,var(--muted)_55%,transparent),transparent_42%)]">
-						<EmptyHeader className="rounded-xl border bg-background/85 px-10 py-9 shadow-sm backdrop-blur-sm">
+					<Empty className="min-h-full rounded-none border-0">
+						<EmptyHeader className="px-10 py-9">
 							<EmptyMedia
 								variant="icon"
-								className="size-12 rounded-xl border bg-background text-primary shadow-sm [&_svg]:size-5"
+								className="size-12 rounded-xl bg-muted text-muted-foreground [&_svg]:size-5"
 							>
 								<FileSearchIcon aria-hidden="true" />
 							</EmptyMedia>
 							<EmptyTitle>Select a file to preview</EmptyTitle>
 							<EmptyDescription>
-								Text, images, and videos render here.
+								Browse text, images, and video. Files are read only.
 							</EmptyDescription>
 						</EmptyHeader>
 					</Empty>
 				) : (
 					<>
-						<header className="flex min-h-[66px] items-center justify-between gap-3 border-b px-3 py-2">
+						<header className="flex min-h-14 items-center justify-between gap-3 border-b px-3 py-2">
 							<div className="min-w-0">
 								<strong className="block truncate text-[13px]">
 									{selected.name}
 								</strong>
-								<small className="block truncate text-xs text-muted-foreground">
+								<small className="block truncate text-[13px] text-muted-foreground">
 									{selected.path} · {formatFileSize(selected.size)}
 								</small>
 							</div>

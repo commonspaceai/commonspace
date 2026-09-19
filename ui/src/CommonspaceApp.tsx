@@ -1,7 +1,6 @@
 import { RouterProvider } from "@tanstack/react-router";
-import { CircleAlertIcon, MenuIcon, RefreshCwIcon, XIcon } from "lucide-react";
+import { MenuIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CommonspaceWorkspace } from "./app-shell/CommonspaceWorkspace.tsx";
 import {
@@ -14,6 +13,7 @@ import { CommonspaceSearchDialog } from "./CommonspaceSearch.tsx";
 import { CommonspaceSidebar } from "./CommonspaceSidebar.tsx";
 import { CommonspaceTopbar } from "./CommonspaceTopbar.tsx";
 import type { CommonspaceStore } from "./commonspace-store.ts";
+import { WorkspaceErrorNotice } from "./design-system/WorkspaceErrorNotice";
 
 export interface CommonspaceAppProps {
 	store: CommonspaceStore;
@@ -52,41 +52,6 @@ export function CommonspaceApp({
 				),
 			}}
 		/>
-	);
-}
-
-function WorkspaceErrorNotice({
-	error,
-	loading,
-	onRefresh,
-}: {
-	error: string;
-	loading: boolean;
-	onRefresh: () => void;
-}) {
-	return (
-		<div
-			className="fixed right-4 bottom-4 z-50 flex max-w-md items-start gap-3 rounded-md border bg-popover p-4 text-sm text-popover-foreground shadow-lg"
-			role="alert"
-		>
-			<CircleAlertIcon
-				aria-hidden="true"
-				className="mt-0.5 size-4 shrink-0 text-destructive"
-			/>
-			<div className="min-w-0 flex-1">
-				<p className="leading-relaxed [overflow-wrap:anywhere]">{error}</p>
-				<Button
-					variant="outline"
-					size="sm"
-					className="mt-3"
-					disabled={loading}
-					onClick={onRefresh}
-				>
-					<RefreshCwIcon data-icon="inline-start" aria-hidden="true" />
-					Refresh workspace
-				</Button>
-			</div>
-		</div>
 	);
 }
 
@@ -135,7 +100,7 @@ function CommonspaceAppShell({
 	return (
 		<div className="relative flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden bg-sidebar">
 			<CommonspaceTopbar onOpenSearch={openSearch} />
-			<div className="relative grid min-h-0 min-w-0 flex-1 grid-cols-[260px_minmax(0,1fr)] bg-sidebar max-[780px]:grid-cols-1">
+			<div className="relative grid min-h-0 min-w-0 flex-1 grid-cols-[var(--navigation-width)_minmax(0,1fr)] bg-sidebar max-[780px]:grid-cols-1">
 				<button
 					type="button"
 					aria-label={navigationOpen ? "Close navigation" : "Open navigation"}
@@ -201,7 +166,7 @@ function CommonspaceAppShell({
 				<section
 					inert={workspaceSettingsOpen}
 					aria-hidden={workspaceSettingsOpen || undefined}
-					className="min-h-0 min-w-0 overflow-hidden bg-background"
+					className="relative isolate min-h-0 min-w-0 overflow-hidden bg-background"
 				>
 					<CommonspaceWorkspace
 						navigation={navigation}
@@ -219,15 +184,18 @@ function CommonspaceAppShell({
 					{...(searchFetcher === undefined ? {} : { fetcher: searchFetcher })}
 				/>
 			)}
-			{snapshot.bootstrap !== null && snapshot.error !== null && (
-				<WorkspaceErrorNotice
-					error={snapshot.error}
-					loading={snapshot.loading}
-					onRefresh={() => {
-						void store.refresh();
-					}}
-				/>
-			)}
+			{!workspaceSettingsOpen &&
+				snapshot.bootstrap !== null &&
+				snapshot.error !== null && (
+					<WorkspaceErrorNotice
+						error={snapshot.error}
+						onDismiss={() => store.dismissError()}
+						loading={snapshot.loading}
+						onRefresh={() => {
+							void store.refresh();
+						}}
+					/>
+				)}
 		</div>
 	);
 }

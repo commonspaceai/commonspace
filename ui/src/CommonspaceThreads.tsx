@@ -5,12 +5,12 @@ import {
 	deriveCommonspaceSessions,
 } from "@commonspace/shared";
 import {
-	BellPlusIcon,
 	CheckCheckIcon,
 	ChevronRightIcon,
 	MessageSquareTextIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
 	Empty,
 	EmptyDescription,
@@ -18,6 +18,7 @@ import {
 	EmptyMedia,
 	EmptyTitle,
 } from "@/components/ui/empty";
+import { CollectionToolbar } from "@/design-system/CollectionToolbar";
 import { ResourceActionMenu } from "@/design-system/ResourceActionMenu";
 import { WorkspaceHeader } from "@/design-system/WorkspaceHeader";
 import type { CommonspaceStore } from "./commonspace-store.ts";
@@ -146,9 +147,9 @@ export function CommonspaceThreads({
 				subtitle={`${String(unreadCount)} unread · ${String(followingCount)} following`}
 				mark={<MessageSquareTextIcon className="size-[17px]" />}
 				actions={
-					<button
+					<Button
 						type="button"
-						className="inline-flex min-h-9 items-center gap-2 rounded-sm border bg-background px-3 text-[11px] font-medium text-foreground hover:bg-muted disabled:text-muted-foreground"
+						variant="outline"
 						disabled={unreadCount === 0}
 						onClick={() => {
 							void store
@@ -158,47 +159,50 @@ export function CommonspaceThreads({
 					>
 						<CheckCheckIcon className="size-4" aria-hidden="true" />
 						Mark all read
-					</button>
+					</Button>
 				}
 			/>
 
-			<div className="mx-auto flex min-h-12 w-full max-w-[1020px] items-center justify-end border-b px-9 max-[780px]:px-5 max-[480px]:px-3">
+			<CollectionToolbar className="justify-start">
 				<fieldset
 					aria-label="Thread filter"
 					className="m-0 flex min-w-0 items-center gap-0.5 border-0 p-0"
 				>
-					<button
+					<Button
 						type="button"
 						aria-pressed={filter === "all"}
 						onClick={() => {
 							setFilter("all");
 						}}
-						className="inline-flex min-h-9 items-center rounded-sm border border-transparent px-2.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground aria-pressed:border-border aria-pressed:bg-muted aria-pressed:text-foreground"
+						variant="tab"
+						size="compact"
 					>
 						All
-					</button>
-					<button
+					</Button>
+					<Button
 						type="button"
 						aria-pressed={filter === "unread"}
 						onClick={() => {
 							setFilter("unread");
 						}}
-						className="inline-flex min-h-9 items-center rounded-sm border border-transparent px-2.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground aria-pressed:border-border aria-pressed:bg-muted aria-pressed:text-foreground"
+						variant="tab"
+						size="compact"
 					>
 						Unread {String(unreadCount)}
-					</button>
-					<button
+					</Button>
+					<Button
 						type="button"
 						aria-pressed={filter === "following"}
 						onClick={() => {
 							setFilter("following");
 						}}
-						className="inline-flex min-h-9 items-center rounded-sm border border-transparent px-2.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground aria-pressed:border-border aria-pressed:bg-muted aria-pressed:text-foreground"
+						variant="tab"
+						size="compact"
 					>
 						Following
-					</button>
+					</Button>
 				</fieldset>
-			</div>
+			</CollectionToolbar>
 
 			<div className="min-h-0 flex-1 overflow-y-auto" aria-live="polite">
 				{visibleRows.length === 0 ? (
@@ -212,13 +216,18 @@ export function CommonspaceThreads({
 								Change the filter or open a conversation from a channel.
 							</EmptyDescription>
 						</EmptyHeader>
+						{filter !== "all" && (
+							<Button variant="outline" onClick={() => setFilter("all")}>
+								Show all threads
+							</Button>
+						)}
 					</Empty>
 				) : (
-					<ol className="mx-auto w-full max-w-[1020px] px-7 pb-10 max-[780px]:px-3">
+					<ol className="mx-auto w-full max-w-[1280px] px-8 py-3 pb-10 max-[780px]:px-3">
 						{visibleRows.map((row) => (
 							<li
 								key={row.id}
-								className="group relative grid min-h-[72px] grid-cols-[minmax(0,1fr)_32px_32px] items-center border-b border-border/70 bg-background transition-colors [contain-intrinsic-size:72px] [content-visibility:auto] hover:bg-surface focus-within:bg-surface"
+								className="group relative grid min-h-[72px] grid-cols-[minmax(0,1fr)_32px] items-center border-b border-border/50 bg-background transition-colors [contain-intrinsic-size:72px] [content-visibility:auto] hover:bg-hover"
 							>
 								<button
 									type="button"
@@ -234,7 +243,7 @@ export function CommonspaceThreads({
 								>
 									{row.unread && (
 										<span
-											className="absolute left-px size-1.5 rounded-full bg-destructive"
+											className="absolute left-px size-1.5 rounded-full bg-foreground"
 											aria-hidden="true"
 										/>
 									)}
@@ -244,41 +253,38 @@ export function CommonspaceThreads({
 										)}
 										fallbackName={row.agentIds[0] ?? "#"}
 										size="md"
-										status={row.unread ? "running" : "stopped"}
-										showStatus
-										className="rounded-md max-[480px]:size-8"
+										className="max-[480px]:size-8"
 									/>
 									<span className="min-w-0">
 										<span className="flex min-w-0 items-center gap-[7px]">
-											<strong className="truncate text-sm tracking-[-0.006em]">
+											<strong className="truncate text-[15px] tracking-[-0.006em]">
 												{row.title}
 											</strong>
-											<span className="truncate text-xs text-muted-foreground">
-												# {row.channelName}
-											</span>
+
 											<time
-												className="ml-auto shrink-0 font-mono text-xs text-muted-foreground"
+												className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground"
 												dateTime={row.updatedAt}
 											>
 												{formattedTime(row.updatedAt)}
 											</time>
 										</span>
-										<span className="mt-1 block truncate text-[13px]">
+										<span className="mt-1.5 block truncate text-sm">
 											{row.detail}
 										</span>
 										<span className="mt-1 flex min-w-0 items-center gap-2 text-xs">
 											<span
 												className={
 													row.unread
-														? "font-mono font-semibold text-[var(--status-success)]"
-														: "font-mono font-semibold text-muted-foreground"
+														? "font-medium text-primary"
+														: "font-medium text-muted-foreground"
 												}
 											>
 												{String(row.replyCount)}{" "}
 												{row.replyCount === 1 ? "reply" : "replies"}
 											</span>
 											<span className="truncate text-muted-foreground">
-												{row.followed ? "followed" : "not followed"}
+												#{row.channelName}
+												{row.followed ? " · Following" : ""}
 											</span>
 										</span>
 									</span>
@@ -287,32 +293,10 @@ export function CommonspaceThreads({
 										aria-hidden="true"
 									/>
 								</button>
-								<button
-									type="button"
-									className="grid size-8 place-items-center rounded-sm border-0 bg-transparent text-primary hover:bg-[color-mix(in_oklch,var(--primary)_9%,var(--background))] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-									aria-label={
-										row.followed ? "Unfollow thread" : "Follow thread"
-									}
-									aria-pressed={row.followed}
-									disabled={row.sessionId === undefined}
-									onClick={() => {
-										if (row.sessionId !== undefined)
-											void store
-												.mutate({
-													action: "set-session-followed",
-													sessionId: row.sessionId,
-													followed: !row.followed,
-												})
-												.catch(() => undefined);
-									}}
-								>
-									<BellPlusIcon className="size-[17px]" aria-hidden="true" />
-								</button>
 								<ResourceActionMenu
 									kind="thread"
 									label={row.title}
 									meta={`#${row.channelName}`}
-									triggerClassName="opacity-100"
 									following={row.followed}
 									unread={row.unread}
 									onOpen={() => {

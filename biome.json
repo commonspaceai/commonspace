@@ -58,7 +58,10 @@
 	},
 	"overrides": [
 		{
-			"includes": ["packages/shared/src/contracts.ts"],
+			"includes": [
+				"packages/shared/src/contracts.ts",
+				"ui/src/settings-operation.ts"
+			],
 			"linter": { "rules": { "suspicious": { "noConstEnum": "off" } } }
 		}
 	],

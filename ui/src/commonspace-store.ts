@@ -32,7 +32,6 @@ import type {
 	StopAgentRunsResponse,
 	UpdateRoutingConfigurationRequest,
 	UpdateThreadContextRequest,
-	UpdateWorkspaceSettingsRequest,
 } from "@commonspace/shared";
 import { conversationKey, isAgentAdapterKind } from "@commonspace/shared";
 import type { WorkspaceArchiveSource } from "./workspace-import.ts";
@@ -369,10 +368,16 @@ export class CommonspaceClientStore {
 	private refreshPromise: Promise<void> | null = null;
 	private discoveryRequest = 0;
 	private pendingRevision = -1;
+	private pendingConfigurationRefresh = false;
+	private routingGeneration = 0;
 	private pendingLiveActivities: CommonspaceLiveAgentActivity[] | null = null;
 	private events: EventSource | null = null;
 
 	getSnapshot = (): CommonspaceClientSnapshot => this.snapshot;
+
+	dismissError(): void {
+		this.set({ ...this.snapshot, error: null });
+	}
 
 	subscribe = (listener: Listener): (() => void) => {
 		this.listeners.add(listener);
@@ -383,6 +388,8 @@ export class CommonspaceClientStore {
 
 	async refresh(): Promise<void> {
 		if (this.refreshPromise !== null) return this.refreshPromise;
+		const routingGeneration = this.routingGeneration;
+		this.pendingConfigurationRefresh = false;
 		this.set({ ...this.snapshot, loading: true, error: null });
 		let refreshSucceeded = false;
 		const task = requestJson<CommonspaceBootstrap>("/api/bootstrap")
@@ -394,6 +401,7 @@ export class CommonspaceClientStore {
 					liveActivities === null
 						? bootstrap
 						: { ...bootstrap, liveActivities },
+					routingGeneration,
 				);
 				this.set({
 					...this.snapshot,
@@ -413,7 +421,11 @@ export class CommonspaceClientStore {
 				this.refreshPromise = null;
 				const currentRevision = this.snapshot.bootstrap?.state.revision ?? -1;
 				if (this.pendingRevision <= currentRevision) this.pendingRevision = -1;
-				else if (refreshSucceeded) void this.refresh();
+				if (
+					refreshSucceeded &&
+					(this.pendingRevision !== -1 || this.pendingConfigurationRefresh)
+				)
+					void this.refresh();
 			});
 		this.refreshPromise = task;
 		return task;
@@ -422,6 +434,13 @@ export class CommonspaceClientStore {
 	connectEvents(): void {
 		if (this.events !== null || typeof EventSource === "undefined") return;
 		const events = new EventSource("/api/events");
+		const refreshConfiguration = () => {
+			this.routingGeneration += 1;
+			this.pendingConfigurationRefresh = true;
+			void this.refresh();
+		};
+		events.addEventListener("routing-changed", refreshConfiguration);
+		events.addEventListener("open", refreshConfiguration);
 		events.addEventListener("revision", (event) => {
 			if (!(event instanceof MessageEvent) || typeof event.data !== "string")
 				return;
@@ -493,6 +512,7 @@ export class CommonspaceClientStore {
 	async updateRoutingConfiguration(
 		request: UpdateRoutingConfigurationRequest,
 	): Promise<void> {
+		const requestGeneration = this.routingGeneration;
 		try {
 			const routing = await requestJson<CommonspaceRoutingConfiguration>(
 				"/api/routing",
@@ -503,10 +523,15 @@ export class CommonspaceClientStore {
 			);
 			const bootstrap = this.snapshot.bootstrap;
 			const next = { ...this.snapshot, error: null };
-			if (bootstrap !== null) next.bootstrap = { ...bootstrap, routing };
+			if (bootstrap !== null && requestGeneration === this.routingGeneration)
+				next.bootstrap = { ...bootstrap, routing };
+			this.routingGeneration += 1;
 			this.set({
 				...next,
 			});
+			this.pendingConfigurationRefresh = true;
+			await this.refresh();
+			if (this.refreshPromise !== null) await this.refreshPromise;
 		} catch (error) {
 			this.set({
 				...this.snapshot,
@@ -531,30 +556,6 @@ export class CommonspaceClientStore {
 		return requestJson<HarnessCapabilityInventory>(
 			`/api/agents/${encodeURIComponent(agentId)}/capabilities`,
 		);
-	}
-
-	async updateWorkspaceSettings(
-		request: UpdateWorkspaceSettingsRequest,
-	): Promise<void> {
-		try {
-			const result = await requestJson<CommonspaceBootstrap>("/api/settings", {
-				method: "PUT",
-				body: JSON.stringify(request),
-			});
-			const merged = this.mergeBootstrap(result);
-			this.set({
-				...this.snapshot,
-				bootstrap: merged,
-				activeProjectId: this.resolveActiveProject(merged),
-				error: null,
-			});
-		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
-		}
 	}
 
 	async discoverAgents(adapter: AgentAdapterKind): Promise<void> {
@@ -1167,17 +1168,28 @@ export class CommonspaceClientStore {
 
 	private mergeBootstrap(
 		candidate: CommonspaceBootstrap,
+		routingGeneration?: number,
 	): CommonspaceBootstrap {
 		const current = this.snapshot.bootstrap;
-		if (current !== null && candidate.state.revision < current.state.revision)
-			return current;
+		if (current === null) return candidate;
+		const merged =
+			candidate.state.revision < current.state.revision
+				? { ...current }
+				: { ...candidate };
 		if (
 			candidate.liveActivities === undefined &&
-			current?.liveActivities !== undefined
-		) {
-			return { ...candidate, liveActivities: current.liveActivities };
-		}
-		return candidate;
+			current.liveActivities !== undefined
+		)
+			merged.liveActivities = current.liveActivities;
+		// Workspace mutations do not own routing. Only a refresh started after
+		// the latest invalidation may replace the independently saved configuration.
+		const routing =
+			routingGeneration === this.routingGeneration
+				? candidate.routing
+				: current.routing;
+		if (routing === undefined) delete merged.routing;
+		else merged.routing = routing;
+		return merged;
 	}
 
 	private resolveActiveProject(bootstrap: CommonspaceBootstrap): string | null {

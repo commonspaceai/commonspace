@@ -89,9 +89,9 @@ The HTTP boundary is implemented in [`server/src/app.ts`](../../server/src/app.t
 | Local discovery | `POST /api/discover-agents`, `POST /api/select-directory` |
 | Agent context tools | `POST /api/mcp`, restricted to bearer-scoped ACP clients |
 
-Routing configuration uses provider-specific shared variants and a single set of reasoning values across the API, saved-state parser, and browser. Current routing requests and version-2 saved files reject unknown fields; only legacy file migration strips obsolete fields. Credential status distinguishes absent, saved, and environment credentials without exposing their values.
+Routing configuration uses provider-specific shared variants and a single set of reasoning values across the API, saved-state parser, and browser. Current routing requests and version-2 saved files reject unknown fields; only legacy file migration strips obsolete fields. Credential status distinguishes absent, saved, and environment credentials without exposing their values. Settings saves retain their pending state and submitted draft across closing and reopening the panel, and disable edits until the request settles.
 
-Server-sent events carry durable state revisions, routing configuration invalidations, and separate temporary activity updates. Routing saves emit invalidations without changing the workspace revision. The browser rejects older revisions so a slower response cannot replace newer state.
+Server-sent events carry durable state revisions, routing configuration invalidations, and separate temporary activity updates. Routing saves refresh other tabs without changing the workspace revision. The browser also refreshes on reconnect and queues invalidations received during an active refresh. It rejects older state revisions so a slower response cannot replace newer state.
 
 ## Server
 
