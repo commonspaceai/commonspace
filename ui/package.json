@@ -12,7 +12,7 @@
 		"storybook": "storybook dev --host 127.0.0.1 --port 6006 --exact-port --no-open --disable-telemetry",
 		"build-storybook": "storybook build --disable-telemetry",
 		"test-storybook": "node ../scripts/run-storybook-tests.mjs run",
-		"test-storybook:watch": "node --watch-preserve-output --watch-path=src --watch-path=.storybook ../scripts/run-storybook-tests.mjs run",
+		"test-storybook:watch": "node ../scripts/run-storybook-tests.mjs watch",
 		"test-storybook:smoke": "node ../scripts/run-storybook-tests.mjs smoke"
 	},
 	"dependencies": {

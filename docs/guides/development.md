@@ -77,6 +77,12 @@ For a focused terminal loop, pass a story-file filter:
 pnpm test:storybook:watch -- Conversation
 ```
 
+This keeps Vitest, Vite, and Chromium alive between edits so related stories can
+rerun without paying browser startup on every change. Press `q` to stop the
+watcher. Browser-file parallelism is bounded by the host, with ceilings of four
+workers locally and two in CI, to avoid making browser checks slower through
+contention.
+
 Use the representative screen suite for a quick check, then the full UI gate before handing off visible work:
 
 ```bash

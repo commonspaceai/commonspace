@@ -1,8 +1,10 @@
+import { availableParallelism } from "node:os";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { storybookTest } from "@storybook/addon-vitest/vitest-plugin";
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
+import { storybookMaxWorkers } from "../scripts/storybook-test-policy.mjs";
 
 const useSystemChrome = process.env.COMMONSPACE_USE_SYSTEM_CHROME === "1";
 const storyTag = process.env.COMMONSPACE_STORYBOOK_TAG ?? "test";
@@ -25,7 +27,10 @@ export default defineConfig({
 	test: {
 		name: "storybook",
 		fileParallelism: true,
-		maxWorkers: process.env.CI === "true" ? 2 : undefined,
+		maxWorkers: storybookMaxWorkers({
+			ci: process.env.CI === "true",
+			availableWorkers: availableParallelism(),
+		}),
 		browser: {
 			enabled: true,
 			headless: true,
