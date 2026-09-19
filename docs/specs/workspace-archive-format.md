@@ -52,7 +52,7 @@ The HTTP importer accepts a version-1 archive value up to 64 MiB for compatibili
 
 ## Privacy boundary
 
-Commonspace-managed fields omit routing-provider credentials, native harness credentials and transcript stores, opaque native-session references, ephemeral MCP capabilities, and absolute Commonspace, projectless-workspace, and Project-root paths.
+Commonspace-managed fields omit native harness credentials and transcript stores, opaque native-session references, ephemeral MCP capabilities, and absolute Commonspace, projectless-workspace, and Project-root paths.
 
 Pending native permission requests export as interrupted because the original harness request cannot survive a transfer. Attachment bytes remain exact: Commonspace does not scan or rewrite their contents. An attached file may therefore contain paths or secrets supplied by its author.
 

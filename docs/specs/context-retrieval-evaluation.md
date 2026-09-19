@@ -1,8 +1,8 @@
 # Evaluating context retrieval
 
 The outcome we want is that an agent continues work correctly using less delivered
-context and acceptable latency. Returning fewer tokens, building a shallow tree,
-or receiving a high Jev relevance score is not evidence of that outcome by itself.
+context and acceptable latency. Returning fewer tokens or building a shallow tree
+is not evidence of that outcome by itself.
 
 ## Repeatable retrieval experiment
 
@@ -27,18 +27,6 @@ Initial scope indexing/model loading, new query inference with warm passages, an
 cached-query latency are reported separately. The scale benchmark also measures
 append/edit/delete reconciliation and counts newly embedded texts.
 
-For the optional remote experiment, export `TYPESAFE_API_KEY` through your normal
-secret manager, then run:
-
-```bash
-COMMONSPACE_EVAL_JEV_MODEL=jev-1.13.0 pnpm --silent evaluate:context --jev > /tmp/context-jev.json
-```
-
-The remote run sends only the checked-in synthetic cases. It does not read workspace
-state, private conversations, or native sessions. Missing credentials, API failures,
-timeouts, and invalid responses fail the run rather than counting a fallback as a
-successful Jev result. Keep generated reports outside commits.
-
 The [corpus](../../scripts/context-evaluation-cases.ts) has sixteen deliberately
 adversarial cases: fourteen answerable and two without an answer. Each answerable
 case has manually specified message IDs and exact source quotes. Together they
@@ -60,13 +48,6 @@ not truncated. The strategies are:
 | Expanded lexical | `ContextHistoryIndex.find`, including identifier expansion |
 | Local hybrid (`--semantic`) | Actual runtime `findHybrid`: ten lexical plus ten local semantic candidates, reciprocal rank fusion, same delivery budget |
 | Diversity experiment | Expanded BM25 top twenty, first passage from each message before additional passages |
-| Jev experiment | Same expanded top twenty, one batched relevance question per candidate, sorted by probability |
-
-Gold labels never enter ranking or the Jev request. Jev sees the query, candidate
-passages, and their chronological order. It is the proposed ranker, not the quality
-judge. There is no calibrated relevance cutoff: even low-scoring candidates can be
-returned. The experiment does not implement semantic branch navigation or runtime
-Jev history retrieval.
 
 The [scorer](../../scripts/context-evaluation.ts) verifies that every supplied
 passage matches its canonical source and offset. It requires coverage of the entire
@@ -78,14 +59,14 @@ The JSON report includes:
 - Complete evidence at four passages and at one passage; all required spans must be
   present. Individual span recall identifies partially answered cases.
 - Candidate recall at twenty for the expanded lexical shortlist, before the
-  delivery budget. This is a ceiling for the Jev experiment, not for hybrid
-  retrieval, whose candidates also come from semantic search.
+  delivery budget. This is not a ceiling for hybrid retrieval, whose candidates
+  also come from semantic search.
 - Per-case useful-passage fraction, obsolete evidence without its required current
   answer, and empty results on unanswerable queries. Returning an undecided discussion
   can be useful; nonempty results are not evidence of hallucination.
 - Exact common-envelope bytes, single-query latency, cold history-index construction,
-  API calls/questions, request bytes, raw probabilities, actual model, and API token
-  usage. Common-envelope bytes exclude the larger MCP metadata and native framing.
+  local model calls, model identity, and inference time where applicable.
+  Common-envelope bytes exclude the larger MCP metadata and native framing.
 - Corpus hash, protocol version, embedding model/revision when enabled, per-case selected source text and offsets, and
   timestamps. Small-history single-query p95 is descriptive, not a load-test estimate.
 
@@ -108,7 +89,7 @@ Separate three failure locations before choosing an algorithm:
 A semantic hierarchy experiment should add revisioned task labels and summaries
 linked to source spans, with explicit correction relationships. Rebuild affected
 ancestors after edits or deletions. Compare semantic candidates alone, lexical
-candidates alone, and their union before testing Jev selection. Preserve multiple
+candidates alone, and their union before testing reranking. Preserve multiple
 branches for cross-topic questions, and record relevant branches wrongly pruned.
 Use a declared traversal/inference budget; benchmark index construction, updates,
 query work, storage, and model calls separately. A balanced tree does not guarantee
@@ -119,8 +100,8 @@ expand the existing authorization scope.
 
 These fixtures are necessary regression evidence, not proof of general effectiveness.
 The local hybrid path is enabled in the scoped history tool with explicit lexical
-fallback; Jev reranking remains an opt-in experiment. Neither the fixture scores
-nor timing runs establish native-agent task success.
+fallback. Neither the fixture scores nor timing runs establish native-agent task
+success.
 Collect an independently labeled, sanitized held-out set of real task failures
 before tuning prompts, thresholds, or hierarchy labels against it. Keep development
 and held-out conversations separate. Report per-category regressions, uncertainty,

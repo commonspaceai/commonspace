@@ -71,7 +71,7 @@ sessions, or snapshots.
 
 ## Cost and cache behavior
 
-There is no Jev or other remote inference call in either history tool. The server
+There is no remote inference call in either history tool. The server
 uses `@huggingface/transformers` with the q8 CPU model `Xenova/all-MiniLM-L6-v2`,
 pinned to revision `751bff37182d3f1213fa05d7196b954e230abad9`. First semantic use
 downloads public model/tokenizer files from Hugging Face into
@@ -110,12 +110,8 @@ not guarantee a provider cache hit, expose KV state, or replace native compactio
 
 ## Design rationale and further work
 
-The [fast-jev-compaction reference](https://github.com/tamaratran/fast-jev-compaction)
-uses Jev judgments to remove or truncate older tool calls/results. That is an
-interesting eviction policy, but it is not sufficient context management for
-Commonspace. Its judgment state omits result bodies, preservation depends on
-incomplete evidence, and a past tool result is not always reproducible by rerunning
-the tool. Per-call questions and repeated state also have costs. Keeping all
+Removing or truncating old tool calls is not sufficient context management for
+Commonspace. A past tool result is not always reproducible, and keeping all
 conversation text does not guarantee that the remaining history fits a budget.
 
 Commonspace instead separates the record, user-authoritative context, generated
@@ -126,11 +122,11 @@ sharing.
 
 A future semantic hierarchy should use source-linked, revisioned branch summaries
 and allow bounded multi-branch selection, with lexical retrieval as an escape
-route when a summary omits a rare identifier. Jev can evaluate a small candidate
-set where semantic judgments improve selection; it need not score every message
-on every turn. Indexing and summary maintenance must be accounted for separately
-from retrieval latency. Cross-conversation retrieval requires an explicit scope
-and product change, rather than treating hierarchy links as authorization.
+route when a summary omits a rare identifier. Any reranker should operate on a
+small candidate set rather than score every message on every turn. Indexing and
+summary maintenance must be accounted for separately from retrieval latency.
+Cross-conversation retrieval requires an explicit scope and product change, rather
+than treating hierarchy links as authorization.
 
 Evaluate that extension on old constraints, corrected decisions, negation,
 cross-topic dependencies, and exact identifiers. Measure evidence recall,
@@ -139,6 +135,6 @@ continuation correctness against the lexical baseline before claiming better
 compaction or cache independence.
 
 The executable [evaluation protocol](context-retrieval-evaluation.md) compares
-retrieval strategies with independently specified source spans, a common delivery
-budget, and an opt-in Jev experiment. Its synthetic evidence scores do not establish
-native-agent task success.
+retrieval strategies with independently specified source spans and a common
+delivery budget. Its synthetic evidence scores do not establish native-agent task
+success.

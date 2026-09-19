@@ -66,20 +66,17 @@ test("compact settings preserve drafts across category and viewport changes", as
 	const category = page.getByRole("combobox", { name: "Settings category" });
 	await expect(category).toBeVisible();
 	await category.selectOption("intelligence");
-	await page
-		.getByRole("checkbox", { name: "Use Jev for routing" })
-		.press("Space");
-	const model = page.getByRole("textbox", { name: "Jev model", exact: true });
-	await model.fill("unsaved-model-draft");
+	const inferenceAgent = page.getByRole("radio", { name: /Build Smith/iu });
+	await inferenceAgent.click();
 	await category.selectOption("appearance");
 	await category.selectOption("intelligence");
-	await expect(model).toHaveValue("unsaved-model-draft");
+	await expect(inferenceAgent).toBeChecked();
 	await page.setViewportSize({ width: 1440, height: 960 });
 	await expect(category).toBeHidden();
 	await expect(
 		page.getByRole("tab", { name: "Intelligence", exact: true }),
 	).toHaveAttribute("aria-selected", "true");
-	await expect(model).toHaveValue("unsaved-model-draft");
+	await expect(inferenceAgent).toBeChecked();
 });
 
 test("shows completed routing receipts and one routing popover", async ({

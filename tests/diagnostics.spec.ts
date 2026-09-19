@@ -30,10 +30,8 @@ describe("runtime diagnostics", () => {
 		await service.discoverAgents("codex");
 		await service.mutate({ action: "add-discovered-agent", agentId: "codex" });
 		await service.updateRoutingConfiguration({
-			provider: CommonspaceRoutingProvider.OpenAiCompatible,
-			model: "remote-router",
-			baseUrl: "https://router.example/v1",
-			apiKey: "private-routing-key",
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "codex",
 		});
 		const diagnostics = await service.diagnostics();
 
@@ -45,8 +43,8 @@ describe("runtime diagnostics", () => {
 				projectlessWorkspace: "ready",
 			},
 			inference: {
-				provider: CommonspaceRoutingProvider.OpenAiCompatible,
-				location: "remote",
+				provider: CommonspaceRoutingProvider.Harness,
+				location: "runtime-managed",
 				configured: true,
 				sends: [
 					"message text",
@@ -74,7 +72,6 @@ describe("runtime diagnostics", () => {
 			]),
 		});
 		expect(JSON.stringify(diagnostics)).not.toContain(root);
-		expect(JSON.stringify(diagnostics)).not.toContain("private-routing-key");
 		await service.close();
 	});
 });

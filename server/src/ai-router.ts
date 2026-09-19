@@ -4,10 +4,7 @@ import {
 } from "@commonspace/shared";
 import { z } from "zod";
 
-const MAX_ROUTER_RESPONSE_BYTES = 64_000;
 const MAX_ROUTER_OUTPUT_TOKENS = 4_096;
-
-export class InferenceResponseTruncatedError extends Error {}
 
 export class RoutingResponseValidationError extends Error {}
 
@@ -47,15 +44,6 @@ const aiRouteResultSchema = z
 	);
 export type AiRouteResult = z.infer<typeof aiRouteResultSchema>;
 
-const openAiChatCompletionSchema = z.object({
-	choices: z.array(
-		z.object({
-			finish_reason: z.string().nullable().optional(),
-			message: z.object({ content: z.string() }).optional(),
-		}),
-	),
-});
-
 export function routingOutputTokenBudget(
 	maxAgents: number,
 	attempt = 0,
@@ -63,28 +51,6 @@ export function routingOutputTokenBudget(
 	const agents = Math.max(1, Math.min(8, Math.trunc(maxAgents)));
 	const initialBudget = 256 + agents * 256;
 	return Math.min(MAX_ROUTER_OUTPUT_TOKENS, initialBudget * (attempt + 1));
-}
-
-export async function boundedResponseText(response: Response): Promise<string> {
-	if (response.body === null) return "";
-	const reader = response.body.getReader();
-	const decoder = new TextDecoder();
-	let bytes = 0;
-	let text = "";
-	try {
-		while (true) {
-			const chunk = await reader.read();
-			if (chunk.done) return `${text}${decoder.decode()}`;
-			bytes += chunk.value.byteLength;
-			if (bytes > MAX_ROUTER_RESPONSE_BYTES) {
-				await reader.cancel("routing provider response was too large");
-				throw new Error("routing provider response was too large");
-			}
-			text += decoder.decode(chunk.value, { stream: true });
-		}
-	} finally {
-		reader.releaseLock();
-	}
 }
 
 export interface AiRouteInput {
@@ -173,81 +139,4 @@ export function parseRoutingResponse(text: string): AiRouteResult {
 		throw new RoutingResponseValidationError(message, { cause: parsed.error });
 	}
 	return parsed.data;
-}
-
-export interface OpenAiInferenceOptions {
-	baseUrl: string;
-	model: string;
-	apiKey?: string;
-	fetch?: typeof fetch;
-	signal?: AbortSignal;
-}
-
-export async function completeWithOpenAICompatible(
-	options: OpenAiInferenceOptions,
-	input: { system: string; prompt: string; maxTokens: number },
-): Promise<string> {
-	const request = options.fetch ?? fetch;
-	const headers: Record<string, string> = {
-		"content-type": "application/json",
-	};
-	if (options.apiKey !== undefined)
-		headers.authorization = `Bearer ${options.apiKey}`;
-	const requestInit: RequestInit = {
-		method: "POST",
-		headers,
-		body: JSON.stringify({
-			model: options.model,
-			temperature: 0,
-			max_tokens: input.maxTokens,
-			response_format: { type: "json_object" },
-			messages: [
-				{ role: "system", content: input.system },
-				{ role: "user", content: input.prompt },
-			],
-		}),
-	};
-	if (options.signal !== undefined) requestInit.signal = options.signal;
-	const response = await request(
-		`${options.baseUrl.replace(/\/$/u, "")}/chat/completions`,
-		requestInit,
-	);
-	const body = await boundedResponseText(response);
-	if (!response.ok)
-		throw new Error(
-			`inference provider returned HTTP ${String(response.status)}`,
-		);
-	let value: unknown;
-	try {
-		value = JSON.parse(body);
-	} catch (cause) {
-		throw new Error("inference provider returned invalid JSON", { cause });
-	}
-	const parsed = openAiChatCompletionSchema.safeParse(value);
-	if (!parsed.success)
-		throw new Error("inference provider returned no message", {
-			cause: parsed.error,
-		});
-	const [choice] = parsed.data.choices;
-	if (choice?.finish_reason === "length")
-		throw new InferenceResponseTruncatedError(
-			"inference provider truncated its response",
-		);
-	const content = choice?.message?.content;
-	if (content === undefined)
-		throw new Error("inference provider returned no message");
-	return content;
-}
-
-export async function routeWithOpenAICompatible(
-	options: OpenAiInferenceOptions,
-	input: AiRouteInput,
-): Promise<AiRouteResult> {
-	const content = await completeWithOpenAICompatible(options, {
-		system:
-			"You are a bounded routing classifier. Return only the requested JSON object.",
-		prompt: buildRoutingPrompt(input),
-		maxTokens: routingOutputTokenBudget(input.maxAgents),
-	});
-	return parseRoutingResponse(content);
 }

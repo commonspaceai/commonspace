@@ -11,7 +11,7 @@ This page lists current priorities and deferred work. It is not the product cont
 
 ## Next
 
-- Calibrate and benchmark the opt-in Jev router against the text-provider baseline. Local retrieval, typed judgments, original-message multi-agent delivery, and background compaction are implemented. Live synthetic smoke checks passed; held-out quality and message-to-dispatch p95 remain unverified. [Research and evaluation proposal](docs/specs/jev-routing-research.md).
+- Benchmark harness-backed routing latency and quality before considering a smaller local routing model. Local retrieval, original-message multi-agent delivery, and background compaction are implemented; held-out quality and message-to-dispatch p95 remain unverified.
 - Resolve Gemini CLI's late native-history replay before certifying full resume compatibility or expanding support. [Current evidence](docs/adapters/agent-adapters.md#gemini-revalidation-evidence) records the 0.43.0 replay defect and rejects 0.59.0 after a restart/resume failure.
 - Add Pi coding agent after its transport passes the same native-session and scoped-MCP checks. The published bridge currently [does not wire scoped MCP](docs/adapters/agent-adapters.md#pi-integration-status).
 - Measure larger synthetic workspaces before changing the current JSON persistence model.

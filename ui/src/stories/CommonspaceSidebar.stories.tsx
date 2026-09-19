@@ -1,6 +1,5 @@
 import {
 	CommonspaceRoutingProvider,
-	CredentialSource,
 	RoutingConfigurationIssue,
 } from "@commonspace/shared";
 import type { Meta, StoryObj } from "@storybook/react-vite";
@@ -18,16 +17,6 @@ import {
 	secondaryProject,
 	storyBootstrap,
 } from "./story-fixtures";
-
-const apiRoutingBootstrap = createStoryBootstrap({
-	routing: {
-		provider: CommonspaceRoutingProvider.OpenAiCompatible,
-		model: "gpt-5.6-sol",
-		baseUrl: "https://api.openai.com/v1",
-		apiKeyConfigured: true,
-		apiKeySource: CredentialSource.Saved,
-	},
-});
 
 const meta = {
 	title: "Pages/CommonspaceSidebar",
@@ -477,137 +466,6 @@ export const WorkspaceSettingsChannelTransition: Story = {
 	},
 };
 
-export const WorkspaceSettingsApiInference: Story = {
-	args: {
-		store: createStoryStore(apiRoutingBootstrap),
-	},
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await userEvent.click(
-			canvas.getByRole("button", { name: "Commonspace settings" }),
-		);
-
-		const page = within(document.body);
-		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
-		const connectionHeading = page.getByRole("heading", { name: "Connection" });
-		connectionHeading.scrollIntoView({ block: "start" });
-
-		await expect(page.getByLabelText("Routing model")).toHaveValue(
-			"gpt-5.6-sol",
-		);
-		const clearApiKey = page.getByRole("checkbox", {
-			name: "Clear routing API key",
-		});
-		await expect(clearApiKey).not.toBeChecked();
-		await userEvent.click(clearApiKey);
-		await expect(clearApiKey).toBeChecked();
-	},
-};
-
-export const WorkspaceSettingsJevSetup: Story = {
-	args: {
-		store: createStoryStore(apiRoutingBootstrap, {
-			diagnostics: async () => ({
-				service: {
-					status: "ready",
-					stateVersion: 30,
-					storage: "ready",
-					projectlessWorkspace: "ready",
-				},
-				inference: {
-					provider: CommonspaceRoutingProvider.OpenAiCompatible,
-					location: "remote",
-					configured: true,
-					sends: [],
-				},
-				harnesses: [],
-			}),
-		}),
-	},
-	play: async ({ canvasElement }) => {
-		await userEvent.click(
-			within(canvasElement).getByRole("button", {
-				name: "Commonspace settings",
-			}),
-		);
-		const page = within(document.body);
-		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
-		await expect(
-			page.queryByText("Configured", { exact: true }),
-		).not.toBeInTheDocument();
-		await expect(
-			page.getByText("Saved router: OpenAI-compatible API"),
-		).toBeVisible();
-		await expect(page.getByLabelText("TypeSafe API key")).toBeDisabled();
-		await expect(page.getByLabelText("TypeSafe API key")).not.toBeVisible();
-		await userEvent.click(
-			page.getByRole("checkbox", { name: "Use Jev for routing" }),
-		);
-		await expect(page.getByLabelText("TypeSafe API key")).toBeEnabled();
-		await expect(page.getByLabelText("TypeSafe API key")).toBeVisible();
-		await expect(
-			page.getByRole("heading", { name: "Context compaction provider" }),
-		).toBeVisible();
-		// Unsaved edits must not claim that the active router has changed.
-		await expect(
-			page.getByText("Saved router: OpenAI-compatible API"),
-		).toBeVisible();
-		await userEvent.click(
-			page.getByRole("button", { name: "Check saved configuration" }),
-		);
-		await expect(
-			page.getByLabelText("Inference configuration status"),
-		).toHaveTextContent("Provider connectivity has not been tested");
-	},
-};
-
-export const WorkspaceSettingsJev: Story = {
-	args: {
-		store: createStoryStore({
-			...apiRoutingBootstrap,
-			routing: {
-				provider: CommonspaceRoutingProvider.OpenAiCompatible,
-				model: "gpt-5.6-sol",
-				baseUrl: "https://api.openai.com/v1",
-				apiKeyConfigured: true,
-				apiKeySource: CredentialSource.Saved,
-				jev: {
-					enabled: true,
-					model: "jev-1.13.0",
-					apiKeyConfigured: true,
-					apiKeySource: CredentialSource.Saved,
-				},
-			},
-		}),
-	},
-	play: async ({ canvasElement }) => {
-		await userEvent.click(
-			within(canvasElement).getByRole("button", {
-				name: "Commonspace settings",
-			}),
-		);
-		const page = within(document.body);
-		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
-		await expect(
-			page.getByRole("checkbox", { name: "Use Jev for routing" }),
-		).toBeChecked();
-		await expect(page.getByLabelText("Jev model")).toHaveValue("jev-1.13.0");
-		await expect(page.getByLabelText("TypeSafe API key")).toHaveValue("");
-		await userEvent.click(
-			page.getByRole("checkbox", { name: "Clear saved TypeSafe API key" }),
-		);
-		await expect(
-			page.getByRole("checkbox", { name: "Clear saved TypeSafe API key" }),
-		).toBeChecked();
-		await userEvent.click(
-			page.getByRole("checkbox", { name: "Use Jev for routing" }),
-		);
-		await expect(page.getByLabelText("Jev model")).toBeDisabled();
-		await expect(page.getByLabelText("TypeSafe API key")).toBeDisabled();
-		await expect(page.getByLabelText("TypeSafe API key")).not.toBeVisible();
-	},
-};
-
 export const WorkspaceSettingsNotifications: Story = {
 	args: {
 		store: createStoryStore(storyBootstrap),
@@ -707,6 +565,56 @@ export const WorkspaceSettingsOperations: Story = {
 		).toBeVisible();
 		await expect(
 			page.getByRole("region", { name: "Conversation retention" }),
+		).toBeVisible();
+	},
+};
+
+export const WorkspaceSettingsDiagnostics: Story = {
+	args: {
+		store: createStoryStore(storyBootstrap, {
+			diagnostics: async () => ({
+				service: {
+					status: "ready",
+					stateVersion: storyBootstrap.state.version,
+					storage: "ready",
+					projectlessWorkspace: "ready",
+				},
+				inference: {
+					provider: CommonspaceRoutingProvider.Harness,
+					location: "runtime-managed",
+					configured: true,
+					sends: [
+						"message text",
+						"Agent labels",
+						"Project labels",
+						"shared context",
+						"routing corrections",
+					],
+				},
+				harnesses: [
+					{
+						adapter: "codex",
+						installed: true,
+						rostered: true,
+						recordedRunStatus: "has-replies",
+						recovery: "Open the Agent and retry the request.",
+					},
+				],
+			}),
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Commonspace settings" }),
+		);
+		const page = within(document.body);
+		await userEvent.click(page.getByRole("tab", { name: "Diagnostics" }));
+		await userEvent.click(
+			page.getByRole("button", { name: "Run runtime diagnostics" }),
+		);
+		await expect(
+			await page.findByText("Selected harness controls model traffic"),
 		).toBeVisible();
 	},
 };
@@ -821,73 +729,17 @@ export const IndependentSettingsSaves: Story = {
 			page.queryByText("Agent run settings saved."),
 		).not.toBeInTheDocument();
 		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
-		await userEvent.type(
-			page.getByLabelText("Routing model"),
-			"synthetic-router",
-		);
+		await userEvent.click(page.getByRole("radio", { name: /Build Smith/u }));
 		await userEvent.click(
-			page.getByRole("button", { name: "Save inference settings" }),
+			page.getByRole("button", { name: "Save inference agent" }),
 		);
 		await waitFor(() => expect(saveInference).toHaveBeenCalledOnce());
 		await expect(saveRunDefaults).toHaveBeenCalledOnce();
 	},
 };
-export const EnvironmentCredentials: Story = {
-	args: {
-		store: createStoryStore(
-			createStoryBootstrap({
-				routing: {
-					provider: CommonspaceRoutingProvider.OpenAiCompatible,
-					model: "router",
-					baseUrl: "https://api.openai.com/v1",
-					apiKeyConfigured: true,
-					apiKeySource: CredentialSource.Environment,
-					jev: {
-						enabled: true,
-						model: "jev-1.13.0",
-						apiKeyConfigured: true,
-						apiKeySource: CredentialSource.Environment,
-					},
-				},
-			}),
-		),
-	},
-	play: async ({ canvasElement }) => {
-		await userEvent.click(
-			within(canvasElement).getByRole("button", {
-				name: "Commonspace settings",
-			}),
-		);
-		const page = within(document.body);
-		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
-		await expect(page.getByLabelText("TypeSafe API key")).toHaveAttribute(
-			"placeholder",
-			"Using TYPESAFE_API_KEY from the server",
-		);
-		await expect(page.getByLabelText("Routing API key")).toHaveAttribute(
-			"placeholder",
-			"Using OPENAI_API_KEY from the server",
-		);
-		await userEvent.clear(page.getByLabelText("Routing API base URL"));
-		await userEvent.type(
-			page.getByLabelText("Routing API base URL"),
-			"https://another-provider.test/v1",
-		);
-		await expect(page.getByLabelText("Routing API key")).toHaveAttribute(
-			"placeholder",
-			"Optional for providers without authentication",
-		);
-		await expect(
-			page.queryByRole("checkbox", { name: "Clear saved TypeSafe API key" }),
-		).not.toBeInTheDocument();
-		await expect(
-			page.queryByRole("checkbox", { name: "Clear routing API key" }),
-		).not.toBeInTheDocument();
-	},
-};
 
 export const SettingsCategoriesPreserveDrafts: Story = {
-	args: { store: createStoryStore(apiRoutingBootstrap) },
+	args: { store: createStoryStore(storyBootstrap) },
 	play: async ({ canvasElement }) => {
 		const page = within(document.body);
 		await userEvent.click(
@@ -901,25 +753,23 @@ export const SettingsCategoriesPreserveDrafts: Story = {
 		);
 		await waitFor(() =>
 			expect(
-				page.queryByRole("button", { name: "Save inference settings" }),
+				page.queryByRole("button", { name: "Save inference agent" }),
 			).not.toBeInTheDocument(),
 		);
 		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
-		await userEvent.clear(page.getByLabelText("Routing model"));
-		await userEvent.type(page.getByLabelText("Routing model"), "draft-router");
+		const codex = page.getByRole("radio", { name: /Build Smith/u });
+		await userEvent.click(codex);
 		await userEvent.click(page.getByRole("tab", { name: "Agent runs" }));
 		await expect(
 			page.getByRole("button", { name: "Save agent run settings" }),
 		).toBeVisible();
 		await waitFor(() =>
 			expect(
-				page.queryByRole("button", { name: "Save inference settings" }),
+				page.queryByRole("button", { name: "Save inference agent" }),
 			).not.toBeInTheDocument(),
 		);
 		await userEvent.click(page.getByRole("tab", { name: "Intelligence" }));
-		await expect(page.getByLabelText("Routing model")).toHaveValue(
-			"draft-router",
-		);
+		await expect(codex).toBeChecked();
 		await userEvent.click(page.getByRole("tab", { name: "Data" }));
 		await expect(
 			page.getByRole("button", { name: "Export workspace data" }),

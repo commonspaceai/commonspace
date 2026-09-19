@@ -50,6 +50,10 @@ async function seed(service) {
 			accentColor: agent.id === "hermes" ? "#e879f9" : "#60a5fa",
 		});
 	}
+	await service.updateRoutingConfiguration({
+		provider: "harness",
+		harnessAgentId: "codex",
+	});
 
 	let state = await service.mutate({
 		action: "create-project",
@@ -172,8 +176,13 @@ try {
 				};
 			},
 			runAgent: async (input) => ({
-				text:
-					input.agent.id === "hermes"
+				text: input.sessionName.startsWith("Commonspace Inference:")
+					? JSON.stringify({
+							summary: "The E2E workspace is ready for verification.",
+							decisions: [],
+							openQuestions: [],
+						})
+					: input.agent.id === "hermes"
 						? "## Visual checkpoint\n\n- Hierarchy reviewed\n- Thread context preserved\n- Composer remains available\n\nThe E2E fixture is ready for inspection."
 						: "Review Bot completed the seeded workspace checkpoint.",
 			}),

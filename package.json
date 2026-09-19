@@ -82,7 +82,6 @@
 		"verify:adapter:gemini": "vitest run tests/native-agent-integration.spec.ts -t \"Gemini CLI\"",
 		"verify:adapter:opencode": "vitest run tests/native-agent-integration.spec.ts -t \"OpenCode\"",
 		"verify:adapters": "vitest run tests/native-agent-integration.spec.ts",
-		"verify:routing-quality": "node scripts/run-vitest.mjs COMMONSPACE_ROUTING_EVAL tests/routing-quality.eval.spec.ts --testTimeout=60000",
 		"test:platform": "vitest run tests/platform-scripts.spec.mjs tests/release-package.spec.mjs tests/dev-supervisor.spec.ts tests/directory-picker.spec.ts tests/standalone-server.spec.ts tests/commonspace-state.spec.ts"
 	},
 	"devDependencies": {

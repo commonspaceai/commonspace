@@ -10,7 +10,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CommonspaceState } from "@commonspace/shared";
-import { CommonspaceRoutingProvider } from "@commonspace/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { CommonspaceHostService } from "../server/src/service.ts";
@@ -260,7 +259,7 @@ describe("portable authored content and managed metadata", () => {
 		const projectRoot = join(root, "project");
 		await mkdir(projectRoot);
 		const nativeSessionId = "123e4567-e89b-42d3-a456-426614174777";
-		const apiKey = "synthetic-portability-secret";
+		const privateToken = "synthetic-portability-secret";
 		const authored =
 			"Read " +
 			projectRoot +
@@ -303,8 +302,7 @@ describe("portable authored content and managed metadata", () => {
 				removedAt: null,
 			},
 		];
-		const managedText =
-			root + " " + projectRoot + " " + nativeSessionId + " " + apiKey;
+		const managedText = root + " " + projectRoot + " " + nativeSessionId;
 		state.messages["dm:codex"]?.push({
 			id: "reply-1",
 			conversation: { kind: "dm", id: "codex" },
@@ -332,7 +330,7 @@ describe("portable authored content and managed metadata", () => {
 				],
 			},
 		});
-		const bytes = Buffer.from(authored + "\n" + apiKey);
+		const bytes = Buffer.from(authored + "\n" + privateToken);
 		const metadata = {
 			id: "223e4567-e89b-42d3-a456-426614174222",
 			name: "authored.bin",
@@ -344,16 +342,6 @@ describe("portable authored content and managed metadata", () => {
 		userMessage.files = [metadata];
 		await mkdir(join(root, "attachments"));
 		await writeFile(join(root, "attachments", metadata.id), bytes);
-		await writeFile(
-			join(root, "routing.json"),
-			JSON.stringify({
-				provider: CommonspaceRoutingProvider.OpenAiCompatible,
-				model: "test-model",
-				harnessAgentId: null,
-				baseUrl: "https://api.openai.com/v1",
-				apiKey,
-			}),
-		);
 		const source = await openWorkspace(root, state);
 
 		const archive = await source.exportWorkspace();
@@ -378,7 +366,7 @@ describe("portable authored content and managed metadata", () => {
 			trace: reply?.trace,
 			replyError: reply?.replyError,
 		});
-		for (const privateValue of [root, projectRoot, nativeSessionId, apiKey])
+		for (const privateValue of [root, projectRoot, nativeSessionId])
 			expect(managed).not.toContain(privateValue);
 		expect(archive.attachments[0]?.data).toBe(bytes.toString("base64"));
 

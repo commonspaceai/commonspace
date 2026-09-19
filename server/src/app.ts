@@ -7,7 +7,6 @@ import {
 	COMMONSPACE_SEARCH_KINDS,
 	type CommonspaceLiveAgentActivity,
 	type CommonspaceMutation,
-	CommonspaceRoutingProvider,
 	type CommonspaceSearchKind,
 	type ConversationRef,
 	type DiscoverAgentsRequest,
@@ -20,7 +19,6 @@ import {
 	type SendMessageRequest,
 	type StopAgentRunsRequest,
 	type UpdateChannelContextRequest,
-	type UpdateRoutingConfigurationRequest,
 	type UpdateThreadContextRequest,
 } from "@commonspace/shared";
 import express, {
@@ -43,6 +41,7 @@ import {
 	projectGitStatus,
 	streamProjectFile,
 } from "./project-files.js";
+import { RoutingConfigurationRequest } from "./routing-configuration.js";
 import { searchCommonspace } from "./search.js";
 import type { CommonspaceHostService } from "./service.js";
 import {
@@ -104,27 +103,6 @@ const applyRetentionRequestSchema = z.object({
 	conversation: conversationSchema,
 	expectedRevision: z.number(),
 }) satisfies z.ZodType<ApplyRetentionRequest>;
-const jevConfigurationSchema = z
-	.strictObject({
-		model: z.string().min(1).max(200),
-		apiKey: z.string().max(10_000).nullable().optional(),
-	})
-	.nullable()
-	.optional();
-const routingConfigurationSchema = z.discriminatedUnion("provider", [
-	z.strictObject({
-		provider: z.literal(CommonspaceRoutingProvider.Harness),
-		harnessAgentId: z.string(),
-		jev: jevConfigurationSchema,
-	}),
-	z.strictObject({
-		provider: z.literal(CommonspaceRoutingProvider.OpenAiCompatible),
-		model: z.string(),
-		baseUrl: z.string().optional(),
-		apiKey: z.string().nullable().optional(),
-		jev: jevConfigurationSchema,
-	}),
-]) satisfies z.ZodType<UpdateRoutingConfigurationRequest>;
 const contextRequestSchema =
 	contextRequestShape satisfies z.ZodType<UpdateChannelContextRequest>;
 const threadContextRequestSchema =
@@ -622,7 +600,7 @@ export function createCommonspaceApp({
 		try {
 			res.json(
 				await service.updateRoutingConfiguration(
-					routingConfigurationSchema.parse(req.body),
+					RoutingConfigurationRequest.parse(req.body),
 				),
 			);
 		} catch (error) {
@@ -637,7 +615,7 @@ export function createCommonspaceApp({
 		try {
 			res.json(
 				service.validateRoutingConfiguration(
-					routingConfigurationSchema.parse(req.body),
+					RoutingConfigurationRequest.parse(req.body),
 				),
 			);
 		} catch (error) {

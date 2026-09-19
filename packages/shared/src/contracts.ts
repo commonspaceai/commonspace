@@ -43,73 +43,42 @@ export interface CommonspaceDefaults {
 export const enum CommonspaceRoutingProvider {
 	Unconfigured = "unconfigured",
 	Harness = "harness",
-	OpenAiCompatible = "openai-compatible",
 }
-export type ConfiguredRoutingProvider = Exclude<
-	CommonspaceRoutingProvider,
-	CommonspaceRoutingProvider.Unconfigured
->;
 
-export const enum CredentialSource {
-	None = "none",
-	Saved = "saved",
-	Environment = "environment",
-}
 export const enum RoutingConfigurationIssue {
 	Missing = "missing",
 	Invalid = "invalid",
-}
-interface MissingCredential {
-	apiKeyConfigured: false;
-	apiKeySource: CredentialSource.None;
-}
-interface ConfiguredCredential {
-	apiKeyConfigured: true;
-	apiKeySource: CredentialSource.Saved | CredentialSource.Environment;
-}
-export type CommonspaceCredentialStatus =
-	| MissingCredential
-	| ConfiguredCredential;
-
-interface JevSettings {
-	enabled: boolean;
-	model: string;
-}
-interface JevWithoutCredential extends JevSettings, MissingCredential {}
-interface JevWithCredential extends JevSettings, ConfiguredCredential {}
-export type CommonspaceJevConfiguration =
-	| JevWithoutCredential
-	| JevWithCredential;
-
-interface RoutingJudgments {
-	jev?: CommonspaceJevConfiguration;
 }
 export interface UnconfiguredRouting {
 	provider: CommonspaceRoutingProvider.Unconfigured;
 	reason: RoutingConfigurationIssue;
 	message: string;
 }
-export interface HarnessRoutingConfiguration extends RoutingJudgments {
+export interface HarnessRoutingConfiguration {
 	provider: CommonspaceRoutingProvider.Harness;
 	harnessAgentId: string;
 }
-interface ApiRoutingSettings extends RoutingJudgments {
-	provider: CommonspaceRoutingProvider.OpenAiCompatible;
-	model: string;
-	baseUrl: string;
-}
-interface ApiRoutingWithoutCredential
-	extends ApiRoutingSettings,
-		MissingCredential {}
-interface ApiRoutingWithCredential
-	extends ApiRoutingSettings,
-		ConfiguredCredential {}
-/** Each provider exposes only its own settings. Credentials never cross this boundary. */
 export type CommonspaceRoutingConfiguration =
 	| UnconfiguredRouting
-	| HarnessRoutingConfiguration
-	| ApiRoutingWithoutCredential
-	| ApiRoutingWithCredential;
+	| HarnessRoutingConfiguration;
+
+export interface UnconfiguredInferenceDiagnostics {
+	provider: CommonspaceRoutingProvider.Unconfigured;
+	location: "none";
+	configured: false;
+	sends: string[];
+}
+
+export interface HarnessInferenceDiagnostics {
+	provider: CommonspaceRoutingProvider.Harness;
+	location: "runtime-managed";
+	configured: boolean;
+	sends: string[];
+}
+
+export type CommonspaceInferenceDiagnostics =
+	| UnconfiguredInferenceDiagnostics
+	| HarnessInferenceDiagnostics;
 
 export interface CommonspaceDiagnostics {
 	service: {
@@ -118,12 +87,7 @@ export interface CommonspaceDiagnostics {
 		storage: "ready" | "attention";
 		projectlessWorkspace: "ready" | "attention";
 	};
-	inference: {
-		provider: CommonspaceRoutingProvider;
-		location: "local" | "remote" | "runtime-managed" | "none";
-		configured: boolean;
-		sends: string[];
-	};
+	inference: CommonspaceInferenceDiagnostics;
 	harnesses: Array<{
 		adapter: AgentAdapterKind;
 		installed: boolean;
@@ -211,30 +175,11 @@ export interface ApplyRetentionRequest {
 	expectedRevision: number;
 }
 
-export interface UpdateJevConfigurationRequest {
-	model: string;
-	/** Omit to preserve the saved key, provide a value to replace it, or null to clear it. */
-	apiKey?: string | null | undefined;
-}
-interface RoutingJudgmentUpdate {
-	/** Omit to preserve, null to disable; an omitted key preserves the Jev credential. */
-	jev?: UpdateJevConfigurationRequest | null | undefined;
-}
-export interface UpdateHarnessRoutingRequest extends RoutingJudgmentUpdate {
+export interface UpdateHarnessRoutingRequest {
 	provider: CommonspaceRoutingProvider.Harness;
 	harnessAgentId: string;
 }
-export interface UpdateApiRoutingRequest extends RoutingJudgmentUpdate {
-	provider: CommonspaceRoutingProvider.OpenAiCompatible;
-	model: string;
-	/** Omission selects the standard OpenAI API endpoint. */
-	baseUrl?: string | undefined;
-	/** Omit to preserve the saved key, provide a value to replace it, or null to clear it. */
-	apiKey?: string | null | undefined;
-}
-export type UpdateRoutingConfigurationRequest =
-	| UpdateHarnessRoutingRequest
-	| UpdateApiRoutingRequest;
+export type UpdateRoutingConfigurationRequest = UpdateHarnessRoutingRequest;
 
 export interface CommonspaceRoutingAssignment {
 	id: string;

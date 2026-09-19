@@ -11,9 +11,7 @@ import {
 	CommonspaceReasoning,
 	CommonspaceRoutingProvider,
 	type CommonspaceSearchResult,
-	type ConfiguredRoutingProvider,
 	type ConversationRef,
-	CredentialSource,
 	DEFAULT_COMMONSPACE_NOTIFICATION_SETTINGS,
 	deriveCommonspaceInboxItems,
 	isCommonspaceReasoning,
@@ -21,7 +19,6 @@ import {
 } from "@commonspace/shared";
 import {
 	ArrowRightIcon,
-	CheckIcon,
 	FolderIcon,
 	GripVerticalIcon,
 	InboxIcon,
@@ -210,36 +207,6 @@ function SettingsSwitch({
 	);
 }
 
-function SettingsCheckbox({
-	checked,
-	label,
-	onCheckedChange,
-}: {
-	checked: boolean;
-	label: string;
-	onCheckedChange: (checked: boolean) => void;
-}) {
-	return (
-		<label className="!grid size-11 shrink-0 cursor-pointer place-items-center">
-			<input
-				type="checkbox"
-				className="peer sr-only"
-				checked={checked}
-				aria-label={label}
-				onChange={(event) => {
-					onCheckedChange(event.target.checked);
-				}}
-			/>
-			<span
-				className="grid size-5 place-items-center rounded-sm border border-input bg-background text-transparent transition-colors peer-checked:border-primary peer-checked:bg-primary peer-checked:text-primary-foreground peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ring"
-				aria-hidden="true"
-			>
-				<CheckIcon className="size-3.5" />
-			</span>
-		</label>
-	);
-}
-
 const NOTIFICATION_OPTIONS = [
 	[
 		"replies",
@@ -425,21 +392,7 @@ export function CommonspaceSidebar({
 		useState<CommonspaceReasoning>(CommonspaceReasoning.Native);
 	const [defaultMaxAgents, setDefaultMaxAgents] = useState(4);
 	const [defaultMemoryThreads, setDefaultMemoryThreads] = useState(12);
-	const [routingProvider, setRoutingProvider] =
-		useState<ConfiguredRoutingProvider>(
-			CommonspaceRoutingProvider.OpenAiCompatible,
-		);
 	const [routingHarnessAgentId, setRoutingHarnessAgentId] = useState("");
-	const [routingModel, setRoutingModel] = useState("");
-	const [routingBaseUrl, setRoutingBaseUrl] = useState(
-		"https://api.openai.com/v1",
-	);
-	const [routingApiKey, setRoutingApiKey] = useState("");
-	const [jevEnabled, setJevEnabled] = useState(false);
-	const [jevModel, setJevModel] = useState("jev-1.13.0");
-	const [jevApiKey, setJevApiKey] = useState("");
-	const [clearJevApiKey, setClearJevApiKey] = useState(false);
-	const [clearRoutingApiKey, setClearRoutingApiKey] = useState(false);
 	const [runSettingsSave, setRunSettingsSave] = useState<SettingsOperation>({
 		status: SettingsOperationStatus.Idle,
 	});
@@ -457,15 +410,6 @@ export function CommonspaceSidebar({
 		null,
 	);
 	const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
-	const [inferenceCheck, setInferenceCheck] = useState<SettingsOperation>({
-		status: SettingsOperationStatus.Idle,
-	});
-	const inferenceChecking =
-		inferenceCheck.status === SettingsOperationStatus.Running;
-	const inferenceCheckStatus =
-		inferenceCheck.status === SettingsOperationStatus.Idle
-			? null
-			: inferenceCheck.message;
 	const [importArchive, setImportArchive] =
 		useState<WorkspaceImportCandidate | null>(null);
 	const [importMappings, setImportMappings] = useState<
@@ -565,16 +509,6 @@ export function CommonspaceSidebar({
 		savedRouting?.provider === CommonspaceRoutingProvider.Unconfigured
 			? undefined
 			: savedRouting;
-	const savedApiRouting =
-		configuredRouting?.provider === CommonspaceRoutingProvider.OpenAiCompatible
-			? configuredRouting
-			: undefined;
-	const savedJev = configuredRouting?.jev;
-	const savedApiKeyAppliesToDraft =
-		savedApiRouting !== undefined &&
-		URL.canParse(routingBaseUrl) &&
-		new URL(routingBaseUrl).toString().replace(/\/$/u, "") ===
-			savedApiRouting.baseUrl;
 	const inboxItems = useMemo(
 		() => (state === undefined ? [] : deriveCommonspaceInboxItems(state)),
 		[state],
@@ -998,40 +932,12 @@ export function CommonspaceSidebar({
 	};
 
 	const routingUpdateRequest = (): UpdateRoutingConfigurationRequest => {
-		const jev = jevEnabled
-			? {
-					model: jevModel,
-					...(clearJevApiKey
-						? { apiKey: null }
-						: jevApiKey.trim()
-							? { apiKey: jevApiKey }
-							: {}),
-				}
-			: null;
-		switch (routingProvider) {
-			case CommonspaceRoutingProvider.Harness:
-				return {
-					provider: routingProvider,
-					harnessAgentId: routingHarnessAgentId,
-					jev,
-				};
-			case CommonspaceRoutingProvider.OpenAiCompatible:
-				return {
-					provider: routingProvider,
-					model: routingModel,
-					baseUrl: routingBaseUrl,
-					jev,
-					...(clearRoutingApiKey
-						? { apiKey: null }
-						: routingApiKey.trim()
-							? { apiKey: routingApiKey }
-							: {}),
-				};
-			default: {
-				const unhandled: never = routingProvider;
-				throw new Error(`Unsupported routing provider: ${unhandled}`);
-			}
-		}
+		if (routingHarnessAgentId === "")
+			throw new Error("Choose a workspace inference agent");
+		return {
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: routingHarnessAgentId,
+		};
 	};
 
 	const saveInferenceSettings = async (event: FormEvent) => {
@@ -1039,13 +945,13 @@ export function CommonspaceSidebar({
 		if (savingInference) return;
 		setInferenceSave({
 			status: SettingsOperationStatus.Running,
-			message: "Saving inference settings…",
+			message: "Saving inference agent…",
 		});
 		try {
 			await store.updateRoutingConfiguration(routingUpdateRequest());
 			setInferenceSave({
 				status: SettingsOperationStatus.Succeeded,
-				message: "Inference settings saved.",
+				message: "Inference agent saved.",
 			});
 			setSettingsOpen(false);
 		} catch (error) {
@@ -1145,28 +1051,6 @@ export function CommonspaceSidebar({
 			setDiagnostics(await store.diagnostics());
 		} finally {
 			setDiagnosticsLoading(false);
-		}
-	};
-
-	const checkInferenceConfiguration = async () => {
-		if (inferenceChecking) return;
-		setInferenceCheck({
-			status: SettingsOperationStatus.Running,
-			message: "Checking saved configuration…",
-		});
-		try {
-			const result = await store.diagnostics();
-			setInferenceCheck({
-				status: SettingsOperationStatus.Succeeded,
-				message: result.inference.configured
-					? "Saved configuration is present. Provider connectivity has not been tested."
-					: "Saved configuration needs attention. Provider connectivity has not been tested.",
-			});
-		} catch {
-			setInferenceCheck({
-				status: SettingsOperationStatus.Failed,
-				message: "Configuration check failed",
-			});
 		}
 	};
 
@@ -1382,24 +1266,23 @@ export function CommonspaceSidebar({
 												Routing and context
 											</h2>
 											<span className="mt-2 block text-xs text-muted-foreground">
-												Saved router:{" "}
-												{savedJev?.enabled === true
-													? "Jev"
-													: bootstrap?.routing?.provider ===
-															CommonspaceRoutingProvider.Harness
-														? "Native agent"
-														: bootstrap?.routing?.provider ===
-																CommonspaceRoutingProvider.OpenAiCompatible
-															? "OpenAI-compatible API"
-															: "Not configured"}
+												Saved inference agent:{" "}
+												{configuredRouting === undefined
+													? "Not configured"
+													: (bootstrap?.agents.find(
+															(agent) =>
+																agent.id === configuredRouting.harnessAgentId,
+														)?.displayName ?? "Unavailable agent")}
 											</span>
 											<p className="mt-2 max-w-[780px] text-sm leading-6 text-muted-foreground">
-												Choose who receives messages and how shared context is
-												summarized.
+												Choose one of your agents to route unaddressed Channel
+												messages and compact shared context. Commonspace uses
+												the runtime&apos;s existing sign-in and never asks for
+												an API key.
 											</p>
 										</div>
 										<form
-											aria-label="Inference settings"
+											aria-label="Inference agent settings"
 											onSubmit={(event) => {
 												void saveInferenceSettings(event);
 											}}
@@ -1421,356 +1304,63 @@ export function CommonspaceSidebar({
 													</p>
 												)}
 												<section className="pt-2">
-													<div className="mb-8 grid gap-3">
-														<div className="flex items-center gap-3">
-															<h2 className="text-base font-semibold">
-																Use Jev for routing
-															</h2>
-															<SettingsCheckbox
-																label="Use Jev for routing"
-																checked={jevEnabled}
-																onCheckedChange={setJevEnabled}
-															/>
-														</div>
-														<p className="text-sm leading-6 text-muted-foreground">
-															Jev selects agents, projects, and delivery order.
-															Each agent receives your original message.
-														</p>
-														<p className="text-xs text-muted-foreground">
-															{jevEnabled
-																? "Save inference settings to apply changes. Disabling Jev keeps its saved key and model. Saving does not test the connection."
-																: "While Jev is off, the provider below handles routing too."}
-														</p>
-														<fieldset
-															disabled={!jevEnabled}
-															hidden={!jevEnabled}
-															className="m-0 grid min-w-0 gap-3 border-0 p-0 disabled:opacity-60 hidden:hidden"
-														>
-															<legend className="sr-only">
-																Jev connection
-															</legend>
-															<p className="text-xs text-muted-foreground">
-																Sends message text, relevant conversation
-																passages, context notes, and Agent and Project
-																labels to TypeSafe.
-															</p>
-															<label>
-																Jev model
-																<input
-																	aria-label="Jev model"
-																	required
-																	value={jevModel}
-																	onChange={(event) =>
-																		setJevModel(event.target.value)
-																	}
-																/>
-															</label>
-															<label>
-																TypeSafe API key
-																<input
-																	aria-label="TypeSafe API key"
-																	type="password"
-																	autoComplete="new-password"
-																	value={jevApiKey}
-																	placeholder={
-																		savedJev?.apiKeySource ===
-																		CredentialSource.Saved
-																			? "Saved key — leave blank to keep"
-																			: savedJev?.apiKeySource ===
-																					CredentialSource.Environment
-																				? "Using TYPESAFE_API_KEY from the server"
-																				: "Enter a TypeSafe API key"
-																	}
-																	onChange={(event) => {
-																		setJevApiKey(event.target.value);
-																		setClearJevApiKey(false);
-																	}}
-																/>
-															</label>
-															{savedJev?.apiKeySource ===
-																CredentialSource.Saved && (
-																<div className="flex items-center justify-between gap-4">
-																	<div>
-																		<strong className="text-sm">
-																			Clear saved TypeSafe API key
-																		</strong>
-																		<p className="text-xs text-muted-foreground">
-																			A key set on the server still applies.
-																		</p>
-																	</div>
-																	<SettingsCheckbox
-																		label="Clear saved TypeSafe API key"
-																		checked={clearJevApiKey}
-																		onCheckedChange={setClearJevApiKey}
-																	/>
-																</div>
-															)}
-														</fieldset>
-													</div>
 													<SettingsSectionHeading
-														title={
-															jevEnabled
-																? "Context compaction provider"
-																: "Routing and context provider"
-														}
-														description={
-															jevEnabled
-																? "Choose the text provider for context compaction."
-																: "Choose where Commonspace gets routing and context decisions."
-														}
+														title="Inference agent"
+														description="This agent handles routing and background compaction through its existing harness session."
 													/>
-													<fieldset className="m-0 grid min-w-0 grid-cols-2 gap-x-6 gap-y-1 border-0 p-0 @max-[640px]/settings:grid-cols-1">
-														<legend className="sr-only">Routing engine</legend>
-														<label
-															className={cn(
-																"relative grid min-h-14 cursor-pointer grid-cols-[20px_minmax(0,1fr)] items-start gap-3 rounded-md py-3 text-left has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring",
-															)}
-														>
-															<input
-																className="sr-only"
-																type="radio"
-																name="commonspace-routing-engine"
-																value="openai-compatible"
-																checked={
-																	routingProvider ===
-																	CommonspaceRoutingProvider.OpenAiCompatible
-																}
-																onChange={() => {
-																	setRoutingProvider(
-																		CommonspaceRoutingProvider.OpenAiCompatible,
-																	);
-																	setRoutingHarnessAgentId("");
-																}}
-															/>
-															<span
+													<fieldset className="m-0 grid min-w-0 overflow-hidden rounded-md border bg-card p-0">
+														<legend className="sr-only">Inference agent</legend>
+														{agents.map((agent) => (
+															<label
+																key={agent.id}
 																className={cn(
-																	"mt-0.5 size-[18px] rounded-full border before:m-auto before:block before:size-2 before:translate-y-1 before:rounded-full",
-																	routingProvider ===
-																		CommonspaceRoutingProvider.OpenAiCompatible &&
-																		"border-primary before:bg-primary",
+																	"grid min-h-[62px] cursor-pointer grid-cols-[20px_36px_minmax(0,1fr)_auto] items-center gap-3 border-t px-4 py-2 text-left first:border-t-0 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-[-2px] has-[input:focus-visible]:outline-ring",
+																	routingHarnessAgentId === agent.id &&
+																		"bg-muted/30",
 																)}
-																aria-hidden="true"
-															/>
-															<span>
-																<strong className="block text-sm">
-																	OpenAI-compatible API
-																</strong>
-																<small className="mt-2 block text-xs text-muted-foreground">
-																	Connect any compatible local or remote
-																	provider.
-																</small>
-															</span>
-														</label>
-														<label
-															className={cn(
-																"relative grid min-h-14 cursor-pointer grid-cols-[20px_minmax(0,1fr)] items-start gap-3 rounded-md py-3 text-left has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring",
-															)}
-														>
-															<input
-																className="sr-only"
-																type="radio"
-																name="commonspace-routing-engine"
-																value="harness"
-																checked={
-																	routingProvider ===
-																	CommonspaceRoutingProvider.Harness
-																}
-																onChange={() => {
-																	setRoutingProvider(
-																		CommonspaceRoutingProvider.Harness,
-																	);
-																	if (routingHarnessAgentId === "")
-																		setRoutingHarnessAgentId(
-																			agents[0]?.id ?? "",
-																		);
-																}}
-															/>
-															<span
-																className={cn(
-																	"mt-0.5 size-[18px] rounded-full border before:m-auto before:block before:size-2 before:translate-y-1 before:rounded-full",
-																	routingProvider ===
-																		CommonspaceRoutingProvider.Harness &&
-																		"border-primary before:bg-primary",
-																)}
-																aria-hidden="true"
-															/>
-															<span>
-																<strong className="block text-sm">
-																	Native agent
-																</strong>
-																<small className="mt-2 block text-xs text-muted-foreground">
-																	Use one of your installed harness profiles.
-																</small>
-															</span>
-														</label>
-													</fieldset>
-													{routingProvider ===
-														CommonspaceRoutingProvider.Harness && (
-														<fieldset className="mt-3 grid border-t pt-2">
-															<legend className="sr-only">Routing agent</legend>
-															{agents.map((agent) => (
-																<label
-																	key={agent.id}
-																	className={cn(
-																		"grid min-h-[58px] cursor-pointer grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 rounded-sm px-1 text-left has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring",
-																		routingHarnessAgentId === agent.id &&
-																			"border-primary",
-																	)}
-																>
-																	<input
-																		className="sr-only"
-																		type="radio"
-																		name="commonspace-routing-agent"
-																		value={agent.id}
-																		checked={routingHarnessAgentId === agent.id}
-																		onChange={() => {
-																			setRoutingHarnessAgentId(agent.id);
-																		}}
-																	/>
-																	<AgentAvatar agent={agent} />
-																	<span>
-																		<strong className="block text-sm">
-																			{agent.displayName}
-																		</strong>
-																		<small className="text-xs text-muted-foreground">
-																			{runtimeLabel(agent.adapter)} ·{" "}
-																			{agent.model ?? "harness default"}
-																		</small>
-																	</span>
-																	{routingHarnessAgentId === agent.id && (
-																		<span className="text-xs font-semibold text-primary">
-																			Routing agent
-																		</span>
-																	)}
-																</label>
-															))}
-														</fieldset>
-													)}
-												</section>
-
-												{routingProvider ===
-													CommonspaceRoutingProvider.OpenAiCompatible && (
-													<section className="mt-8 border-t pt-8">
-														<SettingsSectionHeading
-															title="Connection"
-															description="Credentials stay on this device and are never included in public workspace configuration."
-														/>
-														<div className="overflow-hidden rounded-md border bg-card">
-															<div className="grid grid-cols-2 gap-3 p-4 max-[640px]:grid-cols-1">
-																<label>
-																	<span className="text-xs font-semibold text-muted-foreground">
-																		Model ID
-																	</span>
-																	<input
-																		aria-label="Routing model"
-																		placeholder="gpt-4.1-mini"
-																		value={routingModel}
-																		onChange={(event) => {
-																			setRoutingModel(event.target.value);
-																		}}
-																	/>
-																</label>
-																<label>
-																	<span className="text-xs font-semibold text-muted-foreground">
-																		API base URL
-																	</span>
-																	<input
-																		aria-label="Routing API base URL"
-																		type="url"
-																		value={routingBaseUrl}
-																		onChange={(event) => {
-																			setRoutingBaseUrl(event.target.value);
-																		}}
-																	/>
-																</label>
-															</div>
-															<label className="border-t p-4">
-																<span className="text-xs font-semibold text-muted-foreground">
-																	API key
-																</span>
+															>
 																<input
-																	aria-label="Routing API key"
-																	type="password"
-																	autoComplete="new-password"
-																	placeholder={
-																		savedApiKeyAppliesToDraft &&
-																		savedApiRouting?.apiKeySource ===
-																			CredentialSource.Saved
-																			? "Saved — leave blank to keep"
-																			: savedApiKeyAppliesToDraft &&
-																					savedApiRouting?.apiKeySource ===
-																						CredentialSource.Environment
-																				? "Using OPENAI_API_KEY from the server"
-																				: "Optional for providers without authentication"
-																	}
-																	value={routingApiKey}
-																	onChange={(event) => {
-																		setRoutingApiKey(event.target.value);
-																		setClearRoutingApiKey(false);
+																	className="sr-only"
+																	type="radio"
+																	name="commonspace-inference-agent"
+																	value={agent.id}
+																	checked={routingHarnessAgentId === agent.id}
+																	onChange={() => {
+																		setRoutingHarnessAgentId(agent.id);
 																	}}
 																/>
-																<p className="mt-1 text-xs text-muted-foreground">
-																	Changing the API base URL clears its saved
-																	key. Enter the new provider’s key before
-																	saving if it requires authentication.
-																</p>
-															</label>
-															{savedApiKeyAppliesToDraft &&
-																savedApiRouting?.apiKeySource ===
-																	CredentialSource.Saved && (
-																	<div className="flex min-h-[62px] items-center justify-between gap-4 border-t px-4 py-3">
-																		<div>
-																			<strong className="block text-sm">
-																				Clear saved API key
-																			</strong>
-																			<p className="mt-1 text-xs text-muted-foreground">
-																				Removes the stored credential when you
-																				save.
-																			</p>
-																		</div>
-																		<SettingsCheckbox
-																			label="Clear routing API key"
-																			checked={clearRoutingApiKey}
-																			onCheckedChange={setClearRoutingApiKey}
-																		/>
-																	</div>
-																)}
-															<div className="flex min-h-[76px] items-center justify-between gap-4 border-t bg-muted/30 p-4 max-[640px]:grid">
-																<div>
+																<span
+																	className={cn(
+																		"pointer-events-none size-[18px] rounded-full border before:m-auto before:block before:size-2 before:translate-y-1 before:rounded-full",
+																		routingHarnessAgentId === agent.id &&
+																			"border-primary before:bg-primary",
+																	)}
+																	aria-hidden="true"
+																/>
+																<AgentAvatar agent={agent} />
+																<span>
 																	<strong className="block text-sm">
-																		Used by Commonspace
+																		{agent.displayName}
 																	</strong>
-																	<p className="mt-1 text-xs text-muted-foreground">
-																		{jevEnabled
-																			? "Context compaction · workspace utilities"
-																			: "Message routing · context compaction · workspace utilities"}
-																	</p>
-																</div>
-																<button
-																	type="button"
-																	disabled={inferenceChecking}
-																	onClick={() => {
-																		void checkInferenceConfiguration();
-																	}}
-																>
-																	{inferenceChecking
-																		? "Checking…"
-																		: "Check saved configuration"}
-																</button>
-															</div>
-															{inferenceCheckStatus !== null && (
-																<p
-																	className="border-t px-4 py-3 text-xs text-muted-foreground"
-																	role="status"
-																	aria-live="polite"
-																	aria-label="Inference configuration status"
-																>
-																	{inferenceCheckStatus}
-																</p>
-															)}
-														</div>
-													</section>
-												)}
+																	<small className="text-xs text-muted-foreground">
+																		{runtimeLabel(agent.adapter)} ·{" "}
+																		{agent.model ?? "harness default"}
+																	</small>
+																</span>
+																{routingHarnessAgentId === agent.id && (
+																	<span className="text-xs font-semibold text-primary">
+																		Selected
+																	</span>
+																)}
+															</label>
+														))}
+													</fieldset>
+													<p className="mt-3 text-xs leading-5 text-muted-foreground">
+														Explicit @mentions and DMs bypass inference. The
+														selected agent receives bounded public conversation
+														context only.
+													</p>
+												</section>
 
 												{settingsError !== null && (
 													<p
@@ -1782,17 +1372,19 @@ export function CommonspaceSidebar({
 												)}
 												<div className="mt-6 flex items-center justify-between gap-6 border-t pt-4 max-[640px]:grid">
 													<p className="text-xs leading-5 text-muted-foreground">
-														Saves only routing and context-provider settings.
-														Agent run defaults have their own save button.
+														Saves only the routing and compaction agent. Agent
+														run defaults have their own save button.
 													</p>
 													<button
 														type="submit"
 														className="shrink-0 border-primary bg-primary font-semibold text-primary-foreground hover:bg-[color-mix(in_srgb,var(--primary)_88%,black)] disabled:cursor-wait disabled:opacity-60"
-														disabled={savingInference}
+														disabled={
+															savingInference || routingHarnessAgentId === ""
+														}
 													>
 														{savingInference
-															? "Saving inference…"
-															: "Save inference settings"}
+															? "Saving inference agent…"
+															: "Save inference agent"}
 													</button>
 												</div>
 											</fieldset>
@@ -2085,14 +1677,10 @@ export function CommonspaceSidebar({
 												<div className="grid gap-4 border-t px-4 py-4 text-xs">
 													<div>
 														<strong className="text-sm">
-															{diagnostics.inference.location === "remote"
-																? "Remote inference"
-																: diagnostics.inference.location === "local"
-																	? "Local endpoint"
-																	: diagnostics.inference.location ===
-																			"runtime-managed"
-																		? "Native runtime controls provider traffic"
-																		: "Inference not configured"}
+															{diagnostics.inference.location ===
+															"runtime-managed"
+																? "Selected harness controls model traffic"
+																: "Inference not configured"}
 														</strong>
 														<p className="mt-1 text-muted-foreground">
 															{diagnostics.inference.provider} ·{" "}
@@ -3498,42 +3086,13 @@ export function CommonspaceSidebar({
 						}
 						if (!savingInference) {
 							const routing = bootstrap?.routing;
-							setRoutingProvider(
-								routing === undefined ||
-									routing.provider === CommonspaceRoutingProvider.Unconfigured
-									? CommonspaceRoutingProvider.OpenAiCompatible
-									: routing.provider,
-							);
 							setRoutingHarnessAgentId(
 								routing?.provider === CommonspaceRoutingProvider.Harness
 									? routing.harnessAgentId
 									: "",
 							);
-							setRoutingModel(
-								routing?.provider ===
-									CommonspaceRoutingProvider.OpenAiCompatible
-									? routing.model
-									: "",
-							);
-							setJevEnabled(savedJev?.enabled === true);
-							setJevModel(savedJev?.model ?? "jev-1.13.0");
-							setJevApiKey("");
-							setClearJevApiKey(false);
-							setRoutingBaseUrl(
-								routing?.provider ===
-									CommonspaceRoutingProvider.OpenAiCompatible
-									? routing.baseUrl
-									: "https://api.openai.com/v1",
-							);
-							setRoutingApiKey("");
-							setClearRoutingApiKey(false);
 							setInferenceSave({ status: SettingsOperationStatus.Idle });
 						}
-						setInferenceCheck((current) =>
-							current.status === SettingsOperationStatus.Running
-								? current
-								: { status: SettingsOperationStatus.Idle },
-						);
 						if (!savingNotifications) {
 							setNotificationSave({ status: SettingsOperationStatus.Idle });
 							setNotificationSettings({

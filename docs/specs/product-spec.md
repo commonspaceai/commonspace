@@ -22,7 +22,7 @@ Commonspace solves this by providing:
 
 - Shared Channels and focused threads for agent collaboration.
 - Persistent one-to-one DMs with exact agent continuity.
-- Routing through a configured text provider or optional Jev judgments, with stored decisions and correction history.
+- Routing and shared-context compaction through one selected workspace Agent, with stored decisions and correction history.
 - Visible Project references that identify the resources relevant to a conversation.
 - Shared context that people can inspect and edit separately from private runtime context.
 - Local persistence, search, unread state, attachments, activity, and recovery.
@@ -82,10 +82,10 @@ A user can open Commonspace, talk naturally in a Channel or DM, and trust that:
 3. **Context is explicit.** People can inspect and correct Project references, shared context, routing decisions, and the state of context summaries.
 4. **Native continuity is exact.** A thread or DM resumes its mapped native session whenever the harness supports it.
 5. **Agents are peers.** A visible mention is the handoff. No coordinator is required.
-6. **Inference is a service function.** One configured provider chooses agents, divides requests, identifies Projects, and summarizes shared context and routing corrections.
+6. **Inference is a service function.** One selected workspace Agent chooses agents, divides requests, identifies Projects, and summarizes shared context and routing corrections through its native harness.
 7. **Harness capabilities are authoritative.** Runtime controls come from ACP. Read-only capability browsing may also use native inventory commands or native configuration metadata, with the source and scope visible. Configured capabilities are not proof of availability in a particular session.
 8. **Parallel by default.** Different native sessions may run concurrently. Only work targeting the same native session is serialized.
-9. **Local authority.** Commonspace stores workspace data and native-session references locally. Connected runtimes control their own model-service traffic and credentials. Commonspace inference may also use an explicitly configured remote endpoint.
+9. **Local authority.** Commonspace stores workspace data and native-session references locally. Connected runtimes control model-service traffic and credentials, including inference traffic from the selected workspace Agent.
 10. **Show actual outcomes.** Display routing failures, preserve delivered history, reflect granted permissions, and distinguish interrupted runs from completed runs.
 
 ## 4. Conceptual model
@@ -143,6 +143,8 @@ Agent settings provide an on-demand, read-only native capability browser for eve
 4. The user explicitly selects the harness identity to add.
 5. Commonspace may assign a local display name, emoji/avatar, and accent color without renaming or altering the harness identity or configuration.
 6. The Agent becomes available for DMs, Channel membership, mentions, and routing.
+7. The user selects one added Agent as the workspace inference Agent.
+8. The workspace is ready only after both requirements are satisfied: at least one Agent is added and an added Agent is selected for inference. The same Agent may satisfy both.
 
 ### 5.2 Project setup
 
@@ -199,7 +201,7 @@ Compaction summarizes context so it fits within input limits. It does not delete
 1. The user can inspect the Project, Channel, and Thread context available to an Agent.
 2. Channel context shows its summary, decisions, open questions, the source messages it covers, estimated token pressure, who wrote it, and its compaction state. Channel settings show readable pins and a **Context brief** with current work, decisions, and unresolved questions. There is no per-Channel instruction configuration form. **Edit context** opens an explicit correction editor; saving membership never changes context ownership.
 3. A new Thread snapshots the current Channel context and then develops its own Thread context.
-4. Channel briefs refresh automatically after completed turns when a text provider is configured; Thread compaction responds to estimated context/token pressure.
+4. Channel briefs refresh automatically after completed turns when an inference Agent is selected; Thread compaction responds to estimated context/token pressure.
 5. The user can trigger compaction manually and edit the stored summary, decisions, and questions.
 6. User-written context remains authoritative and is not silently overwritten by automatic projection.
 7. If new source messages make edited context incomplete, Commonspace marks it stale.
@@ -295,7 +297,7 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 
 | ID | Target | Requirement | Acceptance condition |
 | --- | --- | --- | --- |
-| INF-01 | Current | Configure a text provider for compaction, with optional Jev routing judgments in the same Workspace settings. | Jev chooses participants, mode, order, and Project relevance in one request; code validates the choices and dispatches the original user message without an assignment-writing call. Disabling Jev retains its key and model and restores text-provider selection using the same metadata-only delivery contract. Missing or invalid saved configuration cannot silently select another provider. Inference and run defaults save independently; saved-field validation never claims provider connectivity or model access was verified. |
+| INF-01 | Current | Select one added Agent for workspace routing and shared-context compaction. | Commonspace stores only the Agent ID and invokes its ACP harness with the runtime's existing authentication. The inference Agent chooses participants, mode, order, and Project relevance in one request; code validates the result and dispatches the original user message without an assignment-writing call. Missing or invalid configuration cannot silently select another Agent. |
 | INF-02 | Current | Route every unaddressed Channel message through inference. | There is no deterministic/no-inference fallback that silently guesses an Agent. |
 | INF-03 | Current | Treat explicit Agent mentions as authoritative. | Inference may select delivery mode and Project scopes for mentioned Agents but cannot substitute unmentioned Agents or rewrite the request. |
 | INF-04 | Current | Select the smallest useful Agent set and delivery mode. | One Agent is preferred when sufficient; independent responsibilities use parallel assignments; explicit peer-conversation intent uses an ordered relay with at least two speakers. |
@@ -305,11 +307,12 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | INF-08 | Current | Support service-level participant rerouting and correction. | The service/API can redirect one assignment without resending unrelated assignments, and prior attempts remain stored. Inline conversation controls are deferred. |
 | INF-09 | Current | Learn from explicit corrections. | Reroutes are stored as feedback and compacted into bounded routing knowledge used by later decisions. |
 | INF-10 | Current | Fail visibly when inference is unavailable or invalid. | The message remains accepted and receives a retryable needs-attention state; Commonspace does not silently broadcast it. |
-| INF-11 | Current | Target effectively immediate routing. | The routing stage targets sub-second completion where the configured provider permits and reports separately from harness execution time. |
+| INF-11 | Current | Target effectively immediate routing. | The routing stage targets sub-second completion where the selected harness permits and reports separately from normal Agent execution time. |
+| INF-12 | Current | Require one added Agent and one valid inference-Agent selection before onboarding completes. | The same Agent may satisfy both requirements; removing or invalidating the selection returns the workspace to setup instead of silently falling back. |
 
 Routing receives every eligible Agent's current display name, public harness identity, and available responsibility description. Conversational addressing can use a distinctive shortened name or a harness identity when it identifies one recipient; a shared harness name does not establish a default Agent. Native profile references, credentials, and session details are excluded.
 
-Routing retrieves bounded public conversation passages through a local, ephemeral BM25 index. Existing Thread follow-ups retrieve within that Thread; new roots can retrieve within their Channel. Channel instructions, Thread starting context and current notes, pins, prior ownership, and recent messages accompany retrieved evidence. Retrieval excludes native sessions, host files, and private traces. Jev uses a two-second request deadline with no automatic transport retry; uncertain or incompatible consumed judgments fail visibly. Initial Choice confidence and Noul thresholds are conservative policy defaults requiring domain evaluation, rather than a guarantee of correctness.
+Routing retrieves bounded public conversation passages through a local, ephemeral BM25 index. Existing Thread follow-ups retrieve within that Thread; new roots can retrieve within their Channel. Channel instructions, Thread starting context and current notes, pins, prior ownership, and recent messages accompany retrieved evidence. Retrieval excludes native sessions, host files, and private traces. Each routing attempt uses a fresh native inference session with a bounded response and one validation retry; invalid or unavailable judgments fail visibly.
 
 ### 6.6 Shared context and compaction
 
@@ -378,7 +381,7 @@ Agents can navigate an eight-way tree of authorized conversation passages and re
 | DAT-03 | Current | Provide an open, versioned export of workspace data and attachments with managed private fields omitted. | The archive format and supported size contract are documented and usable without Commonspace cloud services. A successful supported export fits the HTTP restoration workflow, preserves exact attachment bytes, and remains unencrypted private user data. |
 | DAT-04 | Current | Validate imports and resolve local resource mappings explicitly. | Import cannot overwrite current state or assume that exported absolute paths exist; malformed or oversized input cannot partially activate state or leave copied attachment bytes. |
 | DAT-05 | Current | Keep data indefinitely by default and provide explicit retention controls. | No fixed append/load window silently drops accepted messages; destructive cleanup is scoped, previewable, and does not silently rewrite delivered history. |
-| DAT-06 | Current | Disclose configured inference data flow. | The user can see whether inference is local or remote and what categories of conversation/context may be sent. |
+| DAT-06 | Current | Disclose configured inference data flow. | The user can see that the selected harness controls model traffic and what categories of conversation/context may be sent. |
 | DAT-07 | Later | Migrate transcripts to a relational store only after measured need. | The product model and export format do not depend on the current JSON persistence implementation. |
 
 ## 7. Context model
@@ -430,7 +433,7 @@ For each Channel root or newly routable follow-up, the inference layer produces 
 
 The original human message remains the source record and stays visible. Delivery references contain Agent and Project metadata, never rewritten requests. Historical wording is retained as `legacySubRequest` for inspection and is never used for execution.
 
-The routing response uses a bounded output budget sized for the visible maximum assignment count. Commonspace detects provider-reported truncation where available and may retry inference once. It validates the delivery mode and entire assignment set, including Agent IDs, count, and Project scopes, before dispatching any Agent work. `relay` requires at least two ordered assignments.
+The routing response uses a bounded output budget sized for the visible maximum assignment count. Commonspace may retry invalid output once. It validates the delivery mode and entire assignment set, including Agent IDs, count, and Project scopes, before dispatching any Agent work. `relay` requires at least two ordered assignments.
 
 ### Reroute semantics
 
@@ -476,7 +479,7 @@ These states explain what happened to a message or agent turn. They belong to th
 - ACP runs locally between Commonspace and supported harness processes.
 - Commonspace does not copy or manage harness credentials.
 - Connected runtimes may send messages and context to their configured model services. Their network behavior remains under the runtime's control.
-- Jev sends bounded routing state to TypeSafe; a user-configured OpenAI-compatible inference endpoint may also be remote. Commonspace must clearly disclose that routing/context data can leave the machine in this configuration.
+- The selected inference Agent receives bounded routing and context state through its native harness. That runtime may send the data to its configured model service; Commonspace does not store or request a separate inference credential.
 - Inference receives only the bounded message, candidate metadata, Project labels/references, and relevant shared context required for its function. Project file contents are not included by default.
 
 ### Data handling

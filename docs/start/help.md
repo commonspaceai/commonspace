@@ -2,15 +2,15 @@
 
 ## Is Commonspace free?
 
-Commonspace is open source under the MIT license. Agent subscriptions, API calls, and optional routing providers have their own pricing. Installing Commonspace does not include model access or credits.
+Commonspace is open source under the MIT license. Agent subscriptions and model calls have their own pricing. Installing Commonspace does not include model access or credits.
 
 ## Can I use my existing agent subscription?
 
-Authenticate in your native runtime. Commonspace uses that runtime’s existing account and configuration; eligible models and subscription access depend on the runtime and provider. A separate OpenAI-compatible routing API or TypeSafe key can have separate usage charges. A direct message needs no routing API key.
+Authenticate in your native runtime. Commonspace uses that runtime’s existing account and configuration; eligible models and subscription access depend on the runtime and provider. The selected workspace inference agent uses the same harness sign-in for routing and shared-context compaction.
 
 ## What stays on my computer?
 
-The server, workspace history, Projects, and native session references live locally. Agents and inference providers can send prompts and context to their model services. “Local-first” does not mean all model processing is offline. Optional Jev routing sends message text, agent and Project labels, shared context, and routing corrections to TypeSafe.
+The server, workspace history, Projects, and native session references live locally. Agents can send prompts and context to model services through their native runtimes. “Local-first” does not mean all model processing is offline. The selected inference agent receives bounded message text, Agent and Project labels, shared context, and routing corrections through its harness.
 
 ## Which files can an agent access?
 
@@ -26,7 +26,7 @@ Discovery is an installation check. Follow the [runtime setup steps](runtimes.md
 
 ## DMs work but Channel routing fails
 
-Open Workspace settings and choose an inference provider. For a native harness, select an added agent. For an OpenAI-compatible service, check its URL, exact model name, and credentials, then save. Jev needs its own TypeSafe key when enabled. Configuration status does not prove model access; an actual routed Channel reply does. Use manual member selection on the failed request while repairing configuration.
+Open Workspace settings and choose one of the added agents as the inference agent. Confirm that agent can answer through its native runtime, then retry. Configuration status does not prove model access; an actual routed Channel reply does. Use manual member selection on the failed request while repairing the harness.
 
 ## How do I restart without losing work?
 

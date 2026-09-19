@@ -155,15 +155,7 @@ Keep activity provider-neutral, bounded, and based only on emitted ACP updates. 
 
 Use the [adapter guide](../adapters/agent-adapters.md#verification-commands) for account-free fixtures and authenticated native-session checks. Run the checks relevant to the changed runtime; fixture results do not establish provider-backed compatibility.
 
-Parser and service tests establish routing contracts; they do not measure model decomposition quality. To evaluate a configured OpenAI-compatible provider against representative cross-responsibility cases with exact constraint tokens and Project scopes, set `COMMONSPACE_ROUTING_BASE_URL`, `COMMONSPACE_ROUTING_MODEL`, and optional `COMMONSPACE_ROUTING_API_KEY`, then run:
-
-```bash
-pnpm verify:routing-quality
-```
-
-For the live Jev greeting-versus-project-continuation regression, set `TYPESAFE_API_KEY` and run `COMMONSPACE_ROUTING_EVAL=1 COMMONSPACE_ROUTING_JEV_MODEL=jev-1.13.0 pnpm test tests/live-jev-routing.spec.ts`. This calls the real TypeSafe endpoint with synthetic conversation history; normal test runs skip it.
-
-This opt-in evaluation may call a remote model and incur provider cost. Record provider/model/version and results; do not turn a mocked JSON parser test into a routing-quality claim.
+Parser and service tests establish routing contracts; they do not measure model decomposition quality or harness latency. Evaluate those properties through an added test Agent using synthetic conversation history, record the runtime/model/version and results, and never turn a mocked JSON parser test into a routing-quality claim.
 
 On macOS, `pnpm verify:notifications` checks whether the native notifier accepts a safe test alert. Use **Send test notification** in Workspace settings to check visible delivery and follow any operating-system guidance.
 

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,9 +8,19 @@ import {
 import { afterEach, expect, it } from "vitest";
 import { startCommonspaceServer } from "../server/src/index.ts";
 import { CommonspaceHostService } from "../server/src/service.ts";
+import { addTestHarness, discoverTestHarnesses } from "./test-harnesses.ts";
 
 const services: CommonspaceHostService[] = [];
 const roots: string[] = [];
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((done) => {
+		resolve = done;
+	});
+	return { promise, resolve };
+}
+
 afterEach(async () => {
 	await Promise.all(services.splice(0).map((service) => service.close()));
 	await Promise.all(
@@ -31,56 +41,167 @@ async function loadConfiguration(saved?: string) {
 	);
 	services.push(service);
 	await service.initialize();
-	return service;
+	return { root, service };
 }
 
 it.each([
-	undefined,
 	"not JSON",
 	JSON.stringify({
-		provider: CommonspaceRoutingProvider.OpenAiCompatible,
-		model: "router",
-		baseUrl: "broken://endpoint",
-		apiKey: "synthetic-other-provider-key",
+		version: 2,
+		provider: CommonspaceRoutingProvider.Harness,
+		harnessAgentId: "old-agent",
 	}),
+	JSON.stringify({ provider: "removed-provider", secret: "discard-me" }),
 	JSON.stringify({
-		provider: CommonspaceRoutingProvider.OpenAiCompatible,
-		model: "router",
-		baseUrl: "https://example.test/v1",
-		jev: { version: 99, model: "unknown" },
+		version: 3,
+		provider: CommonspaceRoutingProvider.Harness,
+		harnessAgentId: "missing-agent",
 	}),
 ])(
-	"keeps unavailable saved routing unavailable instead of selecting another provider (%s)",
+	"removes unsupported or unavailable inference configuration immediately (%s)",
 	async (saved) => {
-		const service = await loadConfiguration(saved);
-		expect(service.routing().provider).toBe("unconfigured");
+		const { root, service } = await loadConfiguration(saved);
+		expect(service.routing().provider).toBe(
+			CommonspaceRoutingProvider.Unconfigured,
+		);
 		expect((await service.diagnostics()).inference.configured).toBe(false);
+		await expect(
+			readFile(join(root, "routing.json"), "utf8"),
+		).rejects.toMatchObject({ code: "ENOENT" });
 	},
 );
 
-it("retains a saved Jev credential when routing is disabled and re-enabled", async () => {
-	const service = await loadConfiguration();
-	const text = {
-		provider: CommonspaceRoutingProvider.OpenAiCompatible,
-		model: "router",
-		baseUrl: "https://example.test/v1",
-	} as const;
+it("loads an exact current inference record for an Agent in the workspace", async () => {
+	const root = await mkdtemp(
+		join(tmpdir(), "commonspace-configuration-current-"),
+	);
+	roots.push(root);
+	const service = new CommonspaceHostService(
+		{},
+		{ root },
+		{ discoverAgents: discoverTestHarnesses },
+	);
+	services.push(service);
+	await service.initialize();
+	await addTestHarness(service, "codex", "Review Bot");
 	await service.updateRoutingConfiguration({
-		...text,
-		jev: { model: "jev-1.13.0", apiKey: "synthetic-jev-key" },
+		provider: CommonspaceRoutingProvider.Harness,
+		harnessAgentId: "codex",
 	});
-	await service.updateRoutingConfiguration({ ...text, jev: null });
-	await service.updateRoutingConfiguration({
-		...text,
-		jev: { model: "jev-1.13.0" },
-	});
-	expect(service.routing()).toMatchObject({
-		jev: { enabled: true, apiKeyConfigured: true },
+
+	const restarted = new CommonspaceHostService(
+		{},
+		{ root },
+		{ discoverAgents: async () => [] },
+	);
+	services.push(restarted);
+	await restarted.initialize();
+	expect(restarted.routing()).toEqual({
+		provider: CommonspaceRoutingProvider.Harness,
+		harnessAgentId: "codex",
 	});
 });
 
-it("saves run defaults independently while a saved router is invalid", async () => {
-	const service = await loadConfiguration("broken configuration");
+it("clears inference when its Agent is removed and does not resurrect it", async () => {
+	const root = await mkdtemp(
+		join(tmpdir(), "commonspace-configuration-agent-removal-"),
+	);
+	roots.push(root);
+	const service = new CommonspaceHostService(
+		{},
+		{ root },
+		{ discoverAgents: discoverTestHarnesses },
+	);
+	services.push(service);
+	await service.initialize();
+	await addTestHarness(service, "codex", "Review Bot");
+	await service.updateRoutingConfiguration({
+		provider: CommonspaceRoutingProvider.Harness,
+		harnessAgentId: "codex",
+	});
+
+	await service.mutate({ action: "remove-agent", agentId: "codex" });
+	expect(service.routing().provider).toBe(
+		CommonspaceRoutingProvider.Unconfigured,
+	);
+	await expect(
+		readFile(join(root, "routing.json"), "utf8"),
+	).rejects.toMatchObject({ code: "ENOENT" });
+
+	await addTestHarness(service, "codex", "Review Bot");
+	expect(service.routing().provider).toBe(
+		CommonspaceRoutingProvider.Unconfigured,
+	);
+
+	const restarted = new CommonspaceHostService(
+		{},
+		{ root },
+		{ discoverAgents: async () => [] },
+	);
+	services.push(restarted);
+	await restarted.initialize();
+	expect(restarted.routing().provider).toBe(
+		CommonspaceRoutingProvider.Unconfigured,
+	);
+});
+
+it("serializes an inference save with removal of that Agent", async () => {
+	const root = await mkdtemp(
+		join(tmpdir(), "commonspace-configuration-concurrent-removal-"),
+	);
+	roots.push(root);
+	const persistenceStarted = deferred<void>();
+	const releasePersistence = deferred<void>();
+	let pauseHarnessWrite = false;
+	const service = new CommonspaceHostService(
+		{},
+		{ root },
+		{
+			discoverAgents: discoverTestHarnesses,
+			beforePersistRoutingConfiguration: async (configuration) => {
+				if (
+					pauseHarnessWrite &&
+					configuration.provider === CommonspaceRoutingProvider.Harness
+				) {
+					pauseHarnessWrite = false;
+					persistenceStarted.resolve(undefined);
+					await releasePersistence.promise;
+				}
+			},
+		},
+	);
+	services.push(service);
+	await service.initialize();
+	await addTestHarness(service, "codex", "Review Bot");
+	await service.updateRoutingConfiguration({
+		provider: CommonspaceRoutingProvider.Harness,
+		harnessAgentId: "codex",
+	});
+
+	pauseHarnessWrite = true;
+	const saving = service.updateRoutingConfiguration({
+		provider: CommonspaceRoutingProvider.Harness,
+		harnessAgentId: "codex",
+	});
+	await persistenceStarted.promise;
+	const removing = service.mutate({
+		action: "remove-agent",
+		agentId: "codex",
+	});
+	releasePersistence.resolve(undefined);
+	await Promise.all([saving, removing]);
+
+	expect(service.snapshot().agents).toEqual([]);
+	expect(service.routing().provider).toBe(
+		CommonspaceRoutingProvider.Unconfigured,
+	);
+	await expect(
+		readFile(join(root, "routing.json"), "utf8"),
+	).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("saves run defaults independently while saved inference is discarded", async () => {
+	const { service } = await loadConfiguration("broken configuration");
 	await service.mutate({
 		action: "set-defaults",
 		model: null,
@@ -94,15 +215,15 @@ it("saves run defaults independently while a saved router is invalid", async () 
 		maxAgentsPerTurn: 2,
 		memoryThreads: 6,
 	});
-	expect(service.routing()).toMatchObject({
-		provider: CommonspaceRoutingProvider.Unconfigured,
-		reason: "invalid",
-	});
+	expect(service.routing().provider).toBe(
+		CommonspaceRoutingProvider.Unconfigured,
+	);
 });
+
 it.each([0, 9, 1.5])(
 	"rejects an invalid agent limit instead of silently rewriting %s",
 	async (maxAgentsPerTurn) => {
-		const service = await loadConfiguration();
+		const { service } = await loadConfiguration();
 		const before = service.snapshot().defaults;
 		await expect(
 			service.mutate({ action: "set-defaults", maxAgentsPerTurn }),
@@ -111,27 +232,24 @@ it.each([0, 9, 1.5])(
 	},
 );
 
-it.each([
-	{ apiKeey: null },
-	{ harnessAgentId: "wrong-provider-field" },
-	{ jev: { version: 2, enabled: true, model: "jev-1.13.0", apiKeey: null } },
-])("rejects unknown fields in current saved routing: %j", async (extra) => {
-	const service = await loadConfiguration(
+it("removes current-looking records with unknown fields", async () => {
+	const { root, service } = await loadConfiguration(
 		JSON.stringify({
-			version: 2,
-			provider: "openai-compatible",
-			model: "router",
-			baseUrl: "https://example.test/v1",
-			...extra,
+			version: 3,
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "agent",
+			unexpected: true,
 		}),
 	);
-	expect(service.routing()).toMatchObject({
-		provider: "unconfigured",
-		reason: "invalid",
-	});
+	expect(service.routing().provider).toBe(
+		CommonspaceRoutingProvider.Unconfigured,
+	);
+	await expect(
+		readFile(join(root, "routing.json"), "utf8"),
+	).rejects.toMatchObject({ code: "ENOENT" });
 });
 
-it("rejects misspelled credential updates before saving or validating", async () => {
+it("rejects removed providers and unknown fields at the API boundary", async () => {
 	const root = await mkdtemp(join(tmpdir(), "commonspace-configuration-api-"));
 	roots.push(root);
 	const running = await startCommonspaceServer({
@@ -141,19 +259,13 @@ it("rejects misspelled credential updates before saving or validating", async ()
 		logger: { warn: () => undefined, info: () => undefined },
 	});
 	try {
-		await running.service.updateRoutingConfiguration({
-			provider: CommonspaceRoutingProvider.OpenAiCompatible,
-			model: "router",
-			baseUrl: "https://example.test/v1",
-			apiKey: "synthetic-key",
-		});
 		const before = running.service.routing();
 		for (const body of [
-			{ provider: "openai-compatible", model: "changed", apiKeey: null },
+			{ provider: "removed-provider", model: "removed-model" },
 			{
-				provider: "openai-compatible",
-				model: "changed",
-				jev: { model: "jev-1.13.0", apiKeey: null },
+				provider: CommonspaceRoutingProvider.Harness,
+				harnessAgentId: "missing-agent",
+				unexpected: true,
 			},
 		]) {
 			for (const [method, path] of [

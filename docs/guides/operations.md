@@ -43,22 +43,18 @@ The server reads these variables at startup. They apply to the foreground proces
 | `COMMONSPACE_OPENCODE_ACP_PATH` | Overrides the executable used with `acp`; defaults to the OpenCode executable. |
 | `COMMONSPACE_HERMES_YOLO=1` | Explicitly enables Hermes unsafe mode. |
 | `COMMONSPACE_AGENT_YOLO=1` | Explicitly enables Full access for Codex, Claude Code, Gemini CLI, and OpenCode. |
-| `TYPESAFE_API_KEY` | Jev key fallback, used only when Jev routing is enabled in Workspace settings. |
-| `OPENAI_API_KEY` | Inference key fallback for the canonical OpenAI origin only. Other endpoints require an explicit configured key when needed. |
 
 Unsafe modes change harness permission behavior. They do not authenticate a harness or repair routing configuration.
 
 Agent Full access changes replace cached ACP processes while keeping native session references. Either effective access change also stops that agent's active work and cancels its pending permissions; queued work uses the latest setting. An operator-level unsafe environment flag takes precedence over the Agent preference. Agent settings show that effective policy and disable the control while the server override applies. Saving agent settings does not verify credentials or native model access.
 
-A new workspace has no inference provider selected. Configure inference in Workspace settings using a supported harness or an OpenAI-compatible endpoint. Missing, unreadable, malformed, and unsupported-version routing configuration stays explicitly unavailable; the workspace remains usable, but inference never silently switches providers. Re-save valid settings to recover. Stored endpoint keys are not returned to the browser. Changing the endpoint URL or switching away from the API provider clears its stored API key, so enter the appropriate key again after that change.
+A new workspace requires two choices: add at least one Agent from an installed ACP harness, then select one added Agent for workspace inference. The selected Agent performs unaddressed Channel routing and shared-context compaction through its harness's existing sign-in. Commonspace stores no separate inference endpoint, model, or credential.
 
-The **Saved router** label identifies the persisted routing choice. **Check saved configuration** checks saved fields only; it does not test credentials, model access, or native-runtime compatibility. Changes take effect after **Save inference settings**.
-
-Enable **Use Jev for routing** under **Fast routing with Jev**, enter a TypeSafe API key (or set `TYPESAFE_API_KEY` on the server), and keep a text provider configured for context compaction. The default model is pinned to `jev-1.13.0`. Jev sends message text, relevant conversation passages, context notes, routing corrections, and Agent/Project labels to TypeSafe. Credentials remain in private `routing.json` and are never returned in bootstrap or exports. Blank key inputs preserve saved keys; clearing removes the saved key while an environment fallback may still apply. Disabling Jev restores text-provider routing while retaining its saved key and model. Credential fields distinguish stored credentials from server environment credentials; only stored keys can be cleared here. Selected participants receive the original user message unchanged; Jev routing makes no assignment-writing call. State version 30 preserves earlier wording as read-only routing history.
+The **Saved inference agent** label identifies the persisted choice. Saving validates that the Agent belongs to the workspace; it does not test native authentication or model access. A malformed or unsupported `routing.json` is deleted at startup and setup remains incomplete until the user makes a current selection.
 
 Agent run settings have their own save operation and can be changed even when inference is unconfigured. A blank workspace model and **Use native session settings** reasoning leave model and reasoning under native control; resumed sessions retain their current native settings. Discovery labels are metadata, not implicit model overrides. An explicitly selected model, reasoning, or permission mode must be supported by the runtime; unsupported settings fail before sending the prompt. Clearing an override does not reset a native session or restore its earlier values. Existing saved reasoning choices are preserved when upgrading; newly created workspaces default to native reasoning.
 
-Routing configuration version 2 stores provider-specific fields and a separately enabled Jev record. Legacy saved routing files and Jev version 1 records migrate in memory without losing valid choices or keys; the next save writes version 2. Routing saves are serialized. Inference settings and run defaults use independent atomic file writes through `PUT /api/routing` and the `set-defaults` mutation; the former combined `PUT /api/settings` operation is removed.
+Routing configuration version 3 stores only the selected harness Agent ID. No older routing configuration is migrated. Routing saves are serialized and use an atomic private file write through `PUT /api/routing`; Agent run defaults save independently through the `set-defaults` mutation.
 
 ## Installed macOS service
 
@@ -105,7 +101,7 @@ The npm package runs in the foreground on Linux. A managed Linux background serv
 | `~/.commonspace/state.json` | Current workspace state |
 | `~/.commonspace/state.backup.json` | Previous valid state |
 | `~/.commonspace/state.corrupt.json` | Last invalid primary retained during automatic recovery |
-| `~/.commonspace/routing.json` | Routing-provider configuration |
+| `~/.commonspace/routing.json` | Selected workspace inference Agent ID |
 | `~/.commonspace/workspace` | Managed directory for projectless work |
 | `~/.commonspace/attachments` | Private image and general-file bytes |
 | Harness-owned locations | Native credentials and transcripts |
@@ -173,7 +169,7 @@ Authenticate through the affected native runtime installation and retry. Commons
 
 The Channel message is persisted before inference. If routing fails, the accepted message remains visible with a failed state and a durable Inbox item; Commonspace does not broadcast it to every agent.
 
-Configure a working inference harness or OpenAI-compatible endpoint in Workspace settings. If Jev is enabled, verify its key and model as well. Uncertain judgments, incompatible relay order, or a two-second Jev timeout leave the request retryable. Open the affected conversation or Thread from Inbox, expand the failed routing receipt, then choose **Retry AI routing** or select a Channel Agent and choose **Route**. Recovery reuses the persisted message instead of adding a duplicate. After changing an endpoint origin, enter its key again. The `OPENAI_API_KEY` fallback applies only to the canonical OpenAI origin.
+Choose a working added Agent under **Workspace settings → Intelligence** and confirm that its native runtime is signed in. Invalid output, an unavailable harness, or an incompatible relay order leaves the request retryable. Open the affected conversation or Thread from Inbox, expand the failed routing receipt, then choose **Retry agent routing** or select a Channel Agent and choose **Route**. Recovery reuses the persisted message instead of adding a duplicate.
 
 ### A Project file is marked sensitive
 

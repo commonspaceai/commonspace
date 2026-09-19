@@ -21,7 +21,7 @@ const bootstrapSchema = z.object({
 	}),
 });
 
-test("persists Jev settings without returning its credential and can disable routing judgments", async ({
+test("persists the selected workspace inference agent across clients", async ({
 	page,
 	context,
 }) => {
@@ -32,39 +32,27 @@ test("persists Jev settings without returning its credential and can disable rou
 	await observer.getByRole("tab", { name: "Intelligence" }).click();
 	await page.getByRole("button", { name: "Commonspace settings" }).click();
 	await page.getByRole("tab", { name: "Intelligence" }).click();
-	await page.getByRole("checkbox", { name: "Use Jev for routing" }).focus();
+	const designCritic = page.getByRole("radio", { name: /Design Critic/iu });
+	await designCritic.focus();
 	await page.keyboard.press("Space");
-	await expect(
-		page.getByRole("checkbox", { name: "Use Jev for routing" }),
-	).toBeChecked();
-	await page
-		.getByLabel("TypeSafe API key", { exact: true })
-		.fill("synthetic-typesafe-key");
-	await page.getByRole("radio", { name: /^OpenAI-compatible API/ }).check();
-	await page
-		.getByLabel("Routing model", { exact: true })
-		.fill("synthetic-router");
-	await page
-		.getByLabel("Routing API base URL", { exact: true })
-		.fill("https://example.test/v1");
 	await page.screenshot({
-		path: "artifacts/jev-settings-light.png",
+		path: "artifacts/inference-agent-settings-light.png",
 		animations: "disabled",
 	});
 	await page.getByRole("tab", { name: "Appearance" }).click();
 	await page.getByRole("radio", { name: /^Dark/ }).focus();
 	await page.keyboard.press("Space");
 	await page.getByRole("tab", { name: "Intelligence" }).click();
-	await page.getByLabel("Jev model").scrollIntoViewIfNeeded();
+	await designCritic.scrollIntoViewIfNeeded();
 	await page.screenshot({
-		path: "artifacts/jev-settings-dark.png",
+		path: "artifacts/inference-agent-settings-dark.png",
 		animations: "disabled",
 	});
 	await page.getByRole("tab", { name: "Appearance" }).click();
 	await page.getByRole("radio", { name: /^Light/ }).focus();
 	await page.keyboard.press("Space");
 	await page.getByRole("tab", { name: "Intelligence" }).click();
-	await page.getByRole("button", { name: "Save inference settings" }).click();
+	await page.getByRole("button", { name: "Save inference agent" }).click();
 	await expect(
 		page.getByRole("region", { name: "Workspace settings" }),
 	).toHaveCount(0);
@@ -72,30 +60,25 @@ test("persists Jev settings without returning its credential and can disable rou
 		headers: { origin: new URL(page.url()).origin },
 	});
 	const body = await configuration.text();
-	expect(body).toContain("jev-1.13.0");
-	expect(body).not.toContain("synthetic-typesafe-key");
+	expect(body).toContain('"harnessAgentId":"hermes"');
 	await expect(
-		observer.getByText("Saved router: Jev", { exact: true }),
+		observer.getByText("Saved inference agent: Design Critic", { exact: true }),
 	).toBeVisible();
 	await page.reload();
 	await page.getByRole("button", { name: "Commonspace settings" }).click();
 	await page.getByRole("tab", { name: "Intelligence" }).click();
 	await expect(
-		page.getByRole("checkbox", { name: "Use Jev for routing" }),
+		page.getByRole("radio", { name: /Design Critic/iu }),
 	).toBeChecked();
-	await expect(
-		page.getByLabel("TypeSafe API key", { exact: true }),
-	).toHaveValue("");
-	await page.getByRole("checkbox", { name: "Use Jev for routing" }).focus();
+	await page.getByRole("radio", { name: /Review Bot/iu }).focus();
 	await page.keyboard.press("Space");
-	await page.getByRole("tab", { name: "Intelligence" }).click();
-	await page.getByRole("button", { name: "Save inference settings" }).click();
+	await page.getByRole("button", { name: "Save inference agent" }).click();
 	await expect(
 		page.getByRole("region", { name: "Workspace settings" }),
 	).toHaveCount(0);
 	await expect(
-		observer.getByText("Saved router: Jev", { exact: true }),
-	).toHaveCount(0);
+		observer.getByText("Saved inference agent: Review Bot", { exact: true }),
+	).toBeVisible();
 	await observer.close();
 });
 
@@ -168,13 +151,8 @@ test("keeps failed inference settings editable and allows retry without page err
 	await page.goto("/");
 	await page.getByRole("button", { name: "Commonspace settings" }).click();
 	await page.getByRole("tab", { name: "Intelligence" }).click();
-	await page.getByRole("radio", { name: /^OpenAI-compatible API/ }).check();
-	await page
-		.getByLabel("Routing model", { exact: true })
-		.fill("synthetic-router");
-	await page
-		.getByLabel("Routing API base URL", { exact: true })
-		.fill("https://example.test/v1");
+	await page.getByRole("radio", { name: /Design Critic/iu }).focus();
+	await page.keyboard.press("Space");
 	await page.getByRole("tab", { name: "Agent runs" }).click();
 	await page.getByRole("spinbutton", { name: "Default max agents" }).fill("3");
 	await page.getByRole("tab", { name: "Intelligence" }).click();
@@ -187,11 +165,11 @@ test("keeps failed inference settings editable and allows retry without page err
 			}),
 		{ times: 1 },
 	);
-	await page.getByRole("button", { name: "Save inference settings" }).click();
+	await page.getByRole("button", { name: "Save inference agent" }).click();
 	const settings = page.getByRole("region", { name: "Workspace settings" });
 	await expect(
 		settings
-			.getByRole("form", { name: "Inference settings" })
+			.getByRole("form", { name: "Inference agent settings" })
 			.getByRole("alert")
 			.filter({ hasText: "Settings temporarily unavailable" }),
 	).toHaveText("Settings temporarily unavailable");
@@ -200,9 +178,7 @@ test("keeps failed inference settings editable and allows retry without page err
 		settings.getByRole("spinbutton", { name: "Default max agents" }),
 	).toHaveValue("3");
 	await page.getByRole("tab", { name: "Intelligence" }).click();
-	await settings
-		.getByRole("button", { name: "Save inference settings" })
-		.click();
+	await settings.getByRole("button", { name: "Save inference agent" }).click();
 	await expect(settings).toHaveCount(0);
 	await page.getByRole("button", { name: "Commonspace settings" }).click();
 	await page.route(
@@ -487,10 +463,14 @@ test("routes Settings transitions and restores detail deep links", async ({
 	await expect(workspaceSettings).toBeHidden();
 	await expect(page).toHaveURL(/\/agents\/[^/?#]+$/u);
 	const agentUrl = page.url();
-	await expect(page.getByLabel("Message Review Bot")).toBeVisible();
+	await expect(
+		page.getByRole("textbox", { name: "Message Review Bot" }),
+	).toBeVisible();
 	await page.reload();
 	await expect(page).toHaveURL(agentUrl);
-	await expect(page.getByLabel("Message Review Bot")).toBeVisible();
+	await expect(
+		page.getByRole("textbox", { name: "Message Review Bot" }),
+	).toBeVisible();
 
 	await page.goBack();
 	await expect(page).toHaveURL(projectUrl);

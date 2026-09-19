@@ -5,7 +5,7 @@ import type {
 import {
 	CommonspaceReasoning,
 	CommonspaceRoutingProvider,
-	CredentialSource,
+	RoutingConfigurationIssue,
 } from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommonspaceClientStore } from "../ui/src/commonspace-store.ts";
@@ -72,11 +72,8 @@ it("refreshes changed routing without a workspace revision, including changes du
 	const updated: CommonspaceBootstrap = {
 		...storyBootstrap,
 		routing: {
-			provider: CommonspaceRoutingProvider.OpenAiCompatible,
-			model: "updated-router",
-			baseUrl: "https://example.test/v1",
-			apiKeyConfigured: false,
-			apiKeySource: CredentialSource.None,
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "agent-codex",
 		},
 	};
 	const fetch = vi
@@ -103,6 +100,67 @@ it("refreshes changed routing without a workspace revision, including changes du
 	await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(5));
 });
 
+it("does not resurrect a removed inference Agent when the same harness ID is re-added without live events", async () => {
+	const removed = structuredClone(storyBootstrap);
+	removed.state.revision += 1;
+	removed.agents = removed.agents.filter(
+		(agent) => agent.id !== "agent-hermes",
+	);
+	removed.state.agents = removed.state.agents.filter(
+		(agent) => agent.id !== "agent-hermes",
+	);
+	removed.routing = {
+		provider: CommonspaceRoutingProvider.Unconfigured,
+		reason: RoutingConfigurationIssue.Missing,
+		message: "Choose a workspace inference agent.",
+	};
+	const readded = structuredClone(removed);
+	readded.state.revision += 1;
+	const originalAgent = storyBootstrap.agents.find(
+		(agent) => agent.id === "agent-hermes",
+	);
+	const originalDefinition = storyBootstrap.state.agents.find(
+		(agent) => agent.id === "agent-hermes",
+	);
+	if (originalAgent === undefined || originalDefinition === undefined)
+		throw new Error("Missing inference Agent fixture");
+	readded.agents.push(structuredClone(originalAgent));
+	readded.state.agents.push(structuredClone(originalDefinition));
+
+	vi.stubGlobal(
+		"fetch",
+		vi
+			.fn()
+			.mockResolvedValueOnce(jsonResponse(storyBootstrap))
+			.mockResolvedValueOnce(jsonResponse(removed))
+			.mockResolvedValueOnce(jsonResponse(readded)),
+	);
+	const store = new CommonspaceClientStore();
+	await store.refresh();
+	expect(store.getSnapshot().bootstrap?.routing).toMatchObject({
+		provider: CommonspaceRoutingProvider.Harness,
+		harnessAgentId: "agent-hermes",
+	});
+
+	await store.mutate({ action: "remove-agent", agentId: "agent-hermes" });
+	expect(store.getSnapshot().bootstrap?.routing?.provider).toBe(
+		CommonspaceRoutingProvider.Unconfigured,
+	);
+	await store.mutate({
+		action: "add-discovered-agent",
+		agentId: "agent-hermes",
+	});
+
+	expect(
+		store
+			.getSnapshot()
+			.bootstrap?.agents.some((agent) => agent.id === "agent-hermes"),
+	).toBe(true);
+	expect(store.getSnapshot().bootstrap?.routing?.provider).toBe(
+		CommonspaceRoutingProvider.Unconfigured,
+	);
+});
+
 describe("CommonspaceClientStore message admission", () => {
 	it("keeps a later routing update when an older routing save response arrives", async () => {
 		const pending = deferred<Response>();
@@ -116,11 +174,8 @@ describe("CommonspaceClientStore message admission", () => {
 		const updated: CommonspaceBootstrap = {
 			...storyBootstrap,
 			routing: {
-				provider: CommonspaceRoutingProvider.OpenAiCompatible,
-				model: "later-router",
-				baseUrl: "https://example.test/v1",
-				apiKeyConfigured: false,
-				apiKeySource: CredentialSource.None,
+				provider: CommonspaceRoutingProvider.Harness,
+				harnessAgentId: "agent-codex",
 			},
 		};
 		vi.stubGlobal(
@@ -135,8 +190,8 @@ describe("CommonspaceClientStore message admission", () => {
 		await store.refresh();
 		store.connectEvents();
 		const saving = store.updateRoutingConfiguration({
-			provider: CommonspaceRoutingProvider.OpenAiCompatible,
-			model: "earlier-router",
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "agent-hermes",
 		});
 		events.dispatchEvent(new MessageEvent("routing-changed", { data: "{}" }));
 		await store.refresh();
@@ -145,7 +200,10 @@ describe("CommonspaceClientStore message admission", () => {
 			observed.push(store.getSnapshot().bootstrap?.routing),
 		);
 		pending.resolve(
-			Response.json({ ...updated.routing, model: "earlier-router" }),
+			Response.json({
+				provider: CommonspaceRoutingProvider.Harness,
+				harnessAgentId: "agent-hermes",
+			}),
 		);
 		await saving;
 		unsubscribe();
@@ -164,11 +222,8 @@ describe("CommonspaceClientStore message admission", () => {
 		const updated: CommonspaceBootstrap = {
 			...oldBootstrap,
 			routing: {
-				provider: CommonspaceRoutingProvider.OpenAiCompatible,
-				model: "new-router",
-				baseUrl: "https://example.test/v1",
-				apiKeyConfigured: false,
-				apiKeySource: CredentialSource.None,
+				provider: CommonspaceRoutingProvider.Harness,
+				harnessAgentId: "agent-codex",
 			},
 		};
 		vi.stubGlobal(

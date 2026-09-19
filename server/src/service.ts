@@ -65,7 +65,6 @@ import type {
 	StopAgentRunsRequest,
 	StopAgentRunsResponse,
 	UpdateChannelContextRequest,
-	UpdateRoutingConfigurationRequest,
 	UpdateThreadContextRequest,
 } from "@commonspace/shared";
 import {
@@ -96,8 +95,6 @@ import {
 import {
 	type AiRouteInput,
 	buildRoutingPrompt,
-	completeWithOpenAICompatible,
-	InferenceResponseTruncatedError,
 	parseRoutingResponse,
 	RoutingResponseValidationError,
 	routingOutputTokenBudget,
@@ -134,7 +131,6 @@ import {
 	type PreparedFileAttachment,
 	prepareAgentFileAttachments,
 } from "./file-attachments.js";
-import { routeWithJev } from "./jev-router.js";
 import { type JsonObject, type JsonValue, jsonObject } from "./json.js";
 import { LocalHistoryEmbeddings } from "./local-history-embeddings.js";
 import {
@@ -150,12 +146,12 @@ import {
 } from "./relay.js";
 import {
 	invalidRouting,
+	loadSavedRoutingConfiguration,
 	missingRouting,
-	openAiEnvironmentKey,
 	type PrivateRoutingConfiguration,
-	parseSavedRoutingConfiguration,
 	prepareRoutingConfiguration,
 	publicRoutingConfiguration,
+	type RoutingConfigurationRequest,
 } from "./routing-configuration.js";
 import {
 	buildRoutingMemoryCompactionPrompt,
@@ -350,6 +346,9 @@ export interface CommonspaceHostDependencies {
 	routeAgents(input: CommonspaceRouteInput): Promise<CommonspaceRouteResult>;
 	notify(notification: CommonspaceDesktopNotification): Promise<void>;
 	beforeAcceptSend?(prepared: PreparedSend): Promise<void>;
+	beforePersistRoutingConfiguration?(
+		configuration: CommonspaceRoutingConfiguration,
+	): Promise<void>;
 }
 
 export type CommonspaceRouteInput = AiRouteInput;
@@ -2320,6 +2319,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private state: CommonspaceState = createInitialState();
 	private routingConfiguration: PrivateRoutingConfiguration = missingRouting;
 	private writeTail = Promise.resolve();
+	private routingConfigurationTail: Promise<void> = Promise.resolve();
 	private readonly agentSessionTails = new Map<string, Promise<unknown>>();
 	private readonly channelMemoryTails = new Map<string, Promise<unknown>>();
 	private readonly threadMemoryTails = new Map<string, Promise<unknown>>();
@@ -2416,9 +2416,18 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		}
 		this.defaultCwd = await realpath(this.defaultCwd);
 		try {
-			this.routingConfiguration = parseSavedRoutingConfiguration(
+			const saved = loadSavedRoutingConfiguration(
 				await readFile(this.routingPath, "utf8"),
 			);
+			if (saved === undefined) {
+				await rm(this.routingPath, { force: true });
+				this.routingConfiguration = missingRouting;
+				this.environment.logger?.warn(
+					"Commonspace removed an unsupported inference configuration",
+				);
+			} else {
+				this.routingConfiguration = saved;
+			}
 		} catch (error) {
 			if (errorCode(error) !== "ENOENT")
 				this.environment.logger?.warn(
@@ -2471,6 +2480,20 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		}
 		this.state = await this.canonicalizeLoadedProjectPaths(this.state);
 		this.state = this.redactLoadedTraces(this.state);
+		const savedInferenceAgentId =
+			this.routingConfiguration.provider === CommonspaceRoutingProvider.Harness
+				? this.routingConfiguration.harnessAgentId
+				: undefined;
+		if (
+			savedInferenceAgentId !== undefined &&
+			!this.state.agents.some((agent) => agent.id === savedInferenceAgentId)
+		) {
+			await this.persistRoutingConfiguration(missingRouting);
+			this.routingConfiguration = missingRouting;
+			this.environment.logger?.warn(
+				"Commonspace removed an inference Agent selection that is not in the workspace",
+			);
+		}
 		let memoryChanged = false;
 		const channels = this.state.channels.map((channel) => {
 			const memory = mergeChannelMemoryProjection(
@@ -3200,14 +3223,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			...Object.values(this.state.agentSessions).flatMap((sessions) =>
 				Object.values(sessions),
 			),
-			...(this.routingConfiguration.provider ===
-			CommonspaceRoutingProvider.OpenAiCompatible
-				? [this.routingConfiguration.apiKey ?? ""]
-				: []),
-			...(this.routingConfiguration.provider !==
-			CommonspaceRoutingProvider.Unconfigured
-				? [this.routingConfiguration.jev?.apiKey ?? ""]
-				: []),
 			...Array.from(this.mcpCredentials.values(), ({ token }) => token),
 		];
 		const archive: CommonspaceWorkspaceArchive = {
@@ -3649,18 +3664,15 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		return this.publicRoutingConfiguration();
 	}
 
-	private prepareRoutingConfiguration(
-		request: UpdateRoutingConfigurationRequest,
-	) {
+	private prepareRoutingConfiguration(request: RoutingConfigurationRequest) {
 		return prepareRoutingConfiguration(
 			request,
-			this.routingConfiguration,
 			this.state.agents.map((agent) => agent.id),
 		);
 	}
 
 	validateRoutingConfiguration(
-		request: UpdateRoutingConfigurationRequest,
+		request: RoutingConfigurationRequest,
 	): CommonspaceDiagnostics["inference"] {
 		return this.routingDiagnostics(this.prepareRoutingConfiguration(request));
 	}
@@ -3675,32 +3687,12 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				configured: false,
 				sends: [],
 			};
-		const jevEnabled = candidate.jev?.enabled === true;
-		const jevReady =
-			!jevEnabled ||
-			candidate.jev?.apiKey !== undefined ||
-			Boolean(process.env.TYPESAFE_API_KEY?.trim());
-		let location: CommonspaceDiagnostics["inference"]["location"] =
-			"runtime-managed";
-		if (jevEnabled) location = "remote";
-		else if (
-			candidate.provider === CommonspaceRoutingProvider.OpenAiCompatible
-		) {
-			const host = new URL(candidate.baseUrl).hostname;
-			location = ["localhost", "127.0.0.1", "[::1]"].includes(host)
-				? "local"
-				: "remote";
-		}
 		return {
 			provider: candidate.provider,
-			location,
-			configured:
-				jevReady &&
-				(candidate.provider === CommonspaceRoutingProvider.Harness
-					? this.state.agents.some(
-							(agent) => agent.id === candidate.harnessAgentId,
-						)
-					: true),
+			location: "runtime-managed",
+			configured: this.state.agents.some(
+				(agent) => agent.id === candidate.harnessAgentId,
+			),
 			sends: [
 				"message text",
 				"Agent labels",
@@ -3712,21 +3704,42 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	}
 
 	async updateRoutingConfiguration(
-		request: UpdateRoutingConfigurationRequest,
+		request: RoutingConfigurationRequest,
 	): Promise<CommonspaceRoutingConfiguration> {
+		const releaseRoutingConfiguration =
+			await this.acquireRoutingConfigurationLock();
 		return this.withAdmission(async () => {
 			const next = this.prepareRoutingConfiguration(request);
 			await this.persistRoutingConfiguration(next);
 			this.routingConfiguration = next;
-			for (const listener of this.routingListeners) {
-				try {
-					listener();
-				} catch {
-					this.routingListeners.delete(listener);
-				}
-			}
+			this.notifyRoutingListeners();
 			return this.publicRoutingConfiguration();
+		}).finally(releaseRoutingConfiguration);
+	}
+
+	private async acquireRoutingConfigurationLock(): Promise<() => void> {
+		const previous = this.routingConfigurationTail;
+		let release: (() => void) | undefined;
+		const lease = new Promise<void>((resolve) => {
+			release = resolve;
 		});
+		if (release === undefined)
+			throw new Error("Routing configuration lock could not be initialized");
+		this.routingConfigurationTail = previous
+			.catch(() => undefined)
+			.then(() => lease);
+		await previous.catch(() => undefined);
+		return release;
+	}
+
+	private notifyRoutingListeners(): void {
+		for (const listener of this.routingListeners) {
+			try {
+				listener();
+			} catch {
+				this.routingListeners.delete(listener);
+			}
+		}
 	}
 
 	channelContext(channelId: string): CommonspaceChannelMemory {
@@ -4619,8 +4632,18 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	}
 
 	async mutate(mutation: CommonspaceMutation): Promise<CommonspaceState> {
+		const releaseRoutingConfiguration =
+			mutation.action === "remove-agent"
+				? await this.acquireRoutingConfigurationLock()
+				: undefined;
 		return this.withAdmission(async () => {
 			const previousState = this.state;
+			const removedInferenceSelection =
+				mutation.action === "remove-agent" &&
+				this.routingConfiguration.provider ===
+					CommonspaceRoutingProvider.Harness &&
+				this.routingConfiguration.harnessAgentId === mutation.agentId;
+			const previousRoutingConfiguration = this.routingConfiguration;
 			const resetScope =
 				mutation.action === "reset-dm" && typeof mutation.agentId === "string"
 					? `${mutation.agentId}\u0000${this.state.dmSessions[mutation.agentId] ?? "Bot Chat"}`
@@ -4706,11 +4729,33 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				this.state = applyMutation(this.state, normalized);
 			}
 			this.invalidateChangedContextEvidence(previousState);
+			let removedRoutingFile = false;
 			try {
+				if (removedInferenceSelection) {
+					await this.persistRoutingConfiguration(missingRouting);
+					removedRoutingFile = true;
+				}
 				await this.persist();
 			} catch (error) {
 				this.state = previousState;
+				if (removedRoutingFile) {
+					try {
+						await this.persistRoutingConfiguration(
+							previousRoutingConfiguration,
+						);
+					} catch (restoreError) {
+						throw new AggregateError(
+							[error, restoreError],
+							"Commonspace could not restore inference configuration after an Agent removal failed",
+							{ cause: restoreError },
+						);
+					}
+				}
 				throw error;
+			}
+			if (removedInferenceSelection) {
+				this.routingConfiguration = missingRouting;
+				this.notifyRoutingListeners();
 			}
 			this.revokeInvalidMcpCredentials();
 			if (mutation.action === "update-agent-profile") {
@@ -4807,7 +4852,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			}
 			this.broadcastRevision();
 			return this.publicSnapshot();
-		});
+		}).finally(() => releaseRoutingConfiguration?.());
 	}
 
 	async send(request: SendMessageRequest): Promise<SendMessageResponse> {
@@ -7730,37 +7775,17 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			| { kind: "isolated" },
 	): Promise<string> {
 		if (
-			this.routingConfiguration.provider ===
-			CommonspaceRoutingProvider.OpenAiCompatible
-		) {
-			const apiKey =
-				this.routingConfiguration.apiKey ??
-				openAiEnvironmentKey(this.routingConfiguration.baseUrl, process.env);
-			const inferenceOptions: Parameters<
-				typeof completeWithOpenAICompatible
-			>[0] = {
-				baseUrl: this.routingConfiguration.baseUrl,
-				model: this.routingConfiguration.model,
-				signal: AbortSignal.any([
-					AbortSignal.timeout(30_000),
-					this.inferenceShutdown.signal,
-				]),
-			};
-			if (apiKey !== undefined) inferenceOptions.apiKey = apiKey;
-			return completeWithOpenAICompatible(inferenceOptions, {
-				system,
-				prompt,
-				maxTokens,
-			});
-		}
-		if (
 			this.routingConfiguration.provider === CommonspaceRoutingProvider.Harness
 		) {
+			const routingAuthority = this.routingConfiguration;
 			const harnessAgentId = this.routingConfiguration.harnessAgentId;
 			const agent = this.configuredAgents().find(
 				(candidate) => candidate.id === harnessAgentId,
 			);
 			if (agent === undefined)
+				throw new Error("routing harness is unavailable");
+			const agentAuthority = this.agentAuthority(agent);
+			if (agentAuthority === undefined)
 				throw new Error("routing harness is unavailable");
 			const sessionName =
 				scope.kind === "channel-routing"
@@ -7772,6 +7797,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			]);
 			const scopeIsActive = (): boolean =>
 				!signal.aborted &&
+				this.routingConfiguration === routingAuthority &&
+				this.agentAuthorityIsCurrent(agent, agentAuthority) &&
 				(scope.kind === "isolated" ||
 					this.state.channels.some(
 						(channel) => channel.id === scope.channelId,
@@ -7827,28 +7854,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		channelId: string,
 		input: CommonspaceRouteInput,
 	): Promise<CommonspaceRouteResult> {
-		const jev =
-			this.routingConfiguration.provider ===
-			CommonspaceRoutingProvider.Unconfigured
-				? undefined
-				: this.routingConfiguration.jev;
-		if (jev?.enabled === true) {
-			const apiKey = jev.apiKey ?? process.env.TYPESAFE_API_KEY?.trim();
-			if (!apiKey)
-				throw new Error(
-					"Jev routing requires a TypeSafe API key in Settings or TYPESAFE_API_KEY",
-				);
-			const decision = await routeWithJev(
-				{ apiKey, model: jev.model, signal: this.inferenceShutdown.signal },
-				input,
-			);
-			return {
-				assignments: decision.assignments,
-				mode: decision.mode,
-				confidence: decision.confidence,
-				reason: decision.reason,
-			};
-		}
 		let retryableFailure: unknown;
 		for (let attempt = 0; attempt < 2; attempt += 1) {
 			try {
@@ -7861,11 +7866,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					),
 				);
 			} catch (error) {
-				if (
-					!(error instanceof InferenceResponseTruncatedError) &&
-					!(error instanceof RoutingResponseValidationError)
-				)
-					throw error;
+				if (!(error instanceof RoutingResponseValidationError)) throw error;
 				retryableFailure = error;
 			}
 		}
@@ -8227,12 +8228,19 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	}
 
 	private publicRoutingConfiguration(): CommonspaceRoutingConfiguration {
-		return publicRoutingConfiguration(this.routingConfiguration, process.env);
+		return publicRoutingConfiguration(this.routingConfiguration);
 	}
 
 	private async persistRoutingConfiguration(
 		configuration: PrivateRoutingConfiguration,
 	): Promise<void> {
+		await this.overrides.beforePersistRoutingConfiguration?.(
+			publicRoutingConfiguration(configuration),
+		);
+		if (configuration.provider === CommonspaceRoutingProvider.Unconfigured) {
+			await rm(this.routingPath, { force: true });
+			return;
+		}
 		const temporary = join(
 			this.root,
 			`routing-${process.pid}-${crypto.randomUUID()}.tmp`,

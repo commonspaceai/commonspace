@@ -13,11 +13,11 @@ import {
 	type CommonspaceThreadMemory,
 	type CommonspaceWorkspaceArchive,
 	type ConversationRef,
-	CredentialSource,
 	type EditMessageRequest,
 	type ProjectFileEntry,
 	type RerouteAssignmentRequest,
 	type RetryRoutingRequest,
+	RoutingConfigurationIssue,
 	type SendMessageRequest,
 	type UpdateRoutingConfigurationRequest,
 	type UpdateThreadContextRequest,
@@ -412,6 +412,16 @@ export function createWorkspaceMockApi(
 					channel.agentIds = channel.agentIds.filter(
 						(agentId) => agentId !== mutation.agentId,
 					);
+				if (
+					data.routing?.provider === CommonspaceRoutingProvider.Harness &&
+					data.routing.harnessAgentId === mutation.agentId
+				) {
+					data.routing = {
+						provider: CommonspaceRoutingProvider.Unconfigured,
+						reason: RoutingConfigurationIssue.Missing,
+						message: "Choose a workspace inference agent.",
+					};
+				}
 				break;
 			case "reset-dm":
 				state.messages[`dm:${mutation.agentId}`] = [];
@@ -686,39 +696,10 @@ export function createWorkspaceMockApi(
 		http.put("/api/routing", async ({ request }) => {
 			const update =
 				await trustedRequestJson<UpdateRoutingConfigurationRequest>(request);
-			const previous = data.routing;
-			data.routing =
-				update.provider === CommonspaceRoutingProvider.Harness
-					? { provider: update.provider, harnessAgentId: update.harnessAgentId }
-					: {
-							provider: update.provider,
-							model: update.model,
-							baseUrl: update.baseUrl ?? "https://api.openai.com/v1",
-							...(update.apiKey
-								? {
-										apiKeyConfigured: true,
-										apiKeySource: CredentialSource.Saved,
-									}
-								: {
-										apiKeyConfigured: false,
-										apiKeySource: CredentialSource.None,
-									}),
-						};
-			if (update.jev)
-				data.routing.jev = {
-					enabled: true,
-					model: update.jev.model,
-					...(update.jev.apiKey
-						? { apiKeyConfigured: true, apiKeySource: CredentialSource.Saved }
-						: { apiKeyConfigured: false, apiKeySource: CredentialSource.None }),
-				};
-			else if (
-				update.jev === undefined &&
-				previous &&
-				"jev" in previous &&
-				previous.jev
-			)
-				data.routing.jev = previous.jev;
+			data.routing = {
+				provider: update.provider,
+				harnessAgentId: update.harnessAgentId,
+			};
 			touch();
 			return json(data.routing);
 		}),

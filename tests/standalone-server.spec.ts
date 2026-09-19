@@ -4,7 +4,6 @@ import { join } from "node:path";
 import {
 	COMMONSPACE_STATE_VERSION,
 	CommonspaceRoutingProvider,
-	CredentialSource,
 } from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -192,31 +191,33 @@ describe("standalone Commonspace server", () => {
 			code: "invalid_mutation",
 			error: expect.stringContaining("unknown mutation"),
 		});
+		await running.service.discoverAgents("codex");
+		await running.service.mutate({
+			action: "add-discovered-agent",
+			agentId: "codex",
+		});
+		discoveryCalls = 0;
 
 		const routingResponse = await fetch(`${running.url}/api/routing`, {
 			method: "PUT",
 			headers: { origin: running.url, "content-type": "application/json" },
 			body: JSON.stringify({
-				provider: CommonspaceRoutingProvider.OpenAiCompatible,
-				model: "local-router",
-				baseUrl: "http://127.0.0.1:11434/v1",
-				apiKey: "private-key",
+				provider: CommonspaceRoutingProvider.Harness,
+				harnessAgentId: "codex",
 			}),
 		});
 		expect(routingResponse.status).toBe(200);
 		await expect(routingResponse.json()).resolves.toEqual({
-			provider: CommonspaceRoutingProvider.OpenAiCompatible,
-			model: "local-router",
-			baseUrl: "http://127.0.0.1:11434/v1",
-			apiKeyConfigured: true,
-			apiKeySource: CredentialSource.Saved,
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "codex",
 		});
 		const routingReadResponse = await fetch(`${running.url}/api/routing`, {
 			headers: { origin: running.url },
 		});
-		expect(JSON.stringify(await routingReadResponse.json())).not.toContain(
-			"private-key",
-		);
+		await expect(routingReadResponse.json()).resolves.toEqual({
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "codex",
+		});
 
 		const rerouteResponse = await fetch(`${running.url}/api/reroute`, {
 			method: "POST",

@@ -31,12 +31,13 @@ npx --yes commonspace@latest
 Open `http://127.0.0.1:3100` in your browser and keep the terminal running.
 
 1. [Install and sign in to one runtime](https://github.com/commonspaceai/commonspace/blob/main/docs/start/runtimes.md), then choose **Add Agent**.
-2. Add a **Project** pointing to your repository.
-3. Open the agent’s DM, select the Project with `@@`, and ask:
+2. Choose one added agent as the workspace inference agent for routing and shared-context compaction.
+3. Add a **Project** pointing to your repository.
+4. Open the agent’s DM, select the Project with `@@`, and ask:
 
    > Explain this repository’s entry points and how to run it. Don’t change any files.
 
-You’re ready when the agent replies about your code. A DM needs no routing API key. Next, [try a Channel with two agents](https://github.com/commonspaceai/commonspace/blob/main/docs/start/first-conversation.md#work-with-two-agents).
+You’re ready when the agent replies about your code. Commonspace uses the runtime’s existing sign-in and does not ask for a separate inference key. Next, [try a Channel with two agents](https://github.com/commonspaceai/commonspace/blob/main/docs/start/first-conversation.md#work-with-two-agents).
 
 Commonspace is free and open source; agent subscriptions and model calls have their own costs. See [pricing and privacy questions](https://github.com/commonspaceai/commonspace/blob/main/docs/start/help.md), [platform support](https://github.com/commonspaceai/commonspace/blob/main/docs/start/support.md), and [reopen/update instructions](https://github.com/commonspaceai/commonspace/blob/main/docs/start/install.md#reopen-and-update).
 

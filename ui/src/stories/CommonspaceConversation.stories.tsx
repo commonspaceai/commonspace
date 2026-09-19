@@ -526,7 +526,9 @@ export const FailedRoutingRecovery: Story = {
 			canvas.getByText("Routing failed · No agent selected"),
 		);
 		await userEvent.click(
-			within(document.body).getByRole("button", { name: "Retry AI routing" }),
+			within(document.body).getByRole("button", {
+				name: "Retry agent routing",
+			}),
 		);
 		await expect(retryRouting).toHaveBeenCalledWith({
 			sourceMessageId: "message-root",

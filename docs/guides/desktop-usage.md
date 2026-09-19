@@ -12,7 +12,7 @@ Open global search with the top-bar button or **Command+K / Control+K**. Type a 
 
 ## Send and follow up
 
-Use `@agent` to address an agent and `@@project` to choose Project context explicitly. Without an agent mention, a Channel uses the configured inference provider. A DM always stays with its chosen agent. **Enter** sends, **Shift+Enter** adds a line, and suggestions support arrow keys and Tab. `/new` in a DM starts fresh context with a visible boundary; ordinary follow-ups continue the mapped native session.
+Use `@agent` to address an agent and `@@project` to choose Project context explicitly. Without an agent mention, a Channel uses the selected workspace inference Agent. A DM always stays with its chosen agent. **Enter** sends, **Shift+Enter** adds a line, and suggestions support arrow keys and Tab. `/new` in a DM starts fresh context with a visible boundary; ordinary follow-ups continue the mapped native session.
 
 The Sending tray shows messages awaiting admission and offers **Restore** after failure, retaining the draft and attachments. Once admitted, an active session's follow-ups appear in **Up next**. Expand a preview to inspect its full text, move messages earlier or later, or remove them. Removing the final queued message returns keyboard focus to the composer; reordering or removing other entries preserves a usable focus target.
 
@@ -26,7 +26,7 @@ Open Workspace settings from the sidebar. Focus enters the settings pane and cov
 
 Choose **Light**, **Dark**, or **System** under Appearance. Light is the default. The choice applies immediately and persists in this browser. System follows operating-system changes while the app is open; native form controls and scrollbars use the resolved appearance too. Reduced-motion preferences suppress interface animations and smooth scrolling.
 
-Inference settings save the routing source, connection, and workspace run defaults together. Configuration status does not test model access; an actual reply establishes access for that request. DMs and explicit single-member Channel requests bypass automatic routing. Notification preferences have a separate save action. Changing appearance needs no save. A failed save keeps entered values available for correction or retry. Channel and agent settings are available from their headers or action menus; Project settings are available from the Project view. Native capability browsing is read-only and identifies unavailable inspection separately from an empty inventory.
+Inference settings select one added Agent for routing and shared-context compaction. Agent run defaults have their own save action. Configuration status does not test model access; an actual reply establishes access for that request. DMs and explicitly addressed Channel requests bypass automatic routing. Notification preferences have a separate save action. Changing appearance needs no save. A failed save keeps the selection available for correction or retry. Channel and agent settings are available from their headers or action menus; Project settings are available from the Project view. Native capability browsing is read-only and identifies unavailable inspection separately from an empty inventory.
 
 ## Recovery and limits
 

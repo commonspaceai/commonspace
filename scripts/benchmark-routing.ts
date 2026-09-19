@@ -54,7 +54,7 @@ console.log(
 			warmQueryP50Ms: samples[49],
 			warmQueryP95Ms: samples[94],
 			scope:
-				"Synthetic local BM25 only; excludes Jev, network, persistence, and agent execution.",
+				"Synthetic local BM25 only; excludes harness inference, network, persistence, and agent execution.",
 		},
 		null,
 		2,

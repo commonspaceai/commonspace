@@ -132,7 +132,7 @@ describe("npm command and runtime isolation", () => {
 			USERPROFILE: "private profile",
 			APPDATA: "private appdata",
 			NODE_OPTIONS: "--require private-script",
-			OPENAI_API_KEY: "private key",
+			MODEL_PROVIDER_TOKEN: "private key",
 		});
 		expect(env).toMatchObject({
 			SystemRoot: "C:\\Windows",
@@ -143,7 +143,7 @@ describe("npm command and runtime isolation", () => {
 			APPDATA: join(home, "AppData", "Roaming"),
 			LOCALAPPDATA: join(home, "AppData", "Local"),
 		});
-		expect(env).not.toHaveProperty("OPENAI_API_KEY");
+		expect(env).not.toHaveProperty("MODEL_PROVIDER_TOKEN");
 		expect(env).not.toHaveProperty("NODE_OPTIONS");
 		expect(JSON.stringify(env)).not.toContain("private");
 	});

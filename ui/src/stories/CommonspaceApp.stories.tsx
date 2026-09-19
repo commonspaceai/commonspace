@@ -1,5 +1,10 @@
+import {
+	CommonspaceRoutingProvider,
+	RoutingConfigurationIssue,
+	type UpdateRoutingConfigurationRequest,
+} from "@commonspace/shared";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent, waitFor, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { CommonspaceApp } from "../CommonspaceApp";
 import {
 	createStoryStore,
@@ -23,6 +28,30 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+const onboardingRouting = {
+	provider: CommonspaceRoutingProvider.Unconfigured,
+	reason: RoutingConfigurationIssue.Missing,
+	message: "Choose a workspace inference agent.",
+} as const;
+const onboardingWithoutAgent = structuredClone(emptyBootstrap);
+onboardingWithoutAgent.agents = [];
+onboardingWithoutAgent.discoveredAgents = [];
+onboardingWithoutAgent.state.agents = [];
+onboardingWithoutAgent.routing = onboardingRouting;
+const onboardingWithAgents = structuredClone(emptyBootstrap);
+onboardingWithAgents.routing = onboardingRouting;
+const saveInferenceAgent = fn(
+	async (request: UpdateRoutingConfigurationRequest) => {
+		void request;
+	},
+);
+const pendingInferenceSave = fn(
+	(request: UpdateRoutingConfigurationRequest) => {
+		void request;
+		return new Promise<void>(() => undefined);
+	},
+);
 
 export const WorkspaceInbox: Story = {
 	args: { store: createStoryStore(storyBootstrap) },
@@ -182,6 +211,80 @@ export const KeyboardSearchFlow: Story = {
 
 export const EmptyWorkspace: Story = {
 	args: { store: createStoryStore(emptyBootstrap) },
+};
+
+export const OnboardingAddAgent: Story = {
+	args: { store: createStoryStore(onboardingWithoutAgent) },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByRole("main", { name: "Workspace setup" }),
+		).toBeVisible();
+		await expect(
+			canvas.getByRole("heading", {
+				name: "Bring an agent. Give the workspace a mind.",
+			}),
+		).toBeVisible();
+		await expect(
+			canvas.getByRole("button", { name: "Add an agent" }),
+		).toBeEnabled();
+		await expect(
+			canvas.getByRole("button", { name: "Use selected agent" }),
+		).toBeDisabled();
+	},
+};
+
+export const OnboardingChooseInferenceAgentUnselected: Story = {
+	args: { store: createStoryStore(onboardingWithAgents) },
+};
+
+export const OnboardingChooseInferenceAgent: Story = {
+	args: {
+		store: createStoryStore(onboardingWithAgents, {
+			updateRoutingConfiguration: saveInferenceAgent,
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		saveInferenceAgent.mockClear();
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByRole("heading", {
+				name: "Choose the workspace inference agent",
+			}),
+		).toBeVisible();
+		const submit = canvas.getByRole("button", { name: "Use selected agent" });
+		await expect(submit).toBeDisabled();
+		const codex = canvas.getByRole("radio", { name: /Build Smith/iu });
+		await userEvent.click(codex);
+		await expect(submit).toBeEnabled();
+		await userEvent.click(submit);
+		await expect(saveInferenceAgent).toHaveBeenCalledWith({
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "agent-codex",
+		});
+	},
+};
+
+export const OnboardingInferenceSavePending: Story = {
+	args: {
+		store: createStoryStore(onboardingWithAgents, {
+			updateRoutingConfiguration: pendingInferenceSave,
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		pendingInferenceSave.mockClear();
+		const canvas = within(canvasElement);
+		const codex = canvas.getByRole("radio", { name: /Build Smith/iu });
+		await userEvent.click(codex);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Use selected agent" }),
+		);
+		await expect(
+			canvas.getByRole("button", { name: "Finishing setup…" }),
+		).toBeDisabled();
+		for (const option of canvas.getAllByRole("radio"))
+			await expect(option).toBeDisabled();
+	},
 };
 
 export const Loading: Story = {

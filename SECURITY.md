@@ -26,7 +26,7 @@ Security fixes target `main` and the latest release. Older versions do not have 
 - Agent commands run without a shell, with limits on input, output, and execution time.
 - Commonspace stores references to agent sessions. The agents retain their own credentials and session stores.
 - Project File previews, human file uploads, and agent-generated file imports block known credential-bearing filenames and private-key extensions. This policy checks filenames; it does not inspect file contents for secrets.
-- Routing provider keys are stored with owner-only permissions and are never returned by the API. Changing the endpoint's origin clears its saved key. `OPENAI_API_KEY` is used only for the OpenAI origin, not for other providers.
+- Commonspace stores only the selected inference Agent ID. Authentication remains in the selected harness and its native credential store.
 - Unsafe agent modes are off by default and require explicit environment variables.
 
 These protections do not make Commonspace a secret manager or every Project file safe to share. Agents may read files and contact model services according to their permissions and provider settings. Keep secrets out of messages, screenshots, and files you ask agents to inspect.

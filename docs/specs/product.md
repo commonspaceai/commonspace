@@ -22,8 +22,8 @@ An **agent runtime**, or **harness**, is the software that runs an agent. It own
 6. **Continuity is exact.** A thread or DM resumes the runtime session created for that conversation whenever the runtime supports it.
 7. **Shared context is separate from private memory.** Commonspace manages inspectable Project, Channel, and Thread context. The runtime controls its private session context.
 8. **Capabilities come from the runtime.** Commonspace shows models, reasoning modes, tools, permission choices, and execution controls only when the runtime advertises them through ACP.
-9. **Local data stays under the user's control.** Commonspace stores workspace data and native-session references locally. Connected agent runtimes may send messages and context to their configured model services. Commonspace inference may also use a disclosed remote endpoint; each runtime continues to manage its own credentials.
-10. **Inference is a service function.** One configured provider handles routing, dividing requests, identifying Projects, and summarizing shared context and routing corrections. It does not appear as another workspace agent.
+9. **Local data stays under the user's control.** Commonspace stores workspace data and native-session references locally. Connected agent runtimes, including the selected inference Agent, may send messages and context to their configured model services. Each runtime continues to manage its own traffic and credentials.
+10. **Inference is an Agent role.** One added Agent handles routing, dividing requests, identifying Projects, and summarizing shared context and routing corrections through its existing harness. Commonspace does not create a separate coordinator identity or provider connection.
 
 ## Core objects
 
@@ -39,7 +39,7 @@ Visible `@@project` tags explicitly choose context. When there are no tags, infe
 
 A Channel is a shared room with a chosen set of agents, instructions, shared context, and threads. It can exist without a Project or any agents. Model and reasoning configuration applies across the workspace; a Channel has no separate override.
 
-Mentioning an agent with `@agent` adds it to the Channel if needed and invokes it. Without an explicit mention, the configured inference provider selects the smallest useful set of agents and their Project scopes. Every selected Agent receives the original user message unchanged. Independent participants run in parallel. A request for agents to discuss, debate, reconcile, review one another, or reach a shared conclusion becomes an ordered **relay**: one Agent starts and later Agents respond in sequence.
+Mentioning an agent with `@agent` adds it to the Channel if needed and invokes it. Without an explicit mention, the selected workspace inference Agent chooses the smallest useful set of agents and their Project scopes through its harness. Every selected Agent receives the original user message unchanged. Independent participants run in parallel. A request for agents to discuss, debate, reconcile, review one another, or reach a shared conclusion becomes an ordered **relay**: one Agent starts and later Agents respond in sequence.
 
 Agents receive separate participation metadata identifying their roster responsibility, peers, and delivery mode. A later relay Agent receives the original user message plus a bounded head-and-tail excerpt of the preceding peer response. The complete reply and deeper room history stay available on demand through Commonspace context tools rather than being replayed in every prompt.
 
@@ -77,7 +77,7 @@ A thread starts with a snapshot of the Channel's current context. It then develo
 
 ### Commonspace inference
 
-Commonspace inference uses one configured provider for agent selection, request division, Project references, shared-context summaries, and summaries of routing corrections.
+Commonspace inference uses one selected workspace Agent for agent selection, request division, Project references, shared-context summaries, and summaries of routing corrections. The Agent runs through its existing harness and authentication.
 
 Routing should feel immediate. The service stores each delivery mode, decision, and participant delivery reference so it can deliver the request, associate replies with it, and retain correction history. Conversation receipts show destinations, selection source, and outcomes; expanded receipts expose assignments, Project references, reasons, timing, and correction history. Failed routing can be retried without duplicating the accepted request.
 

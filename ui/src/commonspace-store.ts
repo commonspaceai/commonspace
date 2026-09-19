@@ -488,12 +488,26 @@ export class CommonspaceClientStore {
 	}
 
 	async mutate(mutation: CommonspaceMutation): Promise<void> {
+		const routingGeneration = this.routingGeneration;
 		try {
 			const result = await requestJson<CommonspaceBootstrap>("/api/mutate", {
 				method: "POST",
 				body: JSON.stringify(mutation),
 			});
-			const merged = this.mergeBootstrap(result);
+			let merged: CommonspaceBootstrap;
+			if (
+				mutation.action === "remove-agent" &&
+				routingGeneration === this.routingGeneration &&
+				result.state.revision >= (this.snapshot.bootstrap?.state.revision ?? -1)
+			) {
+				// Removing an Agent can also remove the independently persisted
+				// inference selection. Make this response authoritative and expire
+				// older bootstrap requests that could restore that selection.
+				this.routingGeneration += 1;
+				merged = this.mergeBootstrap(result, this.routingGeneration);
+			} else {
+				merged = this.mergeBootstrap(result);
+			}
 			this.set({
 				...this.snapshot,
 				bootstrap: merged,

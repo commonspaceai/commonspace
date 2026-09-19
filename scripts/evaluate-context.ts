@@ -23,20 +23,13 @@ import {
 	type ContextEvaluationCase,
 	contextEvaluationCases,
 } from "./context-evaluation-cases.ts";
-import { rerankWithJev } from "./context-evaluation-jev.ts";
 
 const args = process.argv.slice(2);
-if (args.some((arg) => arg !== "--jev" && arg !== "--semantic"))
-	throw new Error("Usage: pnpm evaluate:context [--jev] [--semantic]");
-const live = args.includes("--jev");
+if (args.some((arg) => arg !== "--semantic"))
+	throw new Error("Usage: pnpm evaluate:context [--semantic]");
 const encoder = args.includes("--semantic")
 	? new LocalHistoryEmbeddings(process.env.COMMONSPACE_EMBEDDING_CACHE)
 	: undefined;
-const apiKey = process.env.TYPESAFE_API_KEY;
-if (live && !apiKey)
-	throw new Error(
-		"--jev requires TYPESAFE_API_KEY; sends only the checked-in synthetic corpus",
-	);
 
 async function evaluateCase(evaluation: ContextEvaluationCase) {
 	const started = performance.now();
@@ -129,26 +122,6 @@ async function evaluateCase(evaluation: ContextEvaluationCase) {
 			atOne: scoreEvidence(evaluation, evidence.slice(0, 1)),
 		});
 	}
-	let jev: Awaited<ReturnType<typeof rerankWithJev>>["telemetry"] | null = null;
-	if (live && apiKey) {
-		let ranked = candidates;
-		if (candidates.length) {
-			const result = await rerankWithJev(evaluation.query, candidates, {
-				apiKey,
-				model: process.env.COMMONSPACE_EVAL_JEV_MODEL ?? "jev-latest",
-			});
-			ranked = result.ranked;
-			jev = result.telemetry;
-		}
-		const evidence = packEvidence(ranked);
-		measurements.push({
-			strategy: "jev-experiment",
-			elapsedMs: candidateMs + (jev?.elapsedMs ?? 0),
-			evidence,
-			metrics: scoreEvidence(evaluation, evidence),
-			atOne: scoreEvidence(evaluation, evidence.slice(0, 1)),
-		});
-	}
 	return {
 		case: evaluation.id,
 		query: evaluation.query,
@@ -158,7 +131,6 @@ async function evaluateCase(evaluation: ContextEvaluationCase) {
 		candidateCoverage,
 		semanticColdMs,
 		semanticUncachedQueryMs,
-		jev,
 		measurements,
 	};
 }
@@ -220,7 +192,7 @@ process.stdout.write(
 				candidateLimit: CANDIDATE_LIMIT,
 			},
 			limitations:
-				"Hand-authored synthetic regression cases, not a held-out statistical estimate or native-agent success test. Candidate coverage has no delivery budget and is only an upper bound for reranking. Bytes use a common evidence envelope, not full MCP traffic. Timings are single queries on small histories, not a load benchmark. Jev ranks without an abstention threshold; nonempty results on absent queries are not hallucination measurements.",
+				"Hand-authored synthetic regression cases, not a held-out statistical estimate or native-agent success test. Candidate coverage has no delivery budget and is only an upper bound for reranking. Bytes use a common evidence envelope, not full MCP traffic. Timings are single queries on small histories, not a load benchmark.",
 			summary,
 			rows,
 		},

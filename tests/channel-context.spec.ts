@@ -2,8 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CommonspaceRoutingProvider } from "@commonspace/shared";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type AgentRunInput,
 	CommonspaceHostService,
@@ -13,9 +12,8 @@ import { mustExist } from "./test-helpers.ts";
 
 const roots: string[] = [];
 const services: CommonspaceHostService[] = [];
-const completionRequestSchema = z.object({
-	messages: z.array(z.object({ role: z.string(), content: z.string() })),
-});
+type InferenceRequest = (input: AgentRunInput) => Promise<string>;
+let inferenceRequest: ReturnType<typeof vi.fn<InferenceRequest>>;
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -27,24 +25,24 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
-function inferenceResponse(summary: string): Response {
-	return new Response(
-		JSON.stringify({
-			choices: [
-				{
-					message: {
-						content: JSON.stringify({
-							summary,
-							decisions: [],
-							openQuestions: [],
-						}),
-					},
-				},
-			],
-		}),
-		{ status: 200, headers: { "content-type": "application/json" } },
-	);
+function inferenceResponse(summary: string, decisions: string[] = []): string {
+	return JSON.stringify({ summary, decisions, openQuestions: [] });
 }
+
+function withInference(
+	run: (input: AgentRunInput) => Promise<string | { text: string }>,
+): (input: AgentRunInput) => Promise<string | { text: string }> {
+	return async (input) =>
+		input.sessionName.startsWith("Commonspace Inference:")
+			? inferenceRequest(input)
+			: run(input);
+}
+
+beforeEach(() => {
+	inferenceRequest = vi.fn(async () =>
+		inferenceResponse("Decision: ship the verified implementation."),
+	);
+});
 
 afterEach(async () => {
 	vi.unstubAllGlobals();
@@ -62,19 +60,18 @@ async function fixture() {
 		{ root },
 		{
 			discoverAgents: discoverTestHarnesses,
-			runAgent: async () => ({
+			runAgent: withInference(async () => ({
 				text: "Decision: ship the verified implementation.",
-			}),
+			})),
 		},
 	);
 	services.push(service);
 	await service.initialize();
-	await service.updateRoutingConfiguration({
-		provider: CommonspaceRoutingProvider.OpenAiCompatible,
-		model: "synthetic-router",
-		baseUrl: "https://example.test/v1",
-	});
 	await addTestHarness(service, "codex", "Review Bot");
+	await service.updateRoutingConfiguration({
+		provider: CommonspaceRoutingProvider.Harness,
+		harnessAgentId: "codex",
+	});
 	const channel = mustExist(
 		(
 			await service.mutate({
@@ -103,11 +100,8 @@ describe("editable shared Channel context", () => {
 				kind: "message",
 				messageId: source.rootMessageId,
 			});
-			vi.stubGlobal(
-				"fetch",
-				vi.fn(async () =>
-					inferenceResponse("A fact retained only from the pinned source."),
-				),
+			inferenceRequest = vi.fn(async () =>
+				inferenceResponse("A fact retained only from the pinned source."),
 			);
 			await service.send({
 				conversation: { kind: "channel", id: channel.id },
@@ -149,9 +143,9 @@ describe("editable shared Channel context", () => {
 			kind: "note",
 			note: "PIN_ONLY_DEPLOYMENT: deploy to Mercury.",
 		});
-		const completion = deferred<Response>();
+		const completion = deferred<string>();
 		const request = vi.fn(() => completion.promise);
-		vi.stubGlobal("fetch", request);
+		inferenceRequest = request;
 		const compacting = service.compactChannelContext(channel.id);
 		await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
 		await service.removePin(pin.id);
@@ -171,11 +165,8 @@ describe("editable shared Channel context", () => {
 			kind: "note",
 			note: "Deploy to Mercury.",
 		});
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async () =>
-				inferenceResponse("Deploy to Mercury with Review Bot."),
-			),
+		inferenceRequest = vi.fn(async () =>
+			inferenceResponse("Deploy to Mercury with Review Bot."),
 		);
 		await service.compactChannelContext(channel.id);
 		await service.removePin(pin.id);
@@ -219,7 +210,7 @@ describe("editable shared Channel context", () => {
 			.mockImplementationOnce(async () =>
 				inferenceResponse("Recovered brief."),
 			);
-		vi.stubGlobal("fetch", request);
+		inferenceRequest = request;
 		const { service, channel } = await fixture();
 		await service.send({
 			conversation: { kind: "channel", id: channel.id },
@@ -248,7 +239,7 @@ describe("editable shared Channel context", () => {
 		const request = vi.fn(async () =>
 			inferenceResponse("The implementation is ready for review."),
 		);
-		vi.stubGlobal("fetch", request);
+		inferenceRequest = request;
 		const { service } = await fixture();
 		expect(service.snapshot().channels[0]?.memory).toMatchObject({
 			summary: "The implementation is ready for review.",
@@ -268,20 +259,19 @@ describe("editable shared Channel context", () => {
 			{ root },
 			{
 				discoverAgents: discoverTestHarnesses,
-				runAgent: async (input) => {
+				runAgent: withInference(async (input) => {
 					scope = input.commonspaceScope;
 					return { text: "Thread reply." };
-				},
+				}),
 			},
 		);
 		services.push(service);
 		await service.initialize();
-		await service.updateRoutingConfiguration({
-			provider: CommonspaceRoutingProvider.OpenAiCompatible,
-			model: "synthetic-router",
-			baseUrl: "https://example.test/v1",
-		});
 		await addTestHarness(service, "codex", "Review Bot");
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "codex",
+		});
 		const channel = mustExist(
 			(
 				await service.mutate({
@@ -366,18 +356,11 @@ describe("editable shared Channel context", () => {
 		const channelMemory = structuredClone(
 			mustExist(service.snapshot().channels[0]).memory,
 		);
-		const request = vi.fn(
-			async (_resource: string | URL | Request, init?: RequestInit) => {
-				const body = completionRequestSchema.parse(
-					JSON.parse(String(init?.body)),
-				);
-				expect(
-					body.messages.find((message) => message.role === "user")?.content,
-				).toContain("verify the implementation");
-				return inferenceResponse("Focused Thread context.");
-			},
-		);
-		vi.stubGlobal("fetch", request);
+		const request = vi.fn(async (input: AgentRunInput) => {
+			expect(input.message).toContain("verify the implementation");
+			return inferenceResponse("Focused Thread context.");
+		});
+		inferenceRequest = request;
 		const compactThreadContext = service.compactThreadContext;
 
 		await expect(
@@ -400,9 +383,9 @@ describe("editable shared Channel context", () => {
 		await service.updateThreadContext(thread.id, {
 			summary: "Last valid Thread context.",
 		});
-		const completion = deferred<Response>();
+		const completion = deferred<string>();
 		const request = vi.fn(() => completion.promise);
-		vi.stubGlobal("fetch", request);
+		inferenceRequest = request;
 
 		const compacting = service.compactThreadContext(thread.id);
 		await vi.waitFor(() => {
@@ -429,29 +412,28 @@ describe("editable shared Channel context", () => {
 			join(tmpdir(), "commonspace-thread-background-"),
 		);
 		roots.push(root);
-		const completion = deferred<Response>();
+		const completion = deferred<string>();
 		const request = vi.fn(() => completion.promise);
-		vi.stubGlobal("fetch", request);
+		inferenceRequest = request;
 		const delivered: string[] = [];
 		const service = new CommonspaceHostService(
 			{},
 			{ root },
 			{
 				discoverAgents: discoverTestHarnesses,
-				runAgent: async (input) => {
+				runAgent: withInference(async (input) => {
 					delivered.push(input.message);
 					return { text: `Large result ${"y".repeat(63_000)}` };
-				},
+				}),
 			},
 		);
 		services.push(service);
 		await service.initialize();
-		await service.updateRoutingConfiguration({
-			provider: CommonspaceRoutingProvider.OpenAiCompatible,
-			model: "synthetic-router",
-			baseUrl: "https://example.test/v1",
-		});
 		await addTestHarness(service, "codex", "Review Bot");
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "codex",
+		});
 		const channel = mustExist(
 			(
 				await service.mutate({
@@ -522,9 +504,8 @@ describe("editable shared Channel context", () => {
 					})
 					.then(() => undefined);
 		});
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async () => inferenceResponse("An obsolete manual result.")),
+		inferenceRequest = vi.fn(async () =>
+			inferenceResponse("An obsolete manual result."),
 		);
 		try {
 			await service.compactThreadContext(threadId);
@@ -546,9 +527,8 @@ describe("editable shared Channel context", () => {
 		await service.updateChannelContext(channel.id, {
 			summary: "Human notes before manual compaction.",
 		});
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async () => inferenceResponse("Manually compacted notes.")),
+		inferenceRequest = vi.fn(async () =>
+			inferenceResponse("Manually compacted notes."),
 		);
 		expect((await service.compactChannelContext(channel.id)).summary).toBe(
 			"Manually compacted notes.",
@@ -564,9 +544,9 @@ describe("editable shared Channel context", () => {
 					(m) => m.authorType === "user",
 				),
 		);
-		const completion = deferred<Response>();
+		const completion = deferred<string>();
 		const request = vi.fn(() => completion.promise);
-		vi.stubGlobal("fetch", request);
+		inferenceRequest = request;
 		const pending = service.compactChannelContext(channel.id);
 		await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
 		await service.deleteMessage(source.id);
@@ -588,9 +568,9 @@ describe("editable shared Channel context", () => {
 				),
 		);
 		const threadId = mustExist(source.threadId);
-		const completion = deferred<Response>();
+		const completion = deferred<string>();
 		const request = vi.fn(() => completion.promise);
-		vi.stubGlobal("fetch", request);
+		inferenceRequest = request;
 		const pending = service.compactThreadContext(threadId);
 		await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
 		await service.deleteMessage(source.id);
@@ -608,25 +588,24 @@ describe("editable shared Channel context", () => {
 		const request = vi.fn(async () =>
 			inferenceResponse("Pressure-compacted Thread context."),
 		);
-		vi.stubGlobal("fetch", request);
+		inferenceRequest = request;
 		const service = new CommonspaceHostService(
 			{},
 			{ root },
 			{
 				discoverAgents: discoverTestHarnesses,
-				runAgent: async () => ({
+				runAgent: withInference(async () => ({
 					text: `Large Thread result ${"y".repeat(63_000)}`,
-				}),
+				})),
 			},
 		);
 		services.push(service);
 		await service.initialize();
-		await service.updateRoutingConfiguration({
-			provider: CommonspaceRoutingProvider.OpenAiCompatible,
-			model: "synthetic-router",
-			baseUrl: "https://example.test/v1",
-		});
 		await addTestHarness(service, "codex", "Review Bot");
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "codex",
+		});
 		const channel = mustExist(
 			(
 				await service.mutate({
@@ -699,33 +678,14 @@ describe("editable shared Channel context", () => {
 
 	it("uses configured Commonspace inference for manual compaction", async () => {
 		const { service, channel } = await fixture();
-		const request = vi.fn(
-			async (_resource: string | URL | Request, init?: RequestInit) => {
-				const body = completionRequestSchema.parse(
-					JSON.parse(String(init?.body)),
-				);
-				expect(
-					body.messages.find((message) => message.role === "user")?.content,
-				).toContain("verify the implementation");
-				return new Response(
-					JSON.stringify({
-						choices: [
-							{
-								message: {
-									content: JSON.stringify({
-										summary: "The implementation was verified and approved.",
-										decisions: ["Ship the verified implementation."],
-										openQuestions: [],
-									}),
-								},
-							},
-						],
-					}),
-					{ status: 200, headers: { "content-type": "application/json" } },
-				);
-			},
-		);
-		vi.stubGlobal("fetch", request);
+		const request = vi.fn(async (input: AgentRunInput) => {
+			expect(input.message).toContain("verify the implementation");
+			return inferenceResponse(
+				"The implementation was verified and approved.",
+				["Ship the verified implementation."],
+			);
+		});
+		inferenceRequest = request;
 
 		const memory = await service.compactChannelContext(channel.id);
 
@@ -745,11 +705,8 @@ describe("editable shared Channel context", () => {
 		await service.updateChannelContext(channel.id, {
 			summary: "Last valid Channel context.",
 		});
-		const completion = deferred<Response>();
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async () => completion.promise),
-		);
+		const completion = deferred<string>();
+		inferenceRequest = vi.fn(async () => completion.promise);
 
 		const compacting = service.compactChannelContext(channel.id);
 		await vi.waitFor(() => {
@@ -770,14 +727,14 @@ describe("editable shared Channel context", () => {
 
 	it("marks a manual compaction stale when a message arrives during inference", async () => {
 		const { service, channel } = await fixture();
-		const completion = deferred<Response>();
+		const completion = deferred<string>();
 		const request = vi
 			.fn()
 			.mockImplementationOnce(async () => completion.promise)
 			.mockImplementation(async () =>
 				inferenceResponse("Refreshed newer message."),
 			);
-		vi.stubGlobal("fetch", request);
+		inferenceRequest = request;
 
 		const compacting = service.compactChannelContext(channel.id);
 		await vi.waitFor(() => {
@@ -821,18 +778,17 @@ describe("editable shared Channel context", () => {
 			{ root },
 			{
 				discoverAgents: discoverTestHarnesses,
-				runAgent: async () => ({ text: "Initial reply." }),
+				runAgent: withInference(async () => ({ text: "Initial reply." })),
 				routeAgents: async () => routing.promise,
 			},
 		);
 		services.push(service);
 		await service.initialize();
-		await service.updateRoutingConfiguration({
-			provider: CommonspaceRoutingProvider.OpenAiCompatible,
-			model: "synthetic-router",
-			baseUrl: "https://example.test/v1",
-		});
 		await addTestHarness(service, "codex", "Review Bot");
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "codex",
+		});
 		const channel = mustExist(
 			(
 				await service.mutate({
@@ -877,23 +833,22 @@ describe("editable shared Channel context", () => {
 		const request = vi.fn(async () =>
 			inferenceResponse("Inferred replacement."),
 		);
-		vi.stubGlobal("fetch", request);
+		inferenceRequest = request;
 		const service = new CommonspaceHostService(
 			{},
 			{ root },
 			{
 				discoverAgents: discoverTestHarnesses,
-				runAgent: async () => ({ text: reply }),
+				runAgent: withInference(async () => ({ text: reply })),
 			},
 		);
 		services.push(service);
 		await service.initialize();
-		await service.updateRoutingConfiguration({
-			provider: CommonspaceRoutingProvider.OpenAiCompatible,
-			model: "synthetic-router",
-			baseUrl: "https://example.test/v1",
-		});
 		await addTestHarness(service, "codex", "Review Bot");
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "codex",
+		});
 		const channel = mustExist(
 			(
 				await service.mutate({
@@ -935,27 +890,28 @@ describe("editable shared Channel context", () => {
 	it("serializes automatic compactions and keeps the newest completed projection", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-context-race-"));
 		roots.push(root);
-		const completions = [deferred<Response>(), deferred<Response>()];
+		const completions = [deferred<string>(), deferred<string>()];
 		const request = vi.fn(
 			async () => mustExist(completions[request.mock.calls.length - 1]).promise,
 		);
-		vi.stubGlobal("fetch", request);
+		inferenceRequest = request;
 		const service = new CommonspaceHostService(
 			{},
 			{ root },
 			{
 				discoverAgents: discoverTestHarnesses,
-				runAgent: async () => ({ text: "Completed the requested change." }),
+				runAgent: withInference(async () => ({
+					text: "Completed the requested change.",
+				})),
 			},
 		);
 		services.push(service);
 		await service.initialize();
-		await service.updateRoutingConfiguration({
-			provider: CommonspaceRoutingProvider.OpenAiCompatible,
-			model: "synthetic-router",
-			baseUrl: "https://example.test/v1",
-		});
 		await addTestHarness(service, "codex", "Review Bot");
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "codex",
+		});
 		const channel = mustExist(
 			(
 				await service.mutate({
@@ -1011,42 +967,29 @@ describe("editable shared Channel context", () => {
 	it("automatically compacts when shared context crosses token pressure", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-context-pressure-"));
 		roots.push(root);
-		const request = vi.fn(
-			async () =>
-				new Response(
-					JSON.stringify({
-						choices: [
-							{
-								message: {
-									content: JSON.stringify({
-										summary: "Pressure-compacted shared context.",
-										decisions: ["Keep the verified result."],
-										openQuestions: [],
-									}),
-								},
-							},
-						],
-					}),
-					{ status: 200, headers: { "content-type": "application/json" } },
-				),
+		const request = vi.fn(async () =>
+			inferenceResponse("Pressure-compacted shared context.", [
+				"Keep the verified result.",
+			]),
 		);
-		vi.stubGlobal("fetch", request);
+		inferenceRequest = request;
 		const service = new CommonspaceHostService(
 			{},
 			{ root },
 			{
 				discoverAgents: discoverTestHarnesses,
-				runAgent: async () => ({ text: `Decision: ${"y".repeat(63_900)}` }),
+				runAgent: withInference(async () => ({
+					text: `Decision: ${"y".repeat(63_900)}`,
+				})),
 			},
 		);
 		services.push(service);
 		await service.initialize();
-		await service.updateRoutingConfiguration({
-			provider: CommonspaceRoutingProvider.OpenAiCompatible,
-			model: "synthetic-router",
-			baseUrl: "https://example.test/v1",
-		});
 		await addTestHarness(service, "codex", "Review Bot");
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "codex",
+		});
 		const channel = mustExist(
 			(
 				await service.mutate({

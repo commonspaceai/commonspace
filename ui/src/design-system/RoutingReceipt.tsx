@@ -207,13 +207,6 @@ export function RoutingReceipt({
 					</p>
 				)}
 				<p className="text-foreground">{routing.reason}</p>
-				{routing.source === "ai" &&
-					/^Jev .+ selected .+ for .+ delivery\.$/u.test(routing.reason) && (
-						<p className="mt-1 text-xs text-muted-foreground">
-							The router recorded its selection, but did not provide a detailed
-							rationale.
-						</p>
-					)}
 				<div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-muted-foreground">
 					<p className="text-xs">
 						<span className="capitalize">
@@ -301,7 +294,7 @@ export function RoutingReceipt({
 								}
 							}}
 						>
-							{retrying === "ai" ? "Retrying…" : "Retry AI routing"}
+							{retrying === "ai" ? "Retrying…" : "Retry agent routing"}
 						</Button>
 						<NativeSelect
 							aria-label="Manual routing agent"
