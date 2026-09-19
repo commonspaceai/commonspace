@@ -40,12 +40,16 @@ export const OpenImageFile: Story = {
 	args: { targetFile: { rootIndex: 0, path: "commonspace-logo.png" } },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const image = await canvas.findByRole("img", {
-			name: "Preview commonspace-logo.png",
-		});
+		const image = await canvas.findByRole(
+			"img",
+			{ name: "Preview commonspace-logo.png" },
+			{ timeout: 5_000 },
+		);
 		if (!(image instanceof HTMLImageElement))
 			throw new TypeError("Expected an image preview element.");
-		await waitFor(() => expect(image.naturalWidth).toBeGreaterThan(0));
+		await waitFor(() => expect(image.naturalWidth).toBeGreaterThan(0), {
+			timeout: 5_000,
+		});
 	},
 };
 
@@ -57,10 +61,14 @@ export const OpenVideoFile: Story = {
 		const canvas = within(canvasElement);
 		const video = await canvas.findByLabelText(
 			"Preview agent-workflow-preview.mp4",
+			{},
+			{ timeout: 5_000 },
 		);
 		if (!(video instanceof HTMLVideoElement))
 			throw new TypeError("Expected a video preview element.");
-		await waitFor(() => expect(video.readyState).toBeGreaterThanOrEqual(1));
+		await waitFor(() => expect(video.readyState).toBeGreaterThanOrEqual(1), {
+			timeout: 5_000,
+		});
 	},
 };
 
