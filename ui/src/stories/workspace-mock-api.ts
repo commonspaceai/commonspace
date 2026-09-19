@@ -839,6 +839,12 @@ export function createWorkspaceMockApi(
 				...messages()
 					.filter((message) => !message.deletedAt)
 					.map((message) => {
+						const location =
+							message.conversation.kind === "channel"
+								? `#${data.state.channels.find((channel) => channel.id === message.conversation.id)?.name ?? message.conversation.id}`
+								: (data.agents.find(
+										(agent) => agent.id === message.conversation.id,
+									)?.displayName ?? message.conversation.id);
 						const target: CommonspaceSearchTarget = {
 							kind: "conversation" as const,
 							conversation: message.conversation,
@@ -849,9 +855,10 @@ export function createWorkspaceMockApi(
 						return {
 							id: message.id,
 							kind: "message" as const,
-							title: message.text,
-							detail: message.authorName,
-							receipt: "Message",
+							title: message.authorName,
+							detail: message.text,
+							receipt: `${location} · ${message.authorName} · ${message.createdAt}`,
+							occurredAt: message.createdAt,
 							projectIds: message.projectIds ?? [],
 							highlights: [],
 							target,

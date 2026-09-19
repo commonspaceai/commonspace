@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { expect, userEvent, within } from "storybook/test";
 import { WorkspaceStory } from "./WorkspaceStory";
 import { createWorkspaceMockApi } from "./workspace-mock-api";
 
@@ -37,6 +38,32 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Conversation: Story = {};
+export const SearchWithProvenance: Story = {
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		await page.findByRole(
+			"heading",
+			{ name: "general", level: 1 },
+			{ timeout: 5_000 },
+		);
+		await userEvent.click(
+			await page.findByRole("button", {
+				name: "Search messages, channels, and agents",
+			}),
+		);
+		const dialog = await page.findByRole("dialog", {
+			name: "Search Commonspace",
+		});
+		const search = within(dialog);
+		await userEvent.type(
+			search.getByRole("searchbox", { name: "Search Commonspace" }),
+			"workflow",
+		);
+		const [receipt] = await search.findAllByText(/^#general · /u);
+		if (receipt === undefined) throw new Error("Expected search provenance.");
+		await expect(receipt).toBeVisible();
+	},
+};
 export const Inbox: Story = { args: { initialPath: "/" } };
 export const Threads: Story = { args: { initialPath: "/threads" } };
 export const DirectMessage: Story = {
