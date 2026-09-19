@@ -313,11 +313,9 @@ export function CommonspaceProjectFiles({
 									kind={entry.kind === "directory" ? "folder" : "file"}
 									label={entry.name}
 									meta={entry.kind === "directory" ? "Folder" : "File"}
-									triggerClassName={
-										entry.kind === "file" && selected?.path === entry.path
-											? "opacity-100"
-											: undefined
-									}
+									{...(entry.kind === "file" && selected?.path === entry.path
+										? { triggerClassName: "opacity-100" }
+										: {})}
 									onOpen={openEntry}
 									onCopy={() => {
 										void navigator.clipboard
