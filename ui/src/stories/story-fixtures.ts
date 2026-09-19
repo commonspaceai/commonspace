@@ -27,6 +27,8 @@ import {
 	type ProjectGitDiffResponse,
 	type ProjectGitStatusResponse,
 } from "@commonspace/shared";
+import workflowPreviewUrl from "../assets/agent-workflow-preview.mp4";
+import commonspaceLogoUrl from "../assets/commonspace-logo.png";
 import {
 	type CommonspaceClientSnapshot,
 	CommonspaceClientStore,
@@ -871,10 +873,10 @@ const directory: ProjectDirectoryResponse = {
 			contentType: "image/png",
 		},
 		{
-			name: "recording.mp4",
-			path: "recording.mp4",
+			name: "agent-workflow-preview.mp4",
+			path: "agent-workflow-preview.mp4",
 			kind: "file",
-			size: 4_200_000,
+			size: 2_266,
 			preview: "video",
 			contentType: "video/mp4",
 		},
@@ -960,6 +962,11 @@ export const storyProjectFetcher: typeof globalThis.fetch = async (input) => {
 	if (url.pathname.endsWith("/changes")) return jsonResponse(gitStatus);
 	if (url.pathname.endsWith("/diff")) return jsonResponse(gitDiff);
 	if (url.pathname.endsWith("/file")) {
+		const path = url.searchParams.get("path");
+		if (path === "commonspace-logo.png")
+			return globalThis.fetch(commonspaceLogoUrl);
+		if (path === "agent-workflow-preview.mp4")
+			return globalThis.fetch(workflowPreviewUrl);
 		return new Response("export const story = 'verified';\n", {
 			status: 200,
 			headers: { "content-type": "text/plain" },
@@ -988,6 +995,15 @@ export const emptyProjectFetcher: typeof globalThis.fetch = async (input) => {
 
 export const errorProjectFetcher: typeof globalThis.fetch = async () =>
 	jsonResponse({ error: "Project files are temporarily unavailable." }, 503);
+
+export const mediaErrorProjectFetcher: typeof globalThis.fetch = async (
+	input,
+) => {
+	const url = new URL(String(input), "http://storybook.local");
+	if (url.pathname.endsWith("/file"))
+		return jsonResponse({ error: "Preview data could not be read." }, 422);
+	return storyProjectFetcher(input);
+};
 
 const searchResults: CommonspaceSearchResult[] = [
 	{

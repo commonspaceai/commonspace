@@ -1,9 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { CommonspaceProjectFiles } from "../CommonspaceProjectFiles";
 import {
 	emptyProjectFetcher,
 	errorProjectFetcher,
+	mediaErrorProjectFetcher,
 	primaryProject,
 	storyProjectFetcher,
 } from "./story-fixtures";
@@ -33,6 +34,47 @@ export const BrowseWorkspace: Story = {};
 
 export const OpenTextFile: Story = {
 	args: { targetFile: { rootIndex: 0, path: "README.md" } },
+};
+
+export const OpenImageFile: Story = {
+	args: { targetFile: { rootIndex: 0, path: "commonspace-logo.png" } },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const image = await canvas.findByRole("img", {
+			name: "Preview commonspace-logo.png",
+		});
+		if (!(image instanceof HTMLImageElement))
+			throw new TypeError("Expected an image preview element.");
+		await waitFor(() => expect(image.naturalWidth).toBeGreaterThan(0));
+	},
+};
+
+export const OpenVideoFile: Story = {
+	args: {
+		targetFile: { rootIndex: 0, path: "agent-workflow-preview.mp4" },
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const video = await canvas.findByLabelText(
+			"Preview agent-workflow-preview.mp4",
+		);
+		if (!(video instanceof HTMLVideoElement))
+			throw new TypeError("Expected a video preview element.");
+		await waitFor(() => expect(video.readyState).toBeGreaterThanOrEqual(1));
+	},
+};
+
+export const MediaPreviewFailed: Story = {
+	args: {
+		fetcher: mediaErrorProjectFetcher,
+		targetFile: { rootIndex: 0, path: "commonspace-logo.png" },
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(await canvas.findByRole("alert")).toHaveTextContent(
+			"Preview data could not be read.",
+		);
+	},
 };
 
 export const SensitiveFileBlocked: Story = {

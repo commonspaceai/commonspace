@@ -22,6 +22,7 @@ import {
 import { NativeSelect } from "@/components/ui/native-select";
 import { ResourceActionMenu } from "@/design-system/ResourceActionMenu";
 import {
+	fetchProjectBlob,
 	fetchProjectJson,
 	fetchProjectText,
 	folderName,
@@ -58,6 +59,7 @@ export function CommonspaceProjectFiles({
 	const [listing, setListing] = useState<ProjectDirectoryResponse | null>(null);
 	const [selected, setSelected] = useState<ProjectFileEntry | null>(null);
 	const [text, setText] = useState<string | null>(null);
+	const [mediaUrl, setMediaUrl] = useState<string | null>(null);
 	const [listingError, setListingError] = useState<string | null>(null);
 	const [previewError, setPreviewError] = useState<string | null>(null);
 
@@ -114,6 +116,42 @@ export function CommonspaceProjectFiles({
 	}, [fetcher, projectId, rootIndex, selected]);
 
 	useEffect(() => {
+		setMediaUrl(null);
+		setPreviewError(null);
+		if (
+			selected?.kind !== "file" ||
+			(selected.preview !== "image" && selected.preview !== "video")
+		)
+			return;
+		const controller = new AbortController();
+		let objectUrl: string | null = null;
+		const previewKind = selected.preview;
+		void fetchProjectBlob(
+			projectApiUrl(projectId, "file", rootIndex, selected.path),
+			controller.signal,
+			previewKind === "image" ? "image/*" : "video/*",
+			fetcher,
+		)
+			.then((blob) => {
+				if (controller.signal.aborted) return;
+				if (blob.type !== "" && !blob.type.startsWith(`${previewKind}/`))
+					throw new Error(`File is not a supported ${previewKind}.`);
+				objectUrl = URL.createObjectURL(blob);
+				setMediaUrl(objectUrl);
+			})
+			.catch((cause: unknown) => {
+				if (!controller.signal.aborted)
+					setPreviewError(
+						cause instanceof Error ? cause.message : String(cause),
+					);
+			});
+		return () => {
+			controller.abort();
+			if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
+		};
+	}, [fetcher, projectId, rootIndex, selected]);
+
+	useEffect(() => {
 		if (
 			targetFile === null ||
 			listing === null ||
@@ -149,11 +187,6 @@ export function CommonspaceProjectFiles({
 			</Empty>
 		);
 	}
-
-	const mediaUrl =
-		selected?.kind === "file"
-			? projectApiUrl(projectId, "file", rootIndex, selected.path)
-			: null;
 
 	return (
 		<section
@@ -241,7 +274,7 @@ export function CommonspaceProjectFiles({
 							>
 								<button
 									type="button"
-									className="grid min-h-11 w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 border-0 bg-transparent px-3 py-1 text-left hover:bg-hover aria-pressed:bg-selection"
+									className="grid min-h-11 w-full grid-cols-[28px_minmax(0,1fr)] items-center gap-2 border-0 bg-transparent px-3 py-1 text-left hover:bg-hover aria-pressed:bg-selection"
 									aria-label={`${entry.kind === "directory" ? "Open folder" : "Open file"} ${entry.name}`}
 									aria-pressed={
 										entry.kind === "file" && selected?.path === entry.path
@@ -254,14 +287,16 @@ export function CommonspaceProjectFiles({
 									>
 										{entryIcon(entry)}
 									</span>
-									<span className="truncate text-[13px] font-medium">
-										{entry.name}
+									<span className="min-w-0 leading-tight">
+										<span className="block truncate text-[13px] font-medium">
+											{entry.name}
+										</span>
+										<small className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+											{entry.kind === "directory"
+												? "Folder"
+												: formatFileSize(entry.size)}
+										</small>
 									</span>
-									<small className="text-xs text-muted-foreground">
-										{entry.kind === "directory"
-											? "Folder"
-											: formatFileSize(entry.size)}
-									</small>
 								</button>
 								<ResourceActionMenu
 									kind={entry.kind === "directory" ? "folder" : "file"}
@@ -314,7 +349,9 @@ export function CommonspaceProjectFiles({
 									{selected.name}
 								</strong>
 								<small className="block truncate text-[13px] text-muted-foreground">
-									{selected.path} · {formatFileSize(selected.size)}
+									{selected.path === selected.name
+										? formatFileSize(selected.size)
+										: `${selected.path} · ${formatFileSize(selected.size)}`}
 								</small>
 							</div>
 							<span className="text-xs text-muted-foreground">
@@ -323,7 +360,15 @@ export function CommonspaceProjectFiles({
 						</header>
 						<div className="p-5">
 							{previewError !== null && (
-								<div className="text-xs text-destructive">{previewError}</div>
+								<div className="py-12 text-center" role="alert">
+									<strong>Preview unavailable</strong>
+									<p className="mt-1 text-xs text-destructive">
+										{previewError}
+									</p>
+									<p className="mt-1 text-xs text-muted-foreground">
+										Choose another file to continue browsing.
+									</p>
+								</div>
 							)}
 							{previewError === null &&
 								selected.preview === "text" &&
@@ -340,12 +385,23 @@ export function CommonspaceProjectFiles({
 									</pre>
 								)}
 							{previewError === null &&
+								(selected.preview === "image" ||
+									selected.preview === "video") &&
+								mediaUrl === null && (
+									<div className="text-xs text-muted-foreground">
+										Loading preview…
+									</div>
+								)}
+							{previewError === null &&
 								selected.preview === "image" &&
 								mediaUrl !== null && (
 									<img
 										className="mx-auto max-h-[70vh] rounded-sm border"
 										src={mediaUrl}
 										alt={`Preview ${selected.name}`}
+										onError={() => {
+											setPreviewError("Preview could not be rendered.");
+										}}
 									/>
 								)}
 							{previewError === null &&
@@ -359,6 +415,9 @@ export function CommonspaceProjectFiles({
 										muted
 										playsInline
 										preload="metadata"
+										onError={() => {
+											setPreviewError("Preview could not be rendered.");
+										}}
 									/>
 								)}
 							{previewError === null && selected.preview === "binary" && (

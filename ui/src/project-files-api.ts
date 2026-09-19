@@ -46,6 +46,20 @@ export async function fetchProjectText(
 	return response.text();
 }
 
+export async function fetchProjectBlob(
+	url: string,
+	signal: AbortSignal,
+	accept: "image/*" | "video/*",
+	fetcher: typeof globalThis.fetch = globalThis.fetch,
+): Promise<Blob> {
+	const response = await fetcher(url, {
+		headers: { accept },
+		signal,
+	});
+	if (!response.ok) throw new Error(await responseError(response));
+	return response.blob();
+}
+
 export function formatFileSize(size: number | undefined): string {
 	if (size === undefined) return "";
 	if (size < 1_024) return `${String(size)} B`;
