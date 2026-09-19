@@ -185,6 +185,77 @@ export const ChannelConversation: Story = {
 	},
 };
 
+export const ThreadIdentityAndScope: Story = {
+	args: {
+		store: createStoryStore(storyBootstrap, {
+			activeConversation: channel,
+			activeProjectId: primaryProject.id,
+			activeThreadId: "thread-review",
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const thread = within(
+			canvas.getByRole("complementary", { name: "Thread replies" }),
+		);
+		await expect(
+			thread.getByRole("heading", {
+				name: "Review the visual baseline and document the next component states.",
+			}),
+		).toBeVisible();
+		await expect(
+			thread.getByRole("button", {
+				name: "Show source message in #design-review",
+			}),
+		).toBeVisible();
+		await expect(
+			thread.getByText(/Review Bot · Session preserved/u),
+		).toBeVisible();
+		await expect(
+			thread.getByRole("button", { name: "Open thread context" }),
+		).toHaveTextContent("Context ready");
+
+		const channelComposer = canvas.getByRole("form", {
+			name: "Start a new Thread in design-review",
+		});
+		const threadComposer = thread.getByRole("form", {
+			name: "Reply in active Thread",
+		});
+		await expect(channelComposer).toHaveAttribute(
+			"data-composer-emphasis",
+			"active",
+		);
+		await expect(threadComposer).toHaveAttribute(
+			"data-composer-emphasis",
+			"receded",
+		);
+		await userEvent.click(
+			thread.getByRole("textbox", { name: "Reply in thread" }),
+		);
+		await expect(channelComposer).toHaveAttribute(
+			"data-composer-emphasis",
+			"receded",
+		);
+		await expect(threadComposer).toHaveAttribute(
+			"data-composer-emphasis",
+			"active",
+		);
+
+		await userEvent.click(
+			thread.getByRole("button", { name: "Open thread context" }),
+		);
+		await expect(
+			thread.getByText(/Agents use this shared context/u),
+		).toBeVisible();
+		await expect(
+			thread.getByRole("button", { name: "Update Thread context summary" }),
+		).toBeVisible();
+		await expect(
+			thread.getByRole("button", { name: "Reset changes" }),
+		).toBeDisabled();
+	},
+};
+
 const historicalRoutingBootstrap = structuredClone(storyBootstrap);
 for (const messages of Object.values(
 	historicalRoutingBootstrap.state.messages,
@@ -535,6 +606,13 @@ export const DirectMessage: Story = {
 			activeConversation: directMessage,
 			activeProjectId: primaryProject.id,
 		}),
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByText(
+				/Hermes · gpt-5\.6-sol · Session preserved/u,
+			),
+		).toBeVisible();
 	},
 };
 

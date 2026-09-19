@@ -20,6 +20,7 @@ import {
 	MessageCircleReplyIcon,
 	PaperclipIcon,
 	SettingsIcon,
+	XIcon,
 } from "lucide-react";
 import {
 	type Dispatch,
@@ -105,6 +106,35 @@ const messageMarkdownFallback = (
 function restoreText(current: string, restored: string): string {
 	if (restored === "" || current === restored) return current;
 	return current === "" ? restored : `${restored}\n\n${current}`;
+}
+
+function contextLines(value: string): string[] {
+	return value
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean);
+}
+
+function threadSubject(message: CommonspaceMessage | undefined): string {
+	const subject = message?.text.normalize("NFKC").replace(/\s+/gu, " ").trim();
+	return subject === undefined || subject === "" ? "Thread replies" : subject;
+}
+
+function threadContextStatusLabel(
+	status: CommonspaceThread["context"]["memory"]["status"],
+): string {
+	switch (status) {
+		case "current":
+			return "Context ready";
+		case "stale":
+			return "Context needs refresh";
+		case "compacting":
+			return "Updating context";
+		case "failed":
+			return "Context update failed";
+		case "empty":
+			return "Context is building";
+	}
 }
 
 function restoreImages(
@@ -457,9 +487,13 @@ function conversationTitle(
 		return { title: "Commonspace", subtitle: "Select a channel or agent" };
 	if (ref.kind === "dm") {
 		const agent = bootstrap.agents.find((candidate) => candidate.id === ref.id);
+		const sessionContinuity =
+			agent !== undefined && bootstrap.state.dmSessions[agent.id] !== undefined
+				? "Session preserved"
+				: "New session";
 		return {
 			title: agent?.displayName ?? ref.id,
-			subtitle: `${runtimeLabel(agent?.adapter)} · ${agent?.model ?? "default model"}`,
+			subtitle: `${runtimeLabel(agent?.adapter)} · ${agent?.model ?? "default model"} · ${sessionContinuity}`,
 		};
 	}
 	const channel = bootstrap.state.channels.find(
@@ -607,6 +641,8 @@ function MessageRow({
 			className={cn(
 				"group/message relative mx-auto mb-0 grid w-full max-w-[920px] grid-cols-[32px_minmax(0,1fr)] gap-[11px] rounded-md px-1.5 py-2.5",
 				flush && "px-0 py-2.5",
+				quotedSource &&
+					"max-w-none grid-cols-[24px_minmax(0,1fr)] gap-2.5 rounded-none border-y border-border/70 bg-muted/20 px-4 py-3",
 				highlighted && "bg-muted/40",
 			)}
 			data-author={message.authorType}
@@ -621,12 +657,13 @@ function MessageRow({
 				<AgentAvatar
 					agent={messageAgent}
 					fallbackName={message.authorName}
-					size="md"
+					size={quotedSource ? "sm" : "md"}
 				/>
 			) : (
 				<div
 					className={cn(
 						"grid size-8 place-items-center rounded-[7px] bg-muted font-sans text-xs font-medium",
+						quotedSource && "size-6 rounded-md text-[10px]",
 						message.authorType === "system" && "bg-muted text-muted-foreground",
 					)}
 					aria-hidden="true"
@@ -635,7 +672,12 @@ function MessageRow({
 				</div>
 			)}
 			<div className="min-w-0">
-				<header className="flex min-h-[21px] flex-wrap items-center gap-2 text-sm [&>strong]:font-heading [&>strong]:font-semibold">
+				<header
+					className={cn(
+						"flex min-h-[21px] flex-wrap items-center gap-2 text-sm [&>strong]:font-heading [&>strong]:font-semibold",
+						quotedSource && "min-h-5 text-xs",
+					)}
+				>
 					<strong>{message.authorName}</strong>
 					<time className="whitespace-nowrap text-muted-foreground text-[11px]">
 						{new Date(message.createdAt).toLocaleTimeString([], {
@@ -771,7 +813,14 @@ function MessageRow({
 							<LazyMessageMarkdown text={message.text} />
 						</Suspense>
 					) : (
-						<p className="mt-1 whitespace-pre-wrap text-sm leading-[1.65]">
+						<p
+							className={cn(
+								"mt-1 whitespace-pre-wrap text-sm leading-[1.65]",
+								quotedSource &&
+									"line-clamp-2 text-[13px] leading-5 text-muted-foreground",
+							)}
+							title={quotedSource ? message.text : undefined}
+						>
 							{renderMessageText(message, bootstrap ?? undefined)}
 						</p>
 					))
@@ -1155,6 +1204,9 @@ export function CommonspaceConversation({
 			: `${snapshot.activeConversation.kind}:${snapshot.activeConversation.id}\u0000${snapshot.activeThreadId ?? ""}`;
 	const [draft, setDraft] = useState("");
 	const [threadDraft, setThreadDraft] = useState("");
+	const [focusedComposer, setFocusedComposer] = useState<
+		"channel" | "thread" | null
+	>(null);
 	const [pendingImages, setPendingImages] = useState<SendImageAttachment[]>([]);
 	const [pendingThreadImages, setPendingThreadImages] = useState<
 		SendImageAttachment[]
@@ -1316,6 +1368,37 @@ export function CommonspaceConversation({
 	const threadFollowing = activeThreadSessions.some(
 		(session) => session.followed,
 	);
+	const activeThreadAgentIds = [
+		...new Set(
+			activeThreadSessions.length > 0
+				? activeThreadSessions.map((session) => session.agentId)
+				: (activeThread?.agentIds ?? []),
+		),
+	];
+	const activeThreadAgentNames = activeThreadAgentIds.map(
+		(agentId) =>
+			bootstrap?.agents.find((agent) => agent.id === agentId)?.displayName ??
+			agentId,
+	);
+	const activeThreadSessionState = activeThreadSessions.some(
+		(session) => session.status === "running",
+	)
+		? "Session active"
+		: activeThreadSessions.some(
+					(session) => session.status === "needs-attention",
+				)
+			? "Session needs attention"
+			: activeThreadSessions.length > 0
+				? "Session preserved"
+				: "Session pending";
+	const activeThreadSessionLabel =
+		activeThreadAgentNames.length === 0
+			? activeThreadSessionState
+			: `${activeThreadAgentNames.join(", ")} · ${activeThreadSessionState}`;
+	const activeThreadContextLabel =
+		activeThread === undefined
+			? "Context unavailable"
+			: threadContextStatusLabel(activeThread.context.memory.status);
 
 	const threadSlashSuggestions =
 		activeThread === undefined ||
@@ -1485,6 +1568,34 @@ export function CommonspaceConversation({
 							(pin.scope.kind === "channel" &&
 								pin.scope.id === activeThread.channelId)),
 				);
+	const threadContextDirty =
+		activeThread !== undefined &&
+		(threadContextSummary !== activeThread.context.memory.summary ||
+			contextLines(threadContextDecisions).join("\n") !==
+				activeThread.context.memory.decisions.join("\n") ||
+			contextLines(threadContextQuestions).join("\n") !==
+				activeThread.context.memory.openQuestions.join("\n"));
+	const rootComposerHasContent =
+		draft !== "" || pendingImages.length > 0 || pendingFiles.length > 0;
+	const threadComposerHasContent =
+		threadDraft !== "" ||
+		pendingThreadImages.length > 0 ||
+		pendingThreadFiles.length > 0;
+	const rootComposerEmphasized =
+		focusedComposer === "channel" ||
+		(focusedComposer === null && rootComposerHasContent);
+	const threadComposerEmphasized =
+		focusedComposer === "thread" ||
+		(focusedComposer === null && threadComposerHasContent);
+	const rootComposerReceded =
+		activeThread !== undefined &&
+		!rootComposerHasContent &&
+		(focusedComposer === "thread" ||
+			(focusedComposer === null && threadComposerHasContent));
+	const threadComposerReceded =
+		!threadComposerHasContent &&
+		(focusedComposer === "channel" ||
+			(focusedComposer === null && rootComposerHasContent));
 	const rootIsCommand =
 		pendingImages.length === 0 &&
 		pendingFiles.length === 0 &&
@@ -2134,18 +2245,20 @@ export function CommonspaceConversation({
 		try {
 			await store.updateThreadContext(activeThread.id, {
 				summary: threadContextSummary,
-				decisions: threadContextDecisions
-					.split("\n")
-					.map((value) => value.trim())
-					.filter(Boolean),
-				openQuestions: threadContextQuestions
-					.split("\n")
-					.map((value) => value.trim())
-					.filter(Boolean),
+				decisions: contextLines(threadContextDecisions),
+				openQuestions: contextLines(threadContextQuestions),
 			});
 		} finally {
 			setThreadContextSaving(false);
 		}
+	};
+	const resetThreadContextDraft = () => {
+		if (activeThread === undefined) return;
+		setThreadContextSummary(activeThread.context.memory.summary);
+		setThreadContextDecisions(activeThread.context.memory.decisions.join("\n"));
+		setThreadContextQuestions(
+			activeThread.context.memory.openQuestions.join("\n"),
+		);
 	};
 
 	const compactActiveThreadContext = async () => {
@@ -2713,7 +2826,30 @@ export function CommonspaceConversation({
 									? `Start a new Thread in ${heading.title}`
 									: `Message ${heading.title}`
 							}
-							className="mx-auto mb-[22px] w-[calc(100%-44px)] max-w-[920px] shrink-0"
+							data-composer-emphasis={
+								rootComposerEmphasized
+									? "active"
+									: rootComposerReceded
+										? "receded"
+										: "idle"
+							}
+							className={cn(
+								"mx-auto mb-[22px] w-[calc(100%-44px)] max-w-[920px] shrink-0 transition-[opacity,background-color,border-color,box-shadow]",
+								rootComposerEmphasized && "border-primary/35 bg-card shadow-sm",
+								rootComposerReceded &&
+									"border-transparent bg-muted/30 opacity-80",
+							)}
+							onFocusCapture={() => {
+								setFocusedComposer("channel");
+							}}
+							onBlurCapture={(event) => {
+								const next = event.relatedTarget;
+								if (
+									!(next instanceof Node) ||
+									!event.currentTarget.contains(next)
+								)
+									setFocusedComposer(null);
+							}}
 							onSubmit={(event) => {
 								void sendRoot(event);
 							}}
@@ -2934,53 +3070,124 @@ export function CommonspaceConversation({
 								} else closeThread();
 							}}
 						>
-							<header className="flex min-h-[62px] items-center gap-2 px-6 py-2">
-								<div className="min-w-0 flex-1">
-									<strong className="font-heading text-base font-semibold">
-										Thread
-									</strong>
-									<p className="mt-0.5 truncate text-xs text-muted-foreground">
-										<span>{activeThreadProject?.name ?? "No project"}</span>
-										<span> · </span>
-										<span>
+							<header className="grid min-h-[88px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b px-5 py-3">
+								<div className="min-w-0">
+									<div className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
+										<span>Thread in</span>
+										<button
+											type="button"
+											className="truncate rounded-sm border-0 bg-transparent p-0 font-medium text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+											aria-label={`Show source message in #${activeChannel?.name ?? activeThread.channelId}`}
+											title="Show the source message in the Channel"
+											onClick={() => {
+												if (activeRoot === undefined) return;
+												setFocusedRootMessageId(activeRoot.id);
+												requestAnimationFrame(() => {
+													document
+														.getElementById(
+															`commonspace-message-${activeRoot.id}`,
+														)
+														?.scrollIntoView({
+															block: "center",
+															behavior: "smooth",
+														});
+												});
+											}}
+										>
 											#{activeChannel?.name ?? activeThread.channelId}
+										</button>
+										<span aria-hidden="true">·</span>
+										<span className="truncate">
+											{activeThreadProject?.name ?? "No project"}
 										</span>
-										{activeThreadActivities.length > 0 && (
-											<span> · Agents working</span>
-										)}
-									</p>
+									</div>
+									<h2
+										className="mt-0.5 truncate font-heading text-[15px] font-semibold tracking-[-0.01em]"
+										title={threadSubject(activeRoot)}
+									>
+										{threadSubject(activeRoot)}
+									</h2>
 								</div>
-								<button
-									type="button"
-									className="min-h-8 min-w-[80px] rounded-md border-0 bg-transparent px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground disabled:opacity-50"
-									aria-label={
-										threadFollowing ? "Unfollow thread" : "Follow thread"
-									}
-									aria-pressed={threadFollowing}
-									disabled={activeThreadSessions.length === 0}
-									onClick={toggleThreadFollowing}
-								>
-									{threadFollowing ? "Following" : "Follow"}
-								</button>
 								<div className="flex items-center gap-1">
 									<button
 										type="button"
-										className="inline-flex min-h-8 items-center rounded-sm border-0 bg-transparent px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+										className="min-h-8 rounded-md border-0 bg-transparent px-2.5 text-xs font-normal text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+										aria-label={
+											threadFollowing ? "Unfollow thread" : "Follow thread"
+										}
+										aria-pressed={threadFollowing}
+										disabled={activeThreadSessions.length === 0}
+										onClick={toggleThreadFollowing}
+									>
+										{threadFollowing ? "Following" : "Follow"}
+									</button>
+									<button
+										type="button"
+										className="grid size-8 shrink-0 place-items-center rounded-sm border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+										aria-label="Close thread"
+										onClick={closeThread}
+									>
+										<XIcon className="size-4" aria-hidden="true" />
+									</button>
+								</div>
+								<div className="col-span-2 flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+									<span
+										className="inline-flex min-w-0 items-center gap-1.5"
+										title="Replies continue the saved native agent session for this Thread."
+									>
+										<span className="inline-flex items-center pl-1">
+											{activeThreadAgentIds
+												.slice(0, 3)
+												.map((agentId, index) => {
+													const agent = bootstrap?.agents.find(
+														(candidate) => candidate.id === agentId,
+													);
+													const name = agent?.displayName ?? agentId;
+													return (
+														<AgentAvatar
+															key={agentId}
+															agent={agent}
+															fallbackName={name}
+															size="stack"
+															className="-ml-1 first:ml-0"
+															ariaLabel={`${name} agent session`}
+															style={{
+																zIndex: activeThreadAgentIds.length - index,
+															}}
+														/>
+													);
+												})}
+										</span>
+										<span className="truncate">{activeThreadSessionLabel}</span>
+									</span>
+									<span className="text-border" aria-hidden="true">
+										·
+									</span>
+									<button
+										type="button"
+										className="inline-flex min-h-7 shrink-0 items-center gap-1.5 rounded-sm border border-transparent bg-transparent px-1.5 hover:border-border hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
 										aria-label="Open thread context"
 										aria-pressed={threadContextOpen}
+										title="Review inherited Channel context and the current Thread summary."
 										onClick={() => {
 											setThreadContextOpen((value) => !value);
 										}}
 									>
-										Context
-									</button>
-									<button
-										type="button"
-										className="grid size-8 shrink-0 place-items-center rounded-sm border-0 bg-transparent text-base leading-none text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-										aria-label="Close thread"
-										onClick={closeThread}
-									>
-										×
+										<span
+											className={cn(
+												"size-1.5 rounded-full bg-muted-foreground",
+												activeThread.context.memory.status === "current" &&
+													"bg-[var(--status-success)]",
+												activeThread.context.memory.status === "stale" &&
+													"bg-[var(--status-warning)]",
+												activeThread.context.memory.status === "failed" &&
+													"bg-destructive",
+												activeThread.context.memory.status === "compacting" &&
+													"bg-primary",
+											)}
+											aria-hidden="true"
+										/>
+										{activeThreadContextLabel}
 									</button>
 								</div>
 							</header>
@@ -3002,8 +3209,19 @@ export function CommonspaceConversation({
 									>
 										Back to replies
 									</Button>
+									<p className="mb-4 text-xs leading-5 text-muted-foreground">
+										Agents use this shared context to continue the Thread
+										without rereading the whole Channel. Editing it does not
+										change the conversation record.
+									</p>
 									<details open>
-										<summary>Inherited Channel snapshot</summary>
+										<summary>
+											Inherited from #
+											{activeChannel?.name ?? activeThread.channelId}
+										</summary>
+										<p className="mt-2 text-xs text-muted-foreground">
+											Captured when this Thread started.
+										</p>
 										<p>
 											{activeThread.context.channelSnapshot.summary ||
 												"No Channel summary existed when this Thread started."}
@@ -3028,7 +3246,7 @@ export function CommonspaceConversation({
 										<header>
 											<strong>Current Thread context</strong>
 											<span data-status={activeThread.context.memory.status}>
-												{activeThread.context.memory.status}
+												{activeThreadContextLabel}
 											</span>
 										</header>
 										<label>
@@ -3061,19 +3279,32 @@ export function CommonspaceConversation({
 												}}
 											/>
 										</label>
-										<div>
-											<button type="submit" disabled={threadContextSaving}>
-												{threadContextSaving ? "Saving…" : "Save context"}
+										<div className="flex flex-wrap gap-2">
+											<button
+												type="submit"
+												disabled={threadContextSaving || !threadContextDirty}
+											>
+												{threadContextSaving ? "Saving…" : "Save changes"}
 											</button>
 											<button
 												type="button"
-												aria-label="Compact Thread context"
+												disabled={threadContextSaving || !threadContextDirty}
+												onClick={resetThreadContextDraft}
+											>
+												Reset changes
+											</button>
+											<button
+												type="button"
+												aria-label="Update Thread context summary"
+												title="Ask the inference agent to refresh this summary from the Thread."
 												disabled={threadContextCompacting}
 												onClick={() => {
 													void compactActiveThreadContext();
 												}}
 											>
-												{threadContextCompacting ? "Compacting…" : "Compact"}
+												{threadContextCompacting
+													? "Updating…"
+													: "Update summary"}
 											</button>
 										</div>
 									</form>
@@ -3186,7 +3417,13 @@ export function CommonspaceConversation({
 											onRetryRouting={retryFailedRouting}
 										/>
 									)}
-									<div className="my-5 h-px bg-border text-[0px]">Replies</div>
+									<div className="my-4 flex items-center gap-2">
+										<span className="h-px flex-1 bg-border" />
+										<span className="text-[10px] font-semibold tracking-[0.06em] text-muted-foreground uppercase">
+											Replies
+										</span>
+										<span className="h-px flex-1 bg-border" />
+									</div>
 									{replies.map((reply) => (
 										<MessageRow
 											key={reply.id}
@@ -3263,7 +3500,31 @@ export function CommonspaceConversation({
 								/>
 								<MessageComposerFrame
 									aria-label="Reply in active Thread"
-									className="mx-auto mb-[22px] w-[calc(100%-44px)] max-w-[920px] shrink-0"
+									data-composer-emphasis={
+										threadComposerEmphasized
+											? "active"
+											: threadComposerReceded
+												? "receded"
+												: "idle"
+									}
+									className={cn(
+										"mx-auto mb-[22px] w-[calc(100%-44px)] max-w-[920px] shrink-0 transition-[opacity,background-color,border-color,box-shadow]",
+										threadComposerEmphasized &&
+											"border-primary/35 bg-card shadow-sm",
+										threadComposerReceded &&
+											"border-transparent bg-muted/30 opacity-80",
+									)}
+									onFocusCapture={() => {
+										setFocusedComposer("thread");
+									}}
+									onBlurCapture={(event) => {
+										const next = event.relatedTarget;
+										if (
+											!(next instanceof Node) ||
+											!event.currentTarget.contains(next)
+										)
+											setFocusedComposer(null);
+									}}
 									onSubmit={(event) => {
 										void sendThreadReply(event);
 									}}
