@@ -455,6 +455,13 @@ describe("routing correction", () => {
 			compactedThroughCorrectionId: corrected.correction.id,
 			updatedAt: expect.any(String),
 		});
+		const routingMemoryCompaction = runAgent.mock.calls.find(([input]) =>
+			input.message.includes("bounded routing feedback"),
+		)?.[0];
+		expect(routingMemoryCompaction).toMatchObject({
+			processScopeName: `Commonspace Channel Context: ${channel.id}`,
+			ephemeralSession: true,
+		});
 
 		await service.send({
 			conversation: { kind: "channel", id: channel.id },

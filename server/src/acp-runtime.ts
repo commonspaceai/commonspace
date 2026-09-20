@@ -66,6 +66,8 @@ export interface AcpRunInput {
 	images?: readonly AcpImageInput[];
 	files?: readonly AcpFileInput[];
 	sessionId?: string;
+	/** Keep client-side resume metadata after the turn. Defaults to true. */
+	retainSession?: boolean;
 	mcpServers?: readonly McpServer[];
 	modeId?: string;
 	/** Provider-native model selector exposed by ACP's session model extension. */
@@ -416,104 +418,108 @@ export class AcpAgentProcess {
 			throw new Error("ACP process is not connected");
 
 		const setup = await this.#ensureSession(connection, input);
-		input.signal?.throwIfAborted();
 		const sessionId = setup.sessionId;
 		try {
-			await this.#configureSession(connection, setup, input);
 			input.signal?.throwIfAborted();
-			if (this.#activeTurns.has(sessionId))
-				throw new Error("ACP native session already has an active turn");
-
-			let resolveSettled = (): void => {};
-			const settled = new Promise<void>((resolve) => {
-				resolveSettled = resolve;
-			});
-			const turn: ActiveTurn = {
-				chunks: [],
-				resources: [],
-				chars: 0,
-				maxResponseChars:
-					input.maxResponseChars === undefined
-						? this.#maxResponseChars
-						: Math.min(
-								this.#maxResponseChars,
-								positiveInteger(
-									input.maxResponseChars,
-									this.#maxResponseChars,
-									"ACP response limit",
-								),
-							),
-				exceededLimit: false,
-				settled,
-				resolveSettled,
-				traceStartedAt: timestamp(),
-				traceEntries: [],
-			};
-			if (input.onTraceUpdate !== undefined)
-				turn.onTraceUpdate = input.onTraceUpdate;
-			if (input.onPermissionRequest !== undefined)
-				turn.onPermissionRequest = input.onPermissionRequest;
-			this.#activeTurns.set(sessionId, turn);
 			try {
-				input.onSessionReady?.(sessionId);
+				await this.#configureSession(connection, setup, input);
 				input.signal?.throwIfAborted();
-				const prompt: ContentBlock[] = [
-					...(input.message === ""
-						? []
-						: [{ type: "text" as const, text: input.message }]),
-					...(input.participationContext === undefined
-						? []
-						: [{ type: "text" as const, text: input.participationContext }]),
-					...(input.images ?? []).map((image) => ({
-						type: "image" as const,
-						mimeType: image.mimeType,
-						data: image.data,
-					})),
-					...(input.files ?? []).map((file) => ({
-						type: "resource_link" as const,
-						name: file.name,
-						uri: file.uri,
-						mimeType: file.mimeType,
-						size: file.size,
-					})),
-				];
-				await this.#request("session/prompt", (signal) =>
-					connection.agent.request(
-						methods.agent.session.prompt,
-						{
-							sessionId,
-							prompt,
-						},
-						{ cancellationSignal: signal },
-					),
-				);
-				if (turn.exceededLimit)
-					throw new Error(
-						"ACP agent response exceeded the Commonspace output limit",
-					);
-				const trace =
-					turn.traceEntries.length === 0
-						? undefined
-						: {
-								startedAt: turn.traceStartedAt,
-								completedAt: timestamp(),
-								entries: structuredClone(turn.traceEntries),
-							};
-				const result: AcpRunResult = {
-					sessionId,
-					text: turn.chunks.join(""),
+				if (this.#activeTurns.has(sessionId))
+					throw new Error("ACP native session already has an active turn");
+
+				let resolveSettled = (): void => {};
+				const settled = new Promise<void>((resolve) => {
+					resolveSettled = resolve;
+				});
+				const turn: ActiveTurn = {
+					chunks: [],
+					resources: [],
+					chars: 0,
+					maxResponseChars:
+						input.maxResponseChars === undefined
+							? this.#maxResponseChars
+							: Math.min(
+									this.#maxResponseChars,
+									positiveInteger(
+										input.maxResponseChars,
+										this.#maxResponseChars,
+										"ACP response limit",
+									),
+								),
+					exceededLimit: false,
+					settled,
+					resolveSettled,
+					traceStartedAt: timestamp(),
+					traceEntries: [],
 				};
-				if (trace !== undefined) result.trace = trace;
-				if (turn.resources.length > 0)
-					result.resources = structuredClone(turn.resources);
-				return result;
-			} finally {
-				this.#activeTurns.delete(sessionId);
-				turn.resolveSettled();
+				if (input.onTraceUpdate !== undefined)
+					turn.onTraceUpdate = input.onTraceUpdate;
+				if (input.onPermissionRequest !== undefined)
+					turn.onPermissionRequest = input.onPermissionRequest;
+				this.#activeTurns.set(sessionId, turn);
+				try {
+					input.onSessionReady?.(sessionId);
+					input.signal?.throwIfAborted();
+					const prompt: ContentBlock[] = [
+						...(input.message === ""
+							? []
+							: [{ type: "text" as const, text: input.message }]),
+						...(input.participationContext === undefined
+							? []
+							: [{ type: "text" as const, text: input.participationContext }]),
+						...(input.images ?? []).map((image) => ({
+							type: "image" as const,
+							mimeType: image.mimeType,
+							data: image.data,
+						})),
+						...(input.files ?? []).map((file) => ({
+							type: "resource_link" as const,
+							name: file.name,
+							uri: file.uri,
+							mimeType: file.mimeType,
+							size: file.size,
+						})),
+					];
+					await this.#request("session/prompt", (signal) =>
+						connection.agent.request(
+							methods.agent.session.prompt,
+							{
+								sessionId,
+								prompt,
+							},
+							{ cancellationSignal: signal },
+						),
+					);
+					if (turn.exceededLimit)
+						throw new Error(
+							"ACP agent response exceeded the Commonspace output limit",
+						);
+					const trace =
+						turn.traceEntries.length === 0
+							? undefined
+							: {
+									startedAt: turn.traceStartedAt,
+									completedAt: timestamp(),
+									entries: structuredClone(turn.traceEntries),
+								};
+					const result: AcpRunResult = {
+						sessionId,
+						text: turn.chunks.join(""),
+					};
+					if (trace !== undefined) result.trace = trace;
+					if (turn.resources.length > 0)
+						result.resources = structuredClone(turn.resources);
+					return result;
+				} finally {
+					this.#activeTurns.delete(sessionId);
+					turn.resolveSettled();
+				}
+			} catch (error) {
+				if (error instanceof AcpSessionRunError) throw error;
+				throw new AcpSessionRunError(sessionId, error);
 			}
-		} catch (error) {
-			if (error instanceof AcpSessionRunError) throw error;
-			throw new AcpSessionRunError(sessionId, error);
+		} finally {
+			if (input.retainSession === false) this.#forgetSession(sessionId);
 		}
 	}
 
@@ -565,6 +571,16 @@ export class AcpAgentProcess {
 		this.#availableConfigOptions.clear();
 		this.#availableModeIds.clear();
 		this.#modelStates.clear();
+	}
+
+	#forgetSession(sessionId: string): void {
+		if (this.#activeTurns.has(sessionId)) return;
+		this.#loadedSessions.delete(sessionId);
+		this.#sessionBindings.delete(sessionId);
+		this.#appliedSettings.delete(sessionId);
+		this.#availableConfigOptions.delete(sessionId);
+		this.#availableModeIds.delete(sessionId);
+		this.#modelStates.delete(sessionId);
 	}
 
 	async #ensureStarted(): Promise<void> {

@@ -499,6 +499,91 @@ describe("ACP agent process", () => {
 		}
 	});
 
+	it("forgets ephemeral session bookkeeping after a completed run", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-acp-ephemeral-"));
+		roots.push(root);
+		const logPath = join(root, "frames.ndjson");
+		const processClient = new AcpAgentProcess({
+			command: process.execPath,
+			args: [fixturePath],
+			cwd: root,
+			env: { ...process.env, FAKE_ACP_LOG: logPath },
+		});
+
+		try {
+			const ephemeral = await processClient.run({
+				cwd: root,
+				message: "One isolated judgment.",
+				retainSession: false,
+			});
+			await processClient.run({
+				cwd: root,
+				message: "Explicitly load the same native ID.",
+				sessionId: ephemeral.sessionId,
+			});
+			const frames = (await readFile(logPath, "utf8"))
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line));
+			expect(
+				frames.filter((frame) => frame.method === "session/load"),
+			).toHaveLength(1);
+		} finally {
+			await processClient.close();
+		}
+	});
+
+	it("forgets an ephemeral session when abort wins during session creation", async () => {
+		const root = await mkdtemp(
+			join(tmpdir(), "commonspace-acp-ephemeral-abort-"),
+		);
+		roots.push(root);
+		const logPath = join(root, "frames.ndjson");
+		const processClient = new AcpAgentProcess({
+			command: process.execPath,
+			args: [fixturePath],
+			cwd: root,
+			env: {
+				...process.env,
+				FAKE_ACP_LOG: logPath,
+				FAKE_ACP_DELAY_METHOD: "session/new",
+				FAKE_ACP_SETUP_DELAY_MS: "100",
+			},
+		});
+		const controller = new AbortController();
+
+		try {
+			const running = processClient.run({
+				cwd: root,
+				message: "Abort this isolated judgment.",
+				retainSession: false,
+				signal: controller.signal,
+			});
+			await vi.waitFor(async () =>
+				expect(await readFile(logPath, "utf8")).toContain(
+					'"method":"session/new"',
+				),
+			);
+			controller.abort(new Error("Stopped during session creation."));
+			await expect(running).rejects.toThrow("Stopped during session creation.");
+
+			await processClient.run({
+				cwd: root,
+				message: "Explicitly load the aborted native ID.",
+				sessionId: "123e4567-e89b-42d3-a456-426614174000",
+			});
+			const frames = (await readFile(logPath, "utf8"))
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line));
+			expect(
+				frames.filter((frame) => frame.method === "session/load"),
+			).toHaveLength(1);
+		} finally {
+			await processClient.close();
+		}
+	});
+
 	it("terminates an agent that exceeds the ACP protocol frame limit", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-acp-frame-limit-"));
 		roots.push(root);

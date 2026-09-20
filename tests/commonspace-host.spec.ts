@@ -2647,6 +2647,9 @@ describe("Commonspace host authority", () => {
 			expect(
 				frames.filter((frame) => frame.method === "session/new"),
 			).toHaveLength(8);
+			expect(
+				frames.filter((frame) => frame.method === "initialize"),
+			).toHaveLength(4);
 			const routingPrompts = frames.filter((frame) => {
 				if (frame.method !== "session/prompt") return false;
 				return JSON.stringify(frame.params).includes(
@@ -2708,11 +2711,12 @@ describe("Commonspace host authority", () => {
 		}
 	});
 
-	it("closes isolated harness inference processes after compaction", async () => {
+	it("reuses scoped inference processes while keeping compaction sessions fresh", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-isolated-router-"));
 		roots.push(root);
 		const frameLog = join(root, "acp-frames.ndjson");
 		vi.stubEnv("FAKE_ACP_LOG", frameLog);
+		vi.stubEnv("FAKE_ACP_SHUTDOWN_DELAY_MS", "0");
 		vi.stubEnv("FAKE_ACP_SESSION_ID", "123e4567-e89b-42d3-a456-426614174000");
 		vi.stubEnv(
 			"FAKE_ACP_INFERENCE_RESPONSE",
@@ -2748,30 +2752,185 @@ describe("Commonspace host authority", () => {
 		});
 
 		try {
-			await service.send({
+			const sent = await service.send({
 				conversation: { kind: "channel", id: channel.id },
 				text: "Create context to compact.",
 			});
 			await service.whenIdle();
+			const thread = mustExist(sent.thread);
 
 			await expect(
 				service.compactChannelContext(channel.id),
 			).resolves.toMatchObject({
 				summary: "Compacted Channel context.",
 			});
-			const processCache: unknown = Object.entries(service).find(
-				([key]) => key === "acpProcesses",
-			)?.[1];
-			if (!(processCache instanceof Map))
-				throw new Error("ACP process cache is unavailable");
-			const processKeys = [...processCache.keys()].filter(
-				(key): key is string => typeof key === "string",
+			await service.compactChannelContext(channel.id);
+			await expect(
+				service.compactThreadContext(thread.id),
+			).resolves.toMatchObject({
+				memory: { summary: "Compacted Channel context." },
+			});
+			await service.compactThreadContext(thread.id);
+
+			const frames = (await readFile(frameLog, "utf8"))
+				.trim()
+				.split("\n")
+				.map((line) => acpFrameSchema.parse(JSON.parse(line)));
+			expect(frames.filter((frame) => frame.method === "session/load")).toEqual(
+				[],
 			);
 			expect(
-				processKeys.some((key) =>
-					key.includes("\u0000Commonspace Inference: "),
-				),
-			).toBe(false);
+				frames.filter((frame) => frame.method === "session/new"),
+			).toHaveLength(7);
+			// One process each owns delivery, Channel routing, Channel context, and
+			// Thread context. Repeated judgments create sessions, not processes.
+			expect(
+				frames.filter((frame) => frame.method === "initialize"),
+			).toHaveLength(4);
+
+			const preview = service.previewRetention({
+				kind: "channel",
+				id: channel.id,
+			});
+			await service.applyRetention({
+				conversation: { kind: "channel", id: channel.id },
+				expectedRevision: preview.revision,
+			});
+			const retainedFrames = (await readFile(frameLog, "utf8"))
+				.trim()
+				.split("\n")
+				.map((line) => acpFrameSchema.parse(JSON.parse(line)));
+			expect(
+				retainedFrames.filter((frame) => frame.event === "native-flushed"),
+			).toHaveLength(4);
+		} finally {
+			await service.close();
+		}
+	});
+
+	it("closes reusable inference processes when the inference Agent changes", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-inference-change-"));
+		roots.push(root);
+		const frameLog = join(root, "acp-frames.ndjson");
+		vi.stubEnv("FAKE_ACP_LOG", frameLog);
+		vi.stubEnv("FAKE_ACP_SHUTDOWN_DELAY_MS", "0");
+		vi.stubEnv(
+			"FAKE_ACP_INFERENCE_RESPONSE",
+			'{"mode":"parallel","assignments":[{"agentId":"hermes","projectIds":[]}],"confidence":0.9,"reason":"Hermes owns the request."}',
+		);
+		vi.stubEnv(
+			"FAKE_ACP_COMPACTION_RESPONSE",
+			'{"summary":"Compacted Channel context.","decisions":[],"openQuestions":[]}',
+		);
+		const service = new CommonspaceHostService(
+			{},
+			{
+				root,
+				hermesAcpCommand: process.execPath,
+				hermesAcpArgs: [fakeAcpAgentPath],
+				codexAcpCommand: process.execPath,
+				codexAcpArgs: [fakeAcpAgentPath],
+			},
+			{ discoverAgents: discoverTestHarnesses },
+		);
+		await service.initialize();
+		await addTestHarness(service, "hermes");
+		await addTestHarness(service, "codex");
+		const channel = mustExist(
+			(
+				await service.mutate({
+					action: "create-channel",
+					name: "engineering",
+					agentIds: ["hermes"],
+				})
+			).channels[0],
+		);
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "hermes",
+		});
+
+		try {
+			await service.send({
+				conversation: { kind: "channel", id: channel.id },
+				text: "Create reusable inference lanes.",
+			});
+			await service.whenIdle();
+			await service.updateRoutingConfiguration({
+				provider: CommonspaceRoutingProvider.Harness,
+				harnessAgentId: "codex",
+			});
+
+			const frames = (await readFile(frameLog, "utf8"))
+				.trim()
+				.split("\n")
+				.map((line) => acpFrameSchema.parse(JSON.parse(line)));
+			expect(
+				frames.filter((frame) => frame.event === "native-flushed"),
+			).toHaveLength(2);
+		} finally {
+			await service.close();
+		}
+	});
+
+	it("rotates a busy inference lane after its bounded fresh-session budget", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-bounded-router-"));
+		roots.push(root);
+		const frameLog = join(root, "acp-frames.ndjson");
+		vi.stubEnv("FAKE_ACP_LOG", frameLog);
+		vi.stubEnv("FAKE_ACP_SHUTDOWN_DELAY_MS", "0");
+		vi.stubEnv(
+			"FAKE_ACP_INFERENCE_RESPONSE",
+			'{"mode":"parallel","assignments":[{"agentId":"hermes","projectIds":[]}],"confidence":0.9,"reason":"Hermes owns the request."}',
+		);
+		vi.stubEnv(
+			"FAKE_ACP_COMPACTION_RESPONSE",
+			'{"summary":"Bounded context.","decisions":[],"openQuestions":[]}',
+		);
+		const service = new CommonspaceHostService(
+			{},
+			{
+				root,
+				hermesAcpCommand: process.execPath,
+				hermesAcpArgs: [fakeAcpAgentPath],
+			},
+			{ discoverAgents: discoverTestHarnesses },
+		);
+		await service.initialize();
+		await addTestHarness(service, "hermes");
+		const channel = mustExist(
+			(
+				await service.mutate({
+					action: "create-channel",
+					name: "bounded-lane",
+					agentIds: ["hermes"],
+				})
+			).channels[0],
+		);
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "hermes",
+		});
+
+		try {
+			await service.send({
+				conversation: { kind: "channel", id: channel.id },
+				text: "Give the Channel context to compact.",
+			});
+			await service.whenIdle();
+			for (let attempt = 0; attempt < 64; attempt += 1)
+				await service.compactChannelContext(channel.id);
+
+			const frames = (await readFile(frameLog, "utf8"))
+				.trim()
+				.split("\n")
+				.map((line) => acpFrameSchema.parse(JSON.parse(line)));
+			expect(
+				frames.filter((frame) => frame.event === "native-flushed"),
+			).toHaveLength(1);
+			expect(
+				frames.filter((frame) => frame.method === "initialize"),
+			).toHaveLength(4);
 		} finally {
 			await service.close();
 		}
@@ -2842,6 +3001,79 @@ describe("Commonspace host authority", () => {
 			).toHaveLength(1);
 			expect(service.snapshot().agentSessions.hermes).toBeUndefined();
 		} finally {
+			await service.close();
+		}
+	});
+
+	it("does not cache a routing process whose Channel is removed during launch", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-launch-router-"));
+		roots.push(root);
+		const frameLog = join(root, "acp-frames.ndjson");
+		const launchStartedPath = join(root, "launch-started");
+		const launchReleasePath = join(root, "launch-release");
+		const versionPath = join(root, "gemini-version.mjs");
+		await writeFile(
+			versionPath,
+			`#!${process.execPath}\nimport { access, writeFile } from "node:fs/promises";\nimport { setTimeout as delay } from "node:timers/promises";\nawait writeFile(${JSON.stringify(launchStartedPath)}, "started");\nwhile (true) {\n  try { await access(${JSON.stringify(launchReleasePath)}); break; } catch { await delay(10); }\n}\nconsole.log("0.43.0");\n`,
+			{ mode: 0o755 },
+		);
+		vi.stubEnv("FAKE_ACP_LOG", frameLog);
+		const service = new CommonspaceHostService(
+			{ warn: () => undefined },
+			{
+				root,
+				geminiPath: versionPath,
+				geminiAcpCommand: process.execPath,
+				geminiAcpArgs: [fakeAcpAgentPath],
+			},
+			{
+				discoverAgents: async () => [
+					{
+						id: "gemini",
+						displayName: "Gemini CLI",
+						adapter: "gemini",
+						model: null,
+						status: "stopped",
+					},
+				],
+			},
+		);
+		await service.initialize();
+		await service.discoverAgents("gemini");
+		await service.mutate({
+			action: "add-discovered-agent",
+			agentId: "gemini",
+			adapter: "gemini",
+		});
+		const channel = mustExist(
+			(
+				await service.mutate({
+					action: "create-channel",
+					name: "launch-race",
+					agentIds: ["gemini"],
+				})
+			).channels[0],
+		);
+		await service.updateRoutingConfiguration({
+			provider: CommonspaceRoutingProvider.Harness,
+			harnessAgentId: "gemini",
+		});
+
+		try {
+			await service.send({
+				conversation: { kind: "channel", id: channel.id },
+				text: "Route while the native launch is pending.",
+			});
+			await vi.waitFor(() =>
+				expect(stat(launchStartedPath)).resolves.toBeDefined(),
+			);
+			await service.mutate({ action: "remove-channel", channelId: channel.id });
+			await writeFile(launchReleasePath, "release");
+			await service.whenIdle();
+
+			await expect(readFile(frameLog, "utf8")).rejects.toThrow();
+		} finally {
+			await writeFile(launchReleasePath, "release").catch(() => undefined);
 			await service.close();
 		}
 	});

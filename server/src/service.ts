@@ -208,6 +208,7 @@ const MAX_MCP_SEARCH_SNIPPET_CHARS = 500;
 const MAX_RELAY_PEER_RESPONSE_CHARS = 4_000;
 const MAX_TRACE_ENTRIES = 128;
 const MAX_TRACE_CHARS = 256_000;
+const MAX_EPHEMERAL_SESSIONS_PER_PROCESS = 64;
 const SHARED_CONTEXT_PRESSURE_TOKENS = 24_000;
 const MANAGED_AGENT_ID_PATTERN = /^codex-[\p{L}\p{N}][\p{L}\p{N}-]{0,79}$/u;
 
@@ -244,6 +245,8 @@ const THREAD_SESSION_SCOPE_PATTERN =
 const DM_SESSION_SCOPE_PATTERN =
 	/^Commonspace DM: [0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ROUTING_SESSION_SCOPE_PREFIX = "Commonspace Routing: ";
+const CHANNEL_CONTEXT_PROCESS_SCOPE_PREFIX = "Commonspace Channel Context: ";
+const THREAD_CONTEXT_PROCESS_SCOPE_PREFIX = "Commonspace Thread Context: ";
 const IMAGE_ATTACHMENT_ID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
@@ -287,6 +290,12 @@ export interface AgentRunInput {
 	cwd: string;
 	additionalCwds: string[];
 	sessionName: string;
+	/** Reusable ACP process lane; native session history remains sessionName-scoped. */
+	processScopeName?: string;
+	/** Rejects a delayed process launch after its owning lane has expired. */
+	processScopeIsCurrent?: () => boolean;
+	/** Do not retain this fresh native session for later resume. */
+	ephemeralSession?: boolean;
 	/** The one newly delivered Commonspace message, without replayed context. */
 	message: string;
 	/** Roster and delivery metadata supplied separately from the original message. */
@@ -430,6 +439,48 @@ interface ActiveAgentRun {
 	agentId: string;
 	scopeKey: string;
 	abortController: AbortController;
+}
+
+interface ActiveAcpSession {
+	sessionId: string;
+	processScopeKey: string;
+}
+
+type InferenceScope =
+	| { kind: "channel-routing"; channelId: string }
+	| { kind: "channel-context"; channelId: string }
+	| { kind: "thread-context"; threadId: string };
+
+function inferenceProcessScopeName(scope: InferenceScope): string {
+	switch (scope.kind) {
+		case "channel-routing":
+			return `${ROUTING_SESSION_SCOPE_PREFIX}${scope.channelId}`;
+		case "channel-context":
+			return `${CHANNEL_CONTEXT_PROCESS_SCOPE_PREFIX}${scope.channelId}`;
+		case "thread-context":
+			return `${THREAD_CONTEXT_PROCESS_SCOPE_PREFIX}${scope.threadId}`;
+	}
+}
+
+function inferenceScopeExists(
+	state: CommonspaceState,
+	scope: InferenceScope,
+): boolean {
+	switch (scope.kind) {
+		case "channel-routing":
+		case "channel-context":
+			return state.channels.some((channel) => channel.id === scope.channelId);
+		case "thread-context":
+			return state.threads.some((thread) => thread.id === scope.threadId);
+	}
+}
+
+function isInferenceProcessScopeName(scopeName: string): boolean {
+	return (
+		scopeName.startsWith(ROUTING_SESSION_SCOPE_PREFIX) ||
+		scopeName.startsWith(CHANNEL_CONTEXT_PROCESS_SCOPE_PREFIX) ||
+		scopeName.startsWith(THREAD_CONTEXT_PROCESS_SCOPE_PREFIX)
+	);
 }
 
 interface AgentDeliveryOptions {
@@ -2378,8 +2429,12 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private readonly admissionIdleWaiters = new Set<() => void>();
 	private readonly acpProcesses = new Map<string, AcpAgentProcess>();
 	private readonly acpLaunchAccess = new WeakMap<AcpAgentProcess, boolean>();
+	private readonly acpEphemeralSessionCounts = new WeakMap<
+		AcpAgentProcess,
+		number
+	>();
 	private readonly acpProcessClosures = new Map<string, Promise<void>>();
-	private readonly activeAcpSessions = new Map<string, string>();
+	private readonly activeAcpSessions = new Map<string, ActiveAcpSession>();
 	private readonly mcpCredentials = new Map<
 		string,
 		{ fingerprint: string; scope: CommonspaceMcpScope; token: string }
@@ -3615,13 +3670,30 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			const removedSessionNames = new Set(
 				removedThreads.map((thread) => `Commonspace Thread: ${thread.id}`),
 			);
+			const removedProcessScopeNames = new Set([
+				...removedSessionNames,
+				...removedThreads.map(
+					(thread) => `${THREAD_CONTEXT_PROCESS_SCOPE_PREFIX}${thread.id}`,
+				),
+			]);
+			if (request.conversation.kind === "channel") {
+				removedProcessScopeNames.add(
+					`${ROUTING_SESSION_SCOPE_PREFIX}${request.conversation.id}`,
+				);
+				removedProcessScopeNames.add(
+					`${CHANNEL_CONTEXT_PROCESS_SCOPE_PREFIX}${request.conversation.id}`,
+				);
+			}
 			if (request.conversation.kind === "dm") {
 				removedSessionNames.add("Bot Chat");
+				removedProcessScopeNames.add("Bot Chat");
 				for (const name of Object.keys(
 					this.state.agentSessions[request.conversation.id] ?? {},
 				)) {
-					if (name.startsWith("Commonspace DM: "))
+					if (name.startsWith("Commonspace DM: ")) {
 						removedSessionNames.add(name);
+						removedProcessScopeNames.add(name);
+					}
 				}
 			}
 			const agentSessions: CommonspaceState["agentSessions"] = {};
@@ -3707,6 +3779,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			}
 			await this.removeImageAttachments(imageIds);
 			await this.removeFileAttachments(fileIds);
+			await this.closeAcpProcessesMatching((_agentId, scopeName) =>
+				removedProcessScopeNames.has(scopeName),
+			);
 			this.revokeInvalidMcpCredentials();
 			this.broadcastRevision();
 			return preview;
@@ -3763,8 +3838,18 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			await this.acquireRoutingConfigurationLock();
 		return this.withAdmission(async () => {
 			const next = this.prepareRoutingConfiguration(request);
+			const previousAgentId =
+				this.routingConfiguration.provider ===
+				CommonspaceRoutingProvider.Harness
+					? this.routingConfiguration.harnessAgentId
+					: undefined;
 			await this.persistRoutingConfiguration(next);
 			this.routingConfiguration = next;
+			if (
+				previousAgentId !== undefined &&
+				previousAgentId !== next.harnessAgentId
+			)
+				await this.closeInferenceProcesses(previousAgentId);
 			this.notifyRoutingListeners();
 			return this.publicRoutingConfiguration();
 		}).finally(releaseRoutingConfiguration);
@@ -3988,7 +4073,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 							"You compact bounded shared workspace context. Return only the requested JSON object.",
 							buildThreadContextCompactionPrompt(this.state, threadId),
 							2_000,
-							{ kind: "isolated" },
+							{ kind: "thread-context", threadId },
 						),
 					);
 					const inferred = inferredThreadMemory(projection, compacted, now());
@@ -4707,35 +4792,36 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					: [...this.activeAgentRuns.values()].filter(
 							(run) => run.scopeKey === resetScope,
 						);
-			const removedChannelSessionNames =
+			const removedChannelProcessScopeNames =
 				mutation.action === "remove-channel"
 					? new Set([
 							...this.state.threads
 								.filter((thread) => thread.channelId === mutation.channelId)
-								.map((thread) => `Commonspace Thread: ${thread.id}`),
+								.flatMap((thread) => [
+									`Commonspace Thread: ${thread.id}`,
+									`${THREAD_CONTEXT_PROCESS_SCOPE_PREFIX}${thread.id}`,
+								]),
 							`${ROUTING_SESSION_SCOPE_PREFIX}${mutation.channelId}`,
+							`${CHANNEL_CONTEXT_PROCESS_SCOPE_PREFIX}${mutation.channelId}`,
 						])
 					: undefined;
-			const removedChannelRoutingSessionPrefix =
-				mutation.action === "remove-channel"
-					? `${ROUTING_SESSION_SCOPE_PREFIX}${mutation.channelId}: `
-					: undefined;
-			const belongsToRemovedChannel = (sessionName: string): boolean =>
-				removedChannelSessionNames?.has(sessionName) === true ||
-				(removedChannelRoutingSessionPrefix !== undefined &&
-					sessionName.startsWith(removedChannelRoutingSessionPrefix));
+			const belongsToRemovedChannel = (processScopeKey: string): boolean => {
+				const separator = processScopeKey.indexOf("\u0000");
+				return (
+					separator >= 1 &&
+					removedChannelProcessScopeNames?.has(
+						processScopeKey.slice(separator + 1),
+					) === true
+				);
+			};
 			const activeRemovedChannelSessions =
-				removedChannelSessionNames === undefined
+				removedChannelProcessScopeNames === undefined
 					? []
 					: [...this.activeAcpSessions.entries()].flatMap(
-							([key, sessionId]) => {
-								const separator = key.indexOf("\u0000");
-								if (
-									separator < 1 ||
-									!belongsToRemovedChannel(key.slice(separator + 1))
-								)
+							([sessionScopeKey, session]) => {
+								if (!belongsToRemovedChannel(session.processScopeKey))
 									return [];
-								return [{ key, agentId: key.slice(0, separator), sessionId }];
+								return [{ sessionScopeKey, session }];
 							},
 						);
 			if (mutation.action === "add-discovered-agent") {
@@ -4840,15 +4926,11 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 									reason,
 								) || changed;
 					}
-					const processes = [...this.acpProcesses.entries()].filter(([key]) =>
-						key.startsWith(`${updated.id}\u0000`),
-					);
-					for (const [key] of processes) {
-						this.acpProcesses.delete(key);
-						this.activeAcpSessions.delete(key);
-					}
-					await Promise.all(
-						processes.map(([key, client]) => this.closeAcpProcess(key, client)),
+					const currentFullAccess = this.agentFullAccess(updated);
+					await this.closeAcpProcessesMatching(
+						(candidateAgentId, _scopeName, processClient) =>
+							candidateAgentId === updated.id &&
+							this.acpLaunchAccess.get(processClient) !== currentFullAccess,
 					);
 					if (changed) await this.persist();
 				}
@@ -4870,32 +4952,34 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			} else if (mutation.action === "reset-dm" && resetScope !== undefined) {
 				const processClient = this.acpProcesses.get(resetScope);
 				const activeResetSession = this.activeAcpSessions.get(resetScope);
+				const activeResetProcess =
+					activeResetSession === undefined
+						? undefined
+						: this.acpProcesses.get(activeResetSession.processScopeKey);
 				this.acpProcesses.delete(resetScope);
 				if (activeResetSession !== undefined)
-					await processClient?.cancelSession(activeResetSession);
+					await activeResetProcess?.cancelSession(activeResetSession.sessionId);
 				for (const run of resetRuns)
 					run.abortController.abort(new Error("Interrupted by /new."));
 				if (processClient !== undefined)
 					await this.closeAcpProcess(resetScope, processClient);
 			} else if (mutation.action === "remove-channel") {
 				const processEntries = [...this.acpProcesses.entries()].filter(
-					([key]) => {
-						const separator = key.indexOf("\u0000");
-						return (
-							separator >= 1 &&
-							belongsToRemovedChannel(key.slice(separator + 1))
-						);
-					},
+					([key]) => belongsToRemovedChannel(key),
 				);
 				for (const [key] of processEntries) this.acpProcesses.delete(key);
 				await Promise.all(
-					activeRemovedChannelSessions.map(async ({ key, sessionId }) => {
-						if (this.activeAcpSessions.get(key) === sessionId)
-							this.activeAcpSessions.delete(key);
-						await processEntries
-							.find(([processKey]) => processKey === key)?.[1]
-							.cancelSession(sessionId);
-					}),
+					activeRemovedChannelSessions.map(
+						async ({ sessionScopeKey, session }) => {
+							if (this.activeAcpSessions.get(sessionScopeKey) === session)
+								this.activeAcpSessions.delete(sessionScopeKey);
+							await processEntries
+								.find(
+									([processKey]) => processKey === session.processScopeKey,
+								)?.[1]
+								.cancelSession(session.sessionId);
+						},
+					),
 				);
 				await Promise.all(
 					processEntries.map(([key, processClient]) =>
@@ -5572,9 +5656,11 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			await Promise.all(
 				runs.map(async (run) => {
 					run.abortController.abort(new Error("Stopped by user."));
-					const sessionId = this.activeAcpSessions.get(run.scopeKey);
-					if (sessionId !== undefined)
-						await this.acpProcesses.get(run.scopeKey)?.cancelSession(sessionId);
+					const session = this.activeAcpSessions.get(run.scopeKey);
+					if (session !== undefined)
+						await this.acpProcesses
+							.get(session.processScopeKey)
+							?.cancelSession(session.sessionId);
 				}),
 			);
 			const changed =
@@ -6160,9 +6246,11 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		await Promise.all(
 			runs.map(async (run) => {
 				run.abortController.abort(new Error(reason));
-				const sessionId = this.activeAcpSessions.get(run.scopeKey);
-				if (sessionId !== undefined)
-					await this.acpProcesses.get(run.scopeKey)?.cancelSession(sessionId);
+				const session = this.activeAcpSessions.get(run.scopeKey);
+				if (session !== undefined)
+					await this.acpProcesses
+						.get(session.processScopeKey)
+						?.cancelSession(session.sessionId);
 			}),
 		);
 		const sourceMessageIds = new Set(
@@ -7304,7 +7392,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				"You compact bounded shared workspace context. Return only the requested JSON object.",
 				buildChannelContextCompactionPrompt(this.state, channelId, projection),
 				2_000,
-				{ kind: "isolated" },
+				{ kind: "channel-context", channelId },
 			),
 		);
 		if (hasInvalidatedContextSources(sourceState, this.state, channelId))
@@ -7327,7 +7415,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 						"You compact bounded routing feedback. Return only the requested JSON object.",
 						source.prompt,
 						1_000,
-						{ kind: "isolated" },
+						{ kind: "channel-context", channelId },
 					),
 				);
 				if (!this.state.channels.some((channel) => channel.id === channelId))
@@ -7541,7 +7629,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 							"You compact bounded shared workspace context. Return only the requested JSON object.",
 							buildThreadContextCompactionPrompt(this.state, threadId),
 							2_000,
-							{ kind: "isolated" },
+							{ kind: "thread-context", threadId },
 						),
 					);
 					const inferred = inferredThreadMemory(projection, compacted, now());
@@ -7839,9 +7927,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		system: string,
 		prompt: string,
 		maxTokens: number,
-		scope:
-			| { kind: "channel-routing"; channelId: string }
-			| { kind: "isolated" },
+		scope: InferenceScope,
 	): Promise<string> {
 		if (
 			this.routingConfiguration.provider === CommonspaceRoutingProvider.Harness
@@ -7856,9 +7942,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			const agentAuthority = this.agentAuthority(agent);
 			if (agentAuthority === undefined)
 				throw new Error("routing harness is unavailable");
+			const processScopeName = inferenceProcessScopeName(scope);
 			const sessionName =
 				scope.kind === "channel-routing"
-					? `${ROUTING_SESSION_SCOPE_PREFIX}${scope.channelId}: ${crypto.randomUUID()}`
+					? `${processScopeName}: ${crypto.randomUUID()}`
 					: `Commonspace Inference: ${crypto.randomUUID()}`;
 			const signal = AbortSignal.any([
 				AbortSignal.timeout(30_000),
@@ -7868,10 +7955,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				!signal.aborted &&
 				this.routingConfiguration === routingAuthority &&
 				this.agentAuthorityIsCurrent(agent, agentAuthority) &&
-				(scope.kind === "isolated" ||
-					this.state.channels.some(
-						(channel) => channel.id === scope.channelId,
-					));
+				inferenceScopeExists(this.state, scope);
 			const scopeExpiredError = (): Error =>
 				signal.aborted && signal.reason instanceof Error
 					? signal.reason
@@ -7883,6 +7967,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					cwd: this.defaultCwd,
 					additionalCwds: [],
 					sessionName,
+					processScopeName,
+					processScopeIsCurrent: scopeIsActive,
+					ephemeralSession: true,
 					message: `${system}\n\nOutput token budget: at most ${String(maxTokens)} tokens.\n\n${prompt}`,
 					maxResponseChars: Math.min(MAX_AGENT_RESPONSE_CHARS, maxTokens * 8),
 					signal,
@@ -7894,27 +7981,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				if (result === null || !scopeIsActive()) throw scopeExpiredError();
 				return result.text;
 			};
-			const invoke =
-				scope.kind === "channel-routing"
-					? () =>
-							this.withAgentSessionLock(
-								agent.id,
-								`${ROUTING_SESSION_SCOPE_PREFIX}${scope.channelId}`,
-								run,
-							)
-					: run;
-			try {
-				return await invoke();
-			} finally {
-				const scopeKey = `${agent.id}\u0000${sessionName}`;
-				const processClient = this.acpProcesses.get(scopeKey);
-				if (processClient !== undefined) {
-					this.acpProcesses.delete(scopeKey);
-					await processClient.close().catch((closeError) => {
-						this.environment.logger?.warn(closeError);
-					});
-				}
-			}
+			return this.withAgentSessionLock(agent.id, processScopeName, run);
 		}
 		throw new Error(this.routingConfiguration.message);
 	}
@@ -8029,11 +8096,55 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		return closing;
 	}
 
+	private closeInferenceProcesses(agentId: string): Promise<void> {
+		return this.closeAcpProcessesMatching(
+			(candidateAgentId, scopeName) =>
+				candidateAgentId === agentId && isInferenceProcessScopeName(scopeName),
+		);
+	}
+
+	private async closeAcpProcessesMatching(
+		matches: (
+			agentId: string,
+			scopeName: string,
+			processClient: AcpAgentProcess,
+		) => boolean,
+	): Promise<void> {
+		const processEntries = [...this.acpProcesses.entries()].filter(
+			([key, client]) => {
+				const separator = key.indexOf("\u0000");
+				return (
+					separator >= 1 &&
+					matches(key.slice(0, separator), key.slice(separator + 1), client)
+				);
+			},
+		);
+		const processScopeKeys = new Set(processEntries.map(([key]) => key));
+		for (const key of processScopeKeys) this.acpProcesses.delete(key);
+		for (const [sessionScopeKey, session] of this.activeAcpSessions) {
+			if (processScopeKeys.has(session.processScopeKey))
+				this.activeAcpSessions.delete(sessionScopeKey);
+		}
+		await Promise.all(
+			processEntries.map(([key, processClient]) =>
+				this.closeAcpProcess(key, processClient).catch((error) => {
+					this.environment.logger?.warn(error);
+				}),
+			),
+		);
+	}
+
 	private async runAcpAgent(input: AgentRunInput): Promise<AgentRunResult> {
-		if (input.signal.aborted) throw input.signal.reason;
-		const activeScopeKey = `${input.agent.id}\u0000${input.sessionName}`;
-		await this.acpProcessClosures.get(activeScopeKey);
-		input.signal.throwIfAborted();
+		const assertProcessScopeCurrent = (): void => {
+			input.signal.throwIfAborted();
+			if (input.processScopeIsCurrent?.() === false)
+				throw new Error("Agent process scope expired before execution.");
+		};
+		assertProcessScopeCurrent();
+		const sessionScopeKey = `${input.agent.id}\u0000${input.sessionName}`;
+		const processScopeKey = `${input.agent.id}\u0000${input.processScopeName ?? input.sessionName}`;
+		await this.acpProcessClosures.get(processScopeKey);
+		assertProcessScopeCurrent();
 		const mcpServers = this.mcpServersFor(input);
 		const adapter = this.adapters[input.agent.adapter];
 		const currentAgent = this.state.agents.find(
@@ -8048,13 +8159,25 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			model: input.model,
 			reasoning: input.reasoning,
 		});
-		let processClient = this.acpProcesses.get(activeScopeKey);
+		let processClient = this.acpProcesses.get(processScopeKey);
 		if (
 			processClient !== undefined &&
 			this.acpLaunchAccess.get(processClient) !== fullAccess
 		) {
-			this.acpProcesses.delete(activeScopeKey);
-			await this.closeAcpProcess(activeScopeKey, processClient);
+			this.acpProcesses.delete(processScopeKey);
+			await this.closeAcpProcess(processScopeKey, processClient);
+			assertProcessScopeCurrent();
+			processClient = undefined;
+		}
+		if (
+			processClient !== undefined &&
+			input.ephemeralSession === true &&
+			(this.acpEphemeralSessionCounts.get(processClient) ?? 0) >=
+				MAX_EPHEMERAL_SESSIONS_PER_PROCESS
+		) {
+			this.acpProcesses.delete(processScopeKey);
+			await this.closeAcpProcess(processScopeKey, processClient);
+			assertProcessScopeCurrent();
 			processClient = undefined;
 		}
 		if (processClient === undefined) {
@@ -8063,7 +8186,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				fullAccess,
 				input.signal,
 			);
-			if (input.signal.aborted) throw input.signal.reason;
+			assertProcessScopeCurrent();
 			const latestAgent = this.state.agents.find(
 				(agent) =>
 					agent.id === input.agent.id && agent.adapter === input.agent.adapter,
@@ -8077,15 +8200,22 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				maxResponseChars: MAX_AGENT_RESPONSE_CHARS,
 				clientName: `commonspace-${input.agent.id}`,
 			});
-			this.acpProcesses.set(activeScopeKey, processClient);
+			this.acpProcesses.set(processScopeKey, processClient);
 			this.acpLaunchAccess.set(processClient, fullAccess);
+		}
+		assertProcessScopeCurrent();
+		if (input.ephemeralSession === true) {
+			this.acpEphemeralSessionCounts.set(
+				processClient,
+				(this.acpEphemeralSessionCounts.get(processClient) ?? 0) + 1,
+			);
 		}
 		let activeSessionId: string | undefined;
 		const abortSetup = () => {
 			if (activeSessionId !== undefined) return;
-			if (this.acpProcesses.get(activeScopeKey) === processClient)
-				this.acpProcesses.delete(activeScopeKey);
-			void this.closeAcpProcess(activeScopeKey, processClient).catch((error) =>
+			if (this.acpProcesses.get(processScopeKey) === processClient)
+				this.acpProcesses.delete(processScopeKey);
+			void this.closeAcpProcess(processScopeKey, processClient).catch((error) =>
 				this.environment.logger?.warn(error),
 			);
 		};
@@ -8105,10 +8235,14 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				onSessionReady: (sessionId) => {
 					input.signal.throwIfAborted();
 					activeSessionId = sessionId;
-					this.activeAcpSessions.set(activeScopeKey, sessionId);
+					this.activeAcpSessions.set(sessionScopeKey, {
+						sessionId,
+						processScopeKey,
+					});
 					input.signal.removeEventListener("abort", abortSetup);
 				},
 			};
+			if (input.ephemeralSession === true) acpInput.retainSession = false;
 			if (input.participationContext !== undefined)
 				acpInput.participationContext = input.participationContext;
 			if (input.maxResponseChars !== undefined)
@@ -8137,9 +8271,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			input.signal.removeEventListener("abort", abortSetup);
 			if (
 				activeSessionId !== undefined &&
-				this.activeAcpSessions.get(activeScopeKey) === activeSessionId
+				this.activeAcpSessions.get(sessionScopeKey)?.sessionId ===
+					activeSessionId
 			) {
-				this.activeAcpSessions.delete(activeScopeKey);
+				this.activeAcpSessions.delete(sessionScopeKey);
 			}
 		}
 	}
@@ -8216,10 +8351,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				input.sessionId,
 			);
 			if (!shouldContinue()) return null;
-			const scopeKey = `${input.agent.id}\u0000${input.sessionName}`;
-			const processClient = this.acpProcesses.get(scopeKey);
+			const processScopeKey = `${input.agent.id}\u0000${input.processScopeName ?? input.sessionName}`;
+			const processClient = this.acpProcesses.get(processScopeKey);
 			if (processClient !== undefined) {
-				this.acpProcesses.delete(scopeKey);
+				this.acpProcesses.delete(processScopeKey);
 				await processClient.close().catch((closeError) => {
 					this.environment.logger?.warn(closeError);
 				});
