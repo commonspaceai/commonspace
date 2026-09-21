@@ -37,7 +37,8 @@ describe("CI policy", () => {
 		);
 		const protection = await readJson(".github/main-branch-protection.json");
 
-		expect(protection.enforce_admins).toBe(true);
+		expect(protection.enforce_admins).toBe(false);
+		expect(protection.allow_force_pushes).toBe(false);
 		expect(protection.required_status_checks).toMatchObject({
 			strict: true,
 			checks: [{ context: workflow.jobs.check.name, app_id: 15368 }],

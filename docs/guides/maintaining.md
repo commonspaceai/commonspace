@@ -30,7 +30,7 @@ Keep these repository controls enabled:
 
 ## Configure GitHub
 
-The default branch requires the aggregate **Required CI gate** from GitHub Actions, an up-to-date branch, resolved review conversations, and one code-owner approval for contributors without the owner review allowance. New commits dismiss stale approvals. Force pushes and branch deletion are disabled. Administrator enforcement is enabled, so administrators cannot land an unverified commit on `main`.
+The default branch requires the aggregate **Required CI gate** from GitHub Actions, an up-to-date branch, resolved review conversations, and one code-owner approval for contributors without the owner review allowance. New commits dismiss stale approvals. Force pushes and branch deletion are disabled for ordinary writers. Administrator enforcement remains disabled so the repository owner retains an emergency direct-push and force-push recovery path.
 
 [`main-branch-protection.json`](../../.github/main-branch-protection.json) is the versioned configuration. An administrator can apply it from the repository root with an authenticated GitHub CLI:
 
@@ -40,9 +40,9 @@ gh api --method PUT repos/commonspaceai/commonspace/branches/main/protection \
 gh api repos/commonspaceai/commonspace/branches/main/protection
 ```
 
-The required check is bound to the GitHub Actions app, ID `15368`; another status publisher cannot satisfy it. Verify the returned settings after applying the file, including the required check, administrator enforcement, review and conversation requirements, and force-push/deletion restrictions. The file alone does not enable protection.
+The required check is bound to the GitHub Actions app, ID `15368`; another status publisher cannot satisfy it. Verify the returned settings after applying the file, including the required check, disabled administrator enforcement, review and conversation requirements, and force-push/deletion restrictions. The file alone does not enable protection.
 
-The PR-review allowance names `ralphbibera`, the repository owner and current code owner. It permits owner-authored maintenance without an impossible self-approval, but it does not bypass required CI. GitHub scopes this allowance to the acting user, not the PR author, so review outside contributions through the normal PR path. Revisit the allowance and [CODEOWNERS](../../.github/CODEOWNERS) when the maintainer group changes.
+The PR-review allowance names `ralphbibera`, the repository owner and current code owner. It permits owner-authored maintenance without an impossible self-approval. Separately, disabled administrator enforcement lets the owner bypass branch protection for deliberate recovery, including a force push. Do not use that escape hatch as the normal release path: validate the exact commit first and record why bypass was necessary. GitHub scopes the review allowance to the acting user, not the PR author, so review outside contributions through the normal PR path. Revisit the allowance and [CODEOWNERS](../../.github/CODEOWNERS) when the maintainer group changes.
 
 When renaming a required check, migrate the live protection without an unverified gap. Push the exact candidate commit to a temporary branch, dispatch CI for that branch, and wait for the new check to pass:
 
