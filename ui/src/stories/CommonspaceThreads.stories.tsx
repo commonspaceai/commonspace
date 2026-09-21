@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { CommonspaceThreads } from "../CommonspaceThreads";
 import {
 	createStoryStore,
@@ -28,7 +28,31 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const AllThreads: Story = {};
+export const AllThreads: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const unread = canvas.getByRole("button", { name: "Unread 1" });
+		const following = canvas.getByRole("button", { name: "Following" });
+
+		await userEvent.click(unread);
+		await expect(unread).toHaveAttribute("aria-pressed", "true");
+		await expect(
+			canvas.getByRole("button", { name: /Open thread .+, unread/ }),
+		).toBeVisible();
+
+		await userEvent.click(following);
+		await expect(following).toHaveAttribute("aria-pressed", "true");
+		await expect(
+			canvas.getByRole("button", { name: /Open thread .+, unread/ }),
+		).toBeVisible();
+
+		await userEvent.click(canvas.getByRole("button", { name: "All" }));
+		await expect(canvas.getByRole("button", { name: "All" })).toHaveAttribute(
+			"aria-pressed",
+			"true",
+		);
+	},
+};
 export const Empty: Story = {
 	args: {
 		bootstrap: emptyBootstrap,

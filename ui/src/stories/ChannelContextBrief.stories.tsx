@@ -97,6 +97,12 @@ export const RefreshFailure: Story = {
 		await expect(
 			canvas.getByRole("button", { name: "Refresh brief" }),
 		).toBeEnabled();
+		await userEvent.click(canvas.getByRole("button", { name: "Edit context" }));
+		await expect(canvas.getByLabelText("Channel summary")).toBeVisible();
+		await userEvent.click(canvas.getByRole("button", { name: "Cancel edit" }));
+		await expect(canvas.getByRole("alert")).toHaveTextContent(
+			"Inference is unavailable",
+		);
 	},
 };
 

@@ -186,6 +186,25 @@ export const DenseResults: Story = {
 		await expect(within(messages).getAllByRole("option")).toHaveLength(8);
 		const files = body.getByRole("group", { name: /^Files/u });
 		await expect(within(files).getAllByRole("option")).toHaveLength(8);
+		await expect(
+			within(body.getByRole("listbox")).getAllByRole("group"),
+		).toStrictEqual([recent, channels, messages, files]);
+		await expect(
+			within(channels)
+				.getAllByRole("option")
+				.map((option) => option.getAttribute("aria-label")),
+		).toEqual([
+			"Open Channel: #verification 5",
+			"Open Channel: #verification 6",
+			"Open Channel: #verification 7",
+			"Open Channel: #verification 8",
+		]);
+		await expect(
+			within(messages).getAllByRole("option")[0],
+		).toHaveAccessibleName("Open Message: Review the visual baseline 1");
+		await expect(within(files).getAllByRole("option")[7]).toHaveAccessibleName(
+			"Open File: visual-baseline.png 8",
+		);
 	},
 };
 

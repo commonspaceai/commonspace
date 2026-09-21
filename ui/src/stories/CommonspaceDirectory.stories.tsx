@@ -32,7 +32,23 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Projects: Story = { args: { kind: "projects" } };
+export const Projects: Story = {
+	args: { kind: "projects" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByText("1 pinned")).toBeVisible();
+		const list = within(canvas.getByRole("list"));
+		await expect(
+			list.getAllByRole("button", { name: /^Open project /u }),
+		).toHaveLength(2);
+		await expect(list.getAllByLabelText("Pinned")).toHaveLength(1);
+		await expect(
+			within(
+				list.getByRole("button", { name: "Open project Commonspace" }),
+			).getByLabelText("Pinned"),
+		).toBeVisible();
+	},
+};
 export const Channels: Story = { args: { kind: "channels" } };
 export const Agents: Story = { args: { kind: "agents" } };
 

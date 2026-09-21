@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { WorkspaceStory } from "./WorkspaceStory";
 import { createWorkspaceMockApi } from "./workspace-mock-api";
 
@@ -77,7 +77,7 @@ export const WritingScopeShortcut: Story = {
 		});
 		await userEvent.click(helpTrigger);
 		await userEvent.click(page.getByRole("button", { name: "Close help" }));
-		await expect(helpTrigger).toHaveFocus();
+		await waitFor(() => expect(helpTrigger).toHaveFocus());
 
 		const channelInput = page.getByRole("textbox", { name: "Post in general" });
 		const threadInput = page.getByRole("textbox", { name: "Reply in thread" });

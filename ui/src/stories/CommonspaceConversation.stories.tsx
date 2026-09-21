@@ -268,6 +268,141 @@ export const ThreadIdentityAndScope: Story = {
 	},
 };
 
+const threadPinsBootstrap = structuredClone(storyBootstrap);
+const threadPinSource = threadPinsBootstrap.state.messages[
+	"channel:channel-design"
+]?.find((message) => message.id === "message-root");
+if (threadPinSource === undefined)
+	throw new Error("Story root message is missing");
+threadPinSource.files = [
+	{
+		id: "file-review-plan",
+		name: "review-plan.md",
+		mimeType: "text/markdown",
+		size: 128,
+	},
+];
+threadPinsBootstrap.state.pins.push(
+	{
+		id: "pin-channel-message",
+		scope: { kind: "channel", id: "channel-design" },
+		kind: "message",
+		messageId: threadPinSource.id,
+		createdAt: "2026-09-18T00:00:00.000Z",
+		removedAt: null,
+	},
+	{
+		id: "pin-thread-note",
+		scope: { kind: "thread", id: "thread-review" },
+		kind: "note",
+		note: "Keep the release checklist visible.",
+		createdAt: "2026-09-18T00:01:00.000Z",
+		removedAt: null,
+	},
+	{
+		id: "pin-thread-file",
+		scope: { kind: "thread", id: "thread-review" },
+		kind: "attachment",
+		messageId: threadPinSource.id,
+		attachmentId: "file-review-plan",
+		createdAt: "2026-09-18T00:02:00.000Z",
+		removedAt: null,
+	},
+);
+
+export const ThreadPinSummaries: Story = {
+	args: {
+		store: createStoryStore(threadPinsBootstrap, {
+			activeConversation: channel,
+			activeProjectId: primaryProject.id,
+			activeThreadId: "thread-review",
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const thread = within(
+			canvas.getByRole("complementary", { name: "Thread replies" }),
+		);
+		await userEvent.click(
+			thread.getByRole("button", { name: "Open thread context" }),
+		);
+		const pins = within(thread.getByRole("region", { name: "Thread pins" }));
+		await expect(pins.getByText("3")).toBeVisible();
+		await expect(pins.getByText("Channel")).toBeVisible();
+		await expect(pins.getByText("Note")).toBeVisible();
+		await expect(pins.getByText("File")).toBeVisible();
+		await expect(
+			pins.getByText(
+				"Review the visual baseline and document the next component states.",
+			),
+		).toBeVisible();
+		await expect(
+			pins.getByText("Keep the release checklist visible."),
+		).toBeVisible();
+		await expect(pins.getByText("review-plan.md")).toBeVisible();
+		await expect(
+			pins.getAllByRole("button", { name: /Remove pin/u }),
+		).toHaveLength(3);
+	},
+};
+
+export const ComposerKeyboardNavigation: Story = {
+	args: {
+		store: createStoryStore(storyBootstrap, {
+			activeConversation: channel,
+			activeProjectId: primaryProject.id,
+			activeThreadId: "thread-review",
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const rootComposer = canvas.getByRole("textbox", {
+			name: "Post in design-review",
+		});
+		await userEvent.type(rootComposer, "@");
+		const rootOptions = within(
+			await canvas.findByRole("listbox", { name: "Tag suggestions" }),
+		).getAllByRole("option");
+		const lastRootOption = rootOptions.at(-1);
+		if (rootOptions.length < 2 || lastRootOption === undefined)
+			throw new Error("Expected at least two root composer suggestions");
+		await userEvent.keyboard("{ArrowUp}");
+		await expect(rootComposer).toHaveAttribute(
+			"aria-activedescendant",
+			lastRootOption.id,
+		);
+		await userEvent.keyboard("{Tab}");
+		await expect(rootComposer).toHaveValue("@build-smith ");
+		await userEvent.clear(rootComposer);
+		await userEvent.type(rootComposer, "/");
+		await userEvent.keyboard("{Enter}");
+		await expect(rootComposer).toHaveValue("/help");
+		await userEvent.keyboard("{Shift>}{Enter}{/Shift}");
+		await expect(rootComposer).toHaveValue("/help\n");
+
+		const thread = within(
+			canvas.getByRole("complementary", { name: "Thread replies" }),
+		);
+		const threadComposer = thread.getByRole("textbox", {
+			name: "Reply in thread",
+		});
+		await userEvent.type(threadComposer, "@");
+		const threadOptions = within(
+			await thread.findByRole("listbox", { name: "Tag suggestions" }),
+		).getAllByRole("option");
+		const secondThreadOption = threadOptions.at(1);
+		if (secondThreadOption === undefined)
+			throw new Error("Expected at least two thread composer suggestions");
+		await userEvent.keyboard("{ArrowDown}");
+		await expect(threadComposer).toHaveAttribute(
+			"aria-activedescendant",
+			secondThreadOption.id,
+		);
+		await userEvent.keyboard("{Enter}");
+		await expect(threadComposer).toHaveValue("@build-smith ");
+	},
+};
+
 const historicalRoutingBootstrap = structuredClone(storyBootstrap);
 for (const messages of Object.values(
 	historicalRoutingBootstrap.state.messages,
@@ -699,23 +834,21 @@ export const NarrowActiveRunComposer: Story = {
 		await userEvent.click(
 			canvas.getByRole("button", { name: "Interrupt and send" }),
 		);
-		await expect(activeRunSend).toHaveBeenNthCalledWith(
-			1,
-			"Use the new direction instead.",
-			undefined,
-			[],
-			"stop-and-send",
-		);
+		await expect(activeRunSend).toHaveBeenNthCalledWith(1, {
+			text: "Use the new direction instead.",
+			attachments: [],
+			delivery: "stop-and-send",
+			files: [],
+		});
 
 		await userEvent.type(composer, "Wait for the current run.");
 		await userEvent.click(canvas.getByRole("button", { name: "Queue" }));
-		await expect(activeRunSend).toHaveBeenNthCalledWith(
-			2,
-			"Wait for the current run.",
-			undefined,
-			[],
-			"queue",
-		);
+		await expect(activeRunSend).toHaveBeenNthCalledWith(2, {
+			text: "Wait for the current run.",
+			attachments: [],
+			delivery: "queue",
+			files: [],
+		});
 
 		await expect(
 			canvas.queryByRole("button", { name: "Steer" }),
@@ -723,13 +856,12 @@ export const NarrowActiveRunComposer: Story = {
 		await userEvent.type(composer, "Queue from the keyboard.");
 		fireEvent.keyDown(composer, { key: "Enter", metaKey: true });
 		fireEvent.keyUp(composer, { key: "Enter", metaKey: true });
-		await expect(activeRunSend).toHaveBeenNthCalledWith(
-			3,
-			"Queue from the keyboard.",
-			undefined,
-			[],
-			"queue",
-		);
+		await expect(activeRunSend).toHaveBeenNthCalledWith(3, {
+			text: "Queue from the keyboard.",
+			attachments: [],
+			delivery: "queue",
+			files: [],
+		});
 	},
 };
 

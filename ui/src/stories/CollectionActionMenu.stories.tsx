@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { CollectionActionMenu } from "../design-system/CollectionActionMenu";
 
 const meta = {
@@ -51,6 +51,73 @@ export const OpenMenu: Story = {
 		</div>
 	),
 	args: { defaultOpen: true },
+	play: async () => {
+		const menu = within(document.body).getByRole("menu");
+		const labels = within(menu)
+			.getAllByRole("menuitem")
+			.map(
+				(item) =>
+					item.querySelector("strong")?.textContent ?? item.textContent?.trim(),
+			);
+		await expect(labels).toEqual([
+			"Open channel",
+			"Mark unread",
+			"Pin to sidebar",
+			"Copy channel name",
+			"Channel settings",
+			"Remove channel",
+		]);
+	},
+};
+
+export const AgentOpenMenu: Story = {
+	render: (args) => (
+		<div className="[&_[data-slot=dropdown-menu-trigger]]:opacity-100">
+			<CollectionActionMenu {...args} />
+		</div>
+	),
+	args: {
+		defaultOpen: true,
+		kind: "agent",
+		label: "Review Bot",
+		meta: "Claude Code · Opus",
+		mentionLabel: "Mention @review-bot",
+		onStartFreshChat: fn(),
+		onMention: fn(),
+		onViewSessions: fn(),
+		copyLabel: "Copy agent mention",
+	},
+	play: async ({ args }) => {
+		const page = within(document.body);
+		const menu = page.getByRole("menu");
+		const labels = within(menu)
+			.getAllByRole("menuitem")
+			.map(
+				(item) =>
+					item.querySelector("strong")?.textContent ?? item.textContent?.trim(),
+			);
+		await expect(labels).toEqual([
+			"Message agent",
+			"Start fresh chat",
+			"Mention @review-bot",
+			"View sessions",
+			"Pin to sidebar",
+			"Copy agent mention",
+			"Profile & capabilities",
+			"Remove from Commonspace",
+		]);
+
+		await userEvent.click(
+			within(menu).getByRole("menuitem", { name: /Start fresh chat/u }),
+		);
+		const dialog = within(
+			await page.findByRole("alertdialog", {
+				name: "Start a new chat with Review Bot?",
+			}),
+		);
+		await userEvent.click(dialog.getByRole("button", { name: "Start fresh" }));
+		await expect(args.onStartFreshChat).toHaveBeenCalledOnce();
+	},
 };
 
 export const LongMetadata: Story = {

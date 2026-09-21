@@ -180,6 +180,19 @@ export const InboxSessions: Story = {
 		const sessions = canvas.getByRole("button", { name: /Sessions/iu });
 		await userEvent.click(sessions);
 		await expect(sessions).toHaveAttribute("aria-pressed", "true");
+		const filters = canvas.getByRole("group", {
+			name: "Session status filter",
+		});
+		await userEvent.click(
+			within(filters).getByRole("button", { name: "Completed" }),
+		);
+		await expect(
+			canvas.getAllByRole("button", { name: /session for/iu }),
+		).toHaveLength(2);
+		await userEvent.click(
+			within(filters).getByRole("button", { name: "Running" }),
+		);
+		await expect(canvas.getByText("No matching sessions.")).toBeVisible();
 	},
 };
 
@@ -215,6 +228,12 @@ export const DenseInboxUnread: Story = {
 		const unread = within(filters).getByRole("button", { name: /Unread/iu });
 		await userEvent.click(unread);
 		await expect(unread).toHaveAttribute("aria-pressed", "true");
+		await expect(unread).toHaveAccessibleName("Unread 9");
+		await expect(
+			within(canvas.getByRole("list")).getAllByRole("button", {
+				name: /^Open /u,
+			}),
+		).toHaveLength(9);
 	},
 };
 
@@ -227,6 +246,13 @@ export const InboxSaved: Story = {
 		const saved = within(filters).getByRole("button", { name: /Saved/iu });
 		await userEvent.click(saved);
 		await expect(saved).toHaveAttribute("aria-pressed", "true");
+		const savedItems = within(canvas.getByRole("list")).getAllByRole("button", {
+			name: /^Open /u,
+		});
+		await expect(savedItems).toHaveLength(1);
+		await expect(savedItems[0]).toHaveTextContent(
+			"I found the current visual baseline.",
+		);
 	},
 };
 
@@ -573,6 +599,28 @@ export const ProjectConversations: Story = {
 		await expect(
 			canvas.getByRole("tab", { name: "Conversations" }),
 		).toHaveAttribute("aria-selected", "true");
+		const project = within(
+			canvas.getByRole("main", { name: "Project Commonspace" }),
+		);
+		const conversations = project.getAllByRole("button", {
+			name: /^Open (?:channel|direct message)/u,
+		});
+		await expect(
+			conversations.map((button) => button.getAttribute("aria-label")),
+		).toEqual([
+			"Open channel design-review",
+			"Open channel builds",
+			"Open direct message Review Bot",
+		]);
+		await expect(conversations[0]).toHaveTextContent(
+			"I found the current visual baseline.",
+		);
+		await expect(conversations[1]).toHaveTextContent(
+			"Run the focused Storybook checks.",
+		);
+		await expect(conversations[2]).toHaveTextContent(
+			"The shell and project panes are the remaining high-value surfaces.",
+		);
 	},
 };
 

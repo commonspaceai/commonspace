@@ -1,11 +1,15 @@
+import type { CommonspaceMessage } from "@commonspace/shared";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
 import { CommonspaceProjectView } from "../CommonspaceProjectView";
 import { COMMONSPACE_RESIZABLE_PANEL } from "../design-system/useResizablePanel";
 import {
+	createStoryBootstrap,
 	createStoryStore,
+	designChannel,
 	emptyBootstrap,
 	primaryProject,
+	secondaryProject,
 	storyBootstrap,
 	storyProjectFetcher,
 } from "./story-fixtures";
@@ -37,6 +41,48 @@ export const ProjectFiles: Story = {};
 
 export const FocusedFile: Story = {
 	args: { targetFile: { rootIndex: 0, path: "README.md" } },
+};
+
+const unrelatedProjectMessage = {
+	id: "message-unrelated-project",
+	conversation: { kind: "channel", id: designChannel.id },
+	authorType: "user",
+	authorId: "sample-user",
+	authorName: "You",
+	text: "This later message belongs only to Platform.",
+	createdAt: "2026-09-03T10:01:00.000Z",
+	projectIds: [secondaryProject.id],
+	projectId: secondaryProject.id,
+} satisfies CommonspaceMessage;
+
+const mixedProjectBootstrap = createStoryBootstrap({
+	state: {
+		...storyBootstrap.state,
+		messages: {
+			...storyBootstrap.state.messages,
+			[`channel:${designChannel.id}`]: [
+				...(storyBootstrap.state.messages[`channel:${designChannel.id}`] ?? []),
+				unrelatedProjectMessage,
+			],
+		},
+	},
+});
+
+export const MixedProjectConversations: Story = {
+	args: { store: createStoryStore(mixedProjectBootstrap) },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("tab", { name: "Conversations" }));
+		const designReview = canvas.getByRole("button", {
+			name: "Open channel design-review",
+		});
+		await expect(designReview).toHaveTextContent(
+			"I found the current visual baseline.",
+		);
+		await expect(designReview).not.toHaveTextContent(
+			unrelatedProjectMessage.text,
+		);
+	},
 };
 
 export const ProjectSettings: Story = {

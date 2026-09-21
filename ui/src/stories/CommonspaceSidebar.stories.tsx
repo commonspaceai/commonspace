@@ -114,6 +114,46 @@ const configuredModelBootstrap = createStoryBootstrap({
 	agents: [hermesAgent, { ...codexAgent, model: null }],
 });
 
+const channelPinsBootstrap = createStoryBootstrap({
+	state: {
+		...storyBootstrap.state,
+		pins: [
+			{
+				id: "pin-design-note",
+				scope: { kind: "channel", id: designChannel.id },
+				kind: "note",
+				note: "First design note",
+				createdAt: "2026-09-04T10:00:00.000Z",
+				removedAt: null,
+			},
+			{
+				id: "pin-build-note",
+				scope: { kind: "channel", id: buildChannel.id },
+				kind: "note",
+				note: "Build-only note",
+				createdAt: "2026-09-04T10:01:00.000Z",
+				removedAt: null,
+			},
+			{
+				id: "pin-design-message",
+				scope: { kind: "channel", id: designChannel.id },
+				kind: "message",
+				messageId: "message-root",
+				createdAt: "2026-09-04T10:02:00.000Z",
+				removedAt: null,
+			},
+			{
+				id: "pin-design-removed",
+				scope: { kind: "channel", id: designChannel.id },
+				kind: "note",
+				note: "Removed design note",
+				createdAt: "2026-09-04T10:03:00.000Z",
+				removedAt: "2026-09-04T10:04:00.000Z",
+			},
+		],
+	},
+});
+
 function channelNames(canvasElement: HTMLElement): string[] {
 	return within(canvasElement)
 		.getAllByRole("button", { name: /^Open channel /u })
@@ -189,6 +229,39 @@ export const AgentModelsAccessible: Story = {
 
 		await expect(configuredAgent).toHaveAccessibleDescription("gpt-5.6-sol");
 		await expect(defaultAgent).toHaveAccessibleDescription("Profile default");
+	},
+};
+
+export const InlineChannelPinsIndexed: Story = {
+	args: {
+		...meta.args,
+		store: createStoryStore(channelPinsBootstrap),
+	},
+	render: (args) => {
+		const inlineArgs = { ...args };
+		delete inlineArgs.onOpenContextSettings;
+		return <CommonspaceSidebar {...inlineArgs} />;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", {
+				name: "Manage agents in channel design-review",
+			}),
+		);
+		const pins = within(
+			canvas.getByRole("region", {
+				name: "Channel pins for design-review",
+			}),
+		);
+		await expect(
+			pins
+				.getAllByRole("button", { name: /^Remove Channel pin /u })
+				.map((button) => button.getAttribute("aria-label")),
+		).toEqual([
+			"Remove Channel pin First design note",
+			"Remove Channel pin message-root",
+		]);
 	},
 };
 
