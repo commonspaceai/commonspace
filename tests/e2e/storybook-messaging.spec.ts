@@ -66,8 +66,13 @@ test("compact settings preserve drafts across category and viewport changes", as
 	const category = page.getByRole("combobox", { name: "Settings category" });
 	await expect(category).toBeVisible();
 	await category.selectOption("intelligence");
-	const inferenceAgent = page.getByRole("radio", { name: /Build Smith/iu });
-	await inferenceAgent.click();
+	const inferenceSettings = page.getByRole("form", {
+		name: "Inference agent settings",
+	});
+	const inferenceAgent = inferenceSettings.getByRole("radio", {
+		name: /Build Smith/iu,
+	});
+	await inferenceSettings.getByText("Build Smith", { exact: true }).click();
 	await category.selectOption("appearance");
 	await category.selectOption("intelligence");
 	await expect(inferenceAgent).toBeChecked();
@@ -91,10 +96,15 @@ test("shows completed routing receipts and one routing popover", async ({
 		"Routing details: Routed to Review Bot · AI selected · Completed",
 	);
 	await expect(receipt).toBeVisible();
-	const reason = page.getByText("Design review matches Hermes.");
-	if (!(await reason.isVisible())) await receipt.click();
-	await expect(reason).toBeVisible();
-	const assignments = page.getByRole("list", { name: "Routing assignments" });
+	await expect(receipt).toBeFocused();
+	await receipt.click();
+	const details = page.getByRole("dialog", { name: "Routing details" });
+	await expect(
+		details.getByText("Design review matches Hermes."),
+	).toBeVisible();
+	const assignments = details.getByRole("list", {
+		name: "Routing assignments",
+	});
 	await expect(assignments).toContainText("Original message");
 });
 
