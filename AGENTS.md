@@ -2,6 +2,17 @@
 
 Commonspace is a local-first workspace for conversations with coding agents. Start with the [Product specification](docs/specs/product-spec.md) for behavior, [Architecture](docs/guides/architecture.md) for ownership, and [Development](docs/guides/development.md) for commands.
 
+## Simplicity
+
+Code is a liability. Use the `simple-code` skill when available. These rules apply to every implementation and review, including when the skill is unavailable:
+
+- Make the smallest complete change in the existing owner. Prefer deleting or simplifying code over adding a helper, layer, option, or dependency. A removal should normally reduce the total code to maintain, including tests and fixtures.
+- Reflect authoritative values directly. Harness configuration belongs to the harness; selected display values belong to the user; transient UI feedback should use the existing interaction state. Do not add a second policy or synchronized source of truth.
+- Write for the supported current contract. Add no speculative fallbacks, retries, legacy aliases, or compatibility layers. Required saved-data transitions must preserve conversations and native-session relationships; do not use simplicity to justify silent data loss.
+- Validate external data at its owning boundary and trust the validated internal contract. Keep required security, accessibility, and recovery behavior; avoid repeating defensive checks through every caller.
+- New abstractions must remove real complexity or own a necessary boundary. Good-practice guidance is not a requirement to extract trivial logic, invent generic interfaces, or split a direct operation across files.
+- Before handoff, review the complete diff and remove additions unrelated to the request. Explain any material new mechanism that remains and why the direct approach is insufficient. Do this within the normal review; do not add a separate ceremony.
+
 ## Engineering invariants
 
 - Conversations are the work record. Preserve context, delivery, and session relationships.
@@ -27,7 +38,9 @@ Settle the desktop design at 1440 × 960 first. Inspect actual rendered pixels a
 
 ## Verify
 
-Add a focused failing test for behavior changes. Use Storybook for isolated UI states and browser flows for assembled behavior.
+For behavior changes, extend an existing focused test to reproduce the failure; add a new test when coverage is missing. If existing coverage already proves the requirement, use it and explain why it is sufficient. Use Storybook for isolated UI states and browser flows for assembled behavior.
+
+Select checks using [Contributing](CONTRIBUTING.md#verify). Run required integration gates on the settled change; do not repeat broad checks or reviews without a new change, failure, or unresolved concern.
 
 ```bash
 pnpm check:fast

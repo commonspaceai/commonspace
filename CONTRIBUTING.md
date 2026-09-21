@@ -18,9 +18,9 @@ Clone your fork, add `commonspaceai/commonspace` as the upstream remote, and fol
 
 1. State the user problem, owning package, product rule, and verification plan.
 2. Add a focused failing test for behavior changes; explain when existing coverage is sufficient.
-3. Make the smallest change that solves the problem.
+3. Make the smallest change that solves the problem, following the [simplicity rules](AGENTS.md#simplicity).
 4. Update affected consumers, saved-data migrations, tests, and canonical documentation together.
-5. Review the complete diff, including generated files.
+5. Review the complete diff, including generated files. Remove unnecessary mechanisms and explain why any material added complexity is needed under the [simplicity rules](AGENTS.md#simplicity).
 
 Preserve local serving, request validation, private session data, exact native-session continuity, and the boundaries in [Architecture](docs/guides/architecture.md).
 
