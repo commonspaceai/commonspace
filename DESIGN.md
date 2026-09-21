@@ -68,7 +68,7 @@ Choose corner radii by component role:
 
 Larger radii need a component-specific reason. Use borders and surface contrast for ordinary separation. Reserve elevation for overlays that need to stand above their surroundings.
 
-Agent identities use the same softly squared mark in navigation, lists, messages, activity, and settings. Size may change with context; shape, configured emoji, accent, and fallback lettering must remain consistent. Use a soft accent tint behind identities, not a solid block of saturated color. Keep ordinary unread indicators neutral and separate from runtime status.
+Agent identities use the same softly squared mark in navigation, lists, messages, activity, and settings. Size may change with context; shape, configured emoji, background color, and lettering must remain consistent. Render the configured background color exactly as selected instead of tinting or remapping it. Keep default identity colors restrained. Keep ordinary unread indicators neutral and separate from runtime status.
 
 ## Conversations and message focus
 

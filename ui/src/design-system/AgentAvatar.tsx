@@ -57,8 +57,7 @@ export function agentAvatarStyle(
 	return accentColor === undefined
 		? undefined
 		: {
-				backgroundColor: `color-mix(in srgb, ${accentColor} 16%, var(--background))`,
-				color: `color-mix(in srgb, ${accentColor} 45%, var(--foreground))`,
+				backgroundColor: accentColor,
 			};
 }
 
