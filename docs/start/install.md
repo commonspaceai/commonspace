@@ -25,7 +25,7 @@ Open `http://127.0.0.1:3100` in your desktop browser. Keep the terminal open whi
 Pin an exact release when needed:
 
 ```bash
-npx --yes commonspace@0.0.5
+npx --yes commonspace@0.0.6
 ```
 
 These commands print package information without starting the app:
