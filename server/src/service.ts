@@ -377,6 +377,7 @@ export interface CommonspaceHostDependencies {
 	routeAgents(input: CommonspaceRouteInput): Promise<CommonspaceRouteResult>;
 	notify(notification: CommonspaceDesktopNotification): Promise<void>;
 	beforeAcceptSend?(prepared: PreparedSend): Promise<void>;
+	afterPersistSendAttachments?(prepared: PreparedSend): Promise<void>;
 	beforePersistRoutingConfiguration?(
 		configuration: CommonspaceRoutingConfiguration,
 	): Promise<void>;
@@ -467,6 +468,7 @@ interface PreparedSend {
 	agentExecutionRevisions: ReadonlyMap<string, number>;
 	routing?: CommonspaceRoutingDecision;
 	channel?: CommonspaceState["channels"][number];
+	channelAdmission?: PreparedChannelAdmission;
 	projects: CommonspaceState["projects"];
 	inferProjects: boolean;
 	/** Compatibility primary Project while singular consumers are migrated. */
@@ -481,6 +483,15 @@ interface PreparedSend {
 		branchedFromThreadId: string;
 		branchPointMessageId: string;
 		channelSnapshot: CommonspaceThread["context"]["channelSnapshot"];
+	};
+}
+
+interface PreparedChannelAdmission {
+	channelAgentIds: readonly string[];
+	thread?: {
+		id: string;
+		agentIds: readonly string[];
+		projectIds: readonly string[];
 	};
 }
 
@@ -499,6 +510,7 @@ interface PreparedSendInput {
 
 interface PreparedChannelContext {
 	channel: CommonspaceState["channels"][number];
+	admission: PreparedChannelAdmission;
 	projects: CommonspaceState["projects"];
 	thread?: CommonspaceThread;
 }
@@ -509,6 +521,7 @@ type PreparedSendConversation =
 			agents: readonly CommonspaceAgentProfile[];
 			agentIds: string[];
 			channel: CommonspaceState["channels"][number];
+			admission: PreparedChannelAdmission;
 			projects: CommonspaceState["projects"];
 			routing: CommonspaceRoutingDecision;
 			thread?: CommonspaceThread;
@@ -1002,13 +1015,23 @@ function failedRoutingDecision(
 	};
 }
 
-function sameProjectSet(
+function sameIdentifierSet(
 	left: readonly string[],
 	right: readonly string[],
 ): boolean {
 	return (
 		left.length === right.length &&
 		left.every((projectId) => right.includes(projectId))
+	);
+}
+
+function sameStringSequence(
+	left: readonly string[],
+	right: readonly string[],
+): boolean {
+	return (
+		left.length === right.length &&
+		left.every((value, index) => value === right[index])
 	);
 }
 
@@ -7135,9 +7158,11 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			(candidate) => candidate.id === request.conversation.id,
 		);
 		if (channel === undefined) throw new Error("unknown channel");
+		const channelAgentIds = [...channel.agentIds];
 		if (request.threadId === undefined) {
 			return {
 				channel,
+				admission: { channelAgentIds },
 				projects: this.knownSendProjects(
 					selection.requestedProjectIds,
 					"unknown project",
@@ -7151,6 +7176,14 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		if (thread === undefined || thread.channelId !== channel.id)
 			throw new Error("unknown channel thread");
 		const threadProjectIds = referencedProjectIds(thread);
+		const admission: PreparedChannelAdmission = {
+			channelAgentIds,
+			thread: {
+				id: thread.id,
+				agentIds: [...thread.agentIds],
+				projectIds: [...threadProjectIds],
+			},
+		};
 		const requestedProjectId = selection.requestedProjectIds[0];
 		const selectedExistingThreadProject =
 			selection.legacyThreadSelection &&
@@ -7165,14 +7198,14 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			effectiveProjectIds,
 			"thread references an unknown project",
 		);
-		if (!sameProjectSet(effectiveProjectIds, threadProjectIds)) {
+		if (!sameIdentifierSet(effectiveProjectIds, threadProjectIds)) {
 			thread = {
 				...thread,
 				projectIds: effectiveProjectIds,
 				projectId: effectiveProjectIds[0] ?? null,
 			};
 		}
-		return { channel, projects, thread };
+		return { channel, admission, projects, thread };
 	}
 
 	private async refreshUnknownChannelAgents(
@@ -7255,6 +7288,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			agents,
 			agentIds,
 			channel: context.channel,
+			admission: context.admission,
 			projects: context.projects,
 			routing: this.explicitSendRouting(
 				agentIds,
@@ -7317,6 +7351,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				agents,
 				agentIds: explicitlyAddressed,
 				channel,
+				admission: context.admission,
 				projects: context.projects,
 				routing: this.explicitSendRouting(
 					explicitlyAddressed,
@@ -7334,6 +7369,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			agents,
 			agentIds: [],
 			channel,
+			admission: context.admission,
 			projects: context.projects,
 			routing: {
 				source: "ai",
@@ -7403,6 +7439,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		if (conversation.kind === "channel") {
 			prepared.routing = conversation.routing;
 			prepared.channel = conversation.channel;
+			prepared.channelAdmission = conversation.admission;
 			if (conversation.thread !== undefined)
 				prepared.thread = conversation.thread;
 		} else {
@@ -8005,14 +8042,22 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			await this.persist("acceptance");
 		} catch (error) {
 			this.state = previousState;
-			await this.removeImageAttachments(
-				prepared.attachments.map((attachment) => attachment.metadata.id),
-			);
-			await this.removeFileAttachments(
-				prepared.files.map((file) => file.metadata.id),
-			);
+			await this.removePersistedSendAttachments(prepared);
 			throw error;
 		}
+	}
+
+	private async removePersistedSendAttachments(
+		prepared: PreparedSend,
+	): Promise<void> {
+		await Promise.all([
+			this.removeImageAttachments(
+				prepared.attachments.map((attachment) => attachment.metadata.id),
+			),
+			this.removeFileAttachments(
+				prepared.files.map((file) => file.metadata.id),
+			),
+		]);
 	}
 
 	private acceptedSendResponse(
@@ -8033,11 +8078,20 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private async acceptSend(
 		prepared: PreparedSend,
 	): Promise<SendMessageResponse> {
-		if (!this.conversationIsCurrent(prepared, prepared.thread)) {
+		if (!this.preparedSendIsCurrent(prepared, prepared.thread)) {
 			throw new Error("conversation changed before message acceptance");
 		}
-		const previousState = this.state;
 		await this.persistSendAttachments(prepared);
+		try {
+			await this.overrides.afterPersistSendAttachments?.(prepared);
+			if (!this.preparedSendIsCurrent(prepared, prepared.thread)) {
+				throw new Error("conversation changed before message acceptance");
+			}
+		} catch (error) {
+			await this.removePersistedSendAttachments(prepared);
+			throw error;
+		}
+		const previousState = this.state;
 		const mutationStartedAt = this.performancePhaseStartedAt();
 		const createdAt = now();
 		const acceptedId = messageId();
@@ -9261,6 +9315,71 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		return (
 			thread === undefined ||
 			this.state.threads.some((candidate) => candidate.id === thread.id)
+		);
+	}
+
+	private preparedProjectsAreCurrent(prepared: PreparedSend): boolean {
+		return prepared.projects.every((project) => {
+			const current = this.state.projects.find(
+				(candidate) => candidate.id === project.id,
+			);
+			return (
+				current !== undefined &&
+				sameStringSequence(current.paths, project.paths)
+			);
+		});
+	}
+
+	private preparedAgentsAreCurrent(prepared: PreparedSend): boolean {
+		const agentIds =
+			prepared.request.conversation.kind === "dm"
+				? prepared.agentIds
+				: (prepared.thread?.agentIds ??
+					prepared.channel?.agentIds ??
+					prepared.agentIds);
+		return agentIds.every((agentId) =>
+			this.preparedAgentExecutionIsCurrent(prepared, agentId),
+		);
+	}
+
+	private preparedChannelAdmissionIsCurrent(prepared: PreparedSend): boolean {
+		if (prepared.request.conversation.kind !== "channel") return true;
+		const admission = prepared.channelAdmission;
+		if (admission === undefined) return false;
+		const channel = this.state.channels.find(
+			(candidate) => candidate.id === prepared.request.conversation.id,
+		);
+		if (
+			channel === undefined ||
+			!sameIdentifierSet(channel.agentIds, admission.channelAgentIds)
+		) {
+			return false;
+		}
+		if (admission.thread === undefined)
+			return prepared.request.threadId === undefined;
+		const thread = this.state.threads.find(
+			(candidate) => candidate.id === admission.thread?.id,
+		);
+		return (
+			thread !== undefined &&
+			thread.channelId === channel.id &&
+			sameIdentifierSet(thread.agentIds, admission.thread.agentIds) &&
+			sameIdentifierSet(
+				referencedProjectIds(thread),
+				admission.thread.projectIds,
+			)
+		);
+	}
+
+	private preparedSendIsCurrent(
+		prepared: PreparedSend,
+		thread: CommonspaceThread | undefined,
+	): boolean {
+		return (
+			this.conversationIsCurrent(prepared, thread) &&
+			this.preparedChannelAdmissionIsCurrent(prepared) &&
+			this.preparedProjectsAreCurrent(prepared) &&
+			this.preparedAgentsAreCurrent(prepared)
 		);
 	}
 
