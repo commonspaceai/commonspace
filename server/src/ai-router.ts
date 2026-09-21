@@ -71,7 +71,7 @@ export interface AiRouteInput {
 	maxAgents: number;
 }
 
-export const CONVERSATIONAL_ADDRESSING =
+const CONVERSATIONAL_ADDRESSING =
 	"A greeting or social message is a request for a reply. Identify its addressee from the current eligible agents' names and harness identities, including a distinctive shortened name (for example, 'hi north' addresses 'Northstar Tools'). A directly addressed recipient takes precedence over historical ownership or domain responsibilities. A harness name identifies an agent only when the roster or context distinguishes one recipient; if several agents share that harness, do not invent a default. A mere topic mention is not direct addressing. Use prior ownership for an unaddressed continuation. Do not guess when the evidence cannot distinguish a recipient.";
 
 export function buildRoutingPrompt(input: AiRouteInput): string {

@@ -609,43 +609,44 @@ function parsedCli(argv) {
 
 async function runCli() {
 	const { command, options } = parsedCli(process.argv.slice(2));
-	if (command === "install" || command === "update") {
-		await installOrUpdate({ ...options, mode: command });
-		return;
+	switch (command) {
+		case "install":
+		case "update":
+			await installOrUpdate({ ...options, mode: command });
+			break;
+		case "start": {
+			const layout = await startService(options);
+			writeLine(`Commonspace is healthy at ${layout.url}`);
+			break;
+		}
+		case "stop":
+			await stopService(options);
+			writeLine("Commonspace service stopped.");
+			break;
+		case "restart": {
+			await stopService(options);
+			const layout = await startService(options);
+			writeLine(`Commonspace restarted at ${layout.url}`);
+			break;
+		}
+		case "rollback":
+			await rollbackRelease(options);
+			break;
+		case "status": {
+			const status = await serviceStatus(options);
+			writeLine(
+				`Commonspace: ${status.healthy ? "healthy" : status.loaded ? "unhealthy" : status.installed ? "stopped" : "not installed"}`,
+			);
+			writeLine(`Release: ${status.release ?? "unknown"}`);
+			writeLine(`URL: ${status.url}`);
+			if (!status.healthy) process.exitCode = 1;
+			break;
+		}
+		default:
+			writeLine(
+				"Usage: commonspace <install|update|start|stop|restart|status|rollback> [--source <git-url>] [--app-root <path>]",
+			);
 	}
-	if (command === "start") {
-		const layout = await startService(options);
-		writeLine(`Commonspace is healthy at ${layout.url}`);
-		return;
-	}
-	if (command === "stop") {
-		await stopService(options);
-		writeLine("Commonspace service stopped.");
-		return;
-	}
-	if (command === "restart") {
-		await stopService(options);
-		const layout = await startService(options);
-		writeLine(`Commonspace restarted at ${layout.url}`);
-		return;
-	}
-	if (command === "rollback") {
-		await rollbackRelease(options);
-		return;
-	}
-	if (command === "status") {
-		const status = await serviceStatus(options);
-		writeLine(
-			`Commonspace: ${status.healthy ? "healthy" : status.loaded ? "unhealthy" : status.installed ? "stopped" : "not installed"}`,
-		);
-		writeLine(`Release: ${status.release ?? "unknown"}`);
-		writeLine(`URL: ${status.url}`);
-		if (!status.healthy) process.exitCode = 1;
-		return;
-	}
-	writeLine(
-		"Usage: commonspace <install|update|start|stop|restart|status|rollback> [--source <git-url>] [--app-root <path>]",
-	);
 }
 
 const invokedPath = process.argv[1];

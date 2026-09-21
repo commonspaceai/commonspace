@@ -1,5 +1,5 @@
 import type { CommonspaceChannel } from "@commonspace/shared";
-import { lazy, Suspense, useState } from "react";
+import { lazy, type ReactNode, Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { CommonspaceStore } from "./commonspace-store.ts";
 
@@ -12,22 +12,27 @@ interface BriefProps {
 	store: CommonspaceStore;
 }
 
+type ChannelMemory = CommonspaceChannel["memory"];
+
+function hasContextBrief(memory: ChannelMemory): boolean {
+	return memory.origin === "inference" || memory.origin === "user";
+}
+
+function contextBriefStatus(memory: ChannelMemory, busy: boolean): string {
+	if (busy) return "Updating from the conversation…";
+	if (memory.status === "failed")
+		return "The last update failed. Refresh to try again.";
+	if (memory.status === "stale") return "Recent changes are not yet included.";
+	if (hasContextBrief(memory)) return "Up to date with the conversation.";
+	return "Context will appear as the conversation develops.";
+}
+
 export function ChannelContextBrief({ channel, store }: BriefProps) {
 	const [editing, setEditing] = useState(false);
 	const [refreshing, setRefreshing] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const memory = channel.memory;
-	const hasBrief = memory.origin === "inference" || memory.origin === "user";
 	const busy = refreshing || memory.status === "compacting";
-	const status = busy
-		? "Updating from the conversation…"
-		: memory.status === "failed"
-			? "The last update failed. Refresh to try again."
-			: memory.status === "stale"
-				? "Recent changes are not yet included."
-				: hasBrief
-					? "Up to date with the conversation."
-					: "Context will appear as the conversation develops.";
 
 	async function refresh() {
 		if (busy) return;
@@ -44,13 +49,7 @@ export function ChannelContextBrief({ channel, store }: BriefProps) {
 
 	return (
 		<section className="mt-7 border-t pt-6" aria-label="Context brief">
-			<div className="flex items-start justify-between gap-3">
-				<div>
-					<h3 className="font-heading text-sm font-semibold">Context brief</h3>
-					<p className="mt-1 text-xs text-muted-foreground">
-						What agents need to carry the work forward.
-					</p>
-				</div>
+			<ContextBriefHeader>
 				{editing ? null : (
 					<Button
 						type="button"
@@ -62,7 +61,7 @@ export function ChannelContextBrief({ channel, store }: BriefProps) {
 						Edit context
 					</Button>
 				)}
-			</div>
+			</ContextBriefHeader>
 			{editing ? (
 				<ContextCorrectionEditor
 					channel={channel}
@@ -70,75 +69,111 @@ export function ChannelContextBrief({ channel, store }: BriefProps) {
 					onClose={() => setEditing(false)}
 				/>
 			) : (
-				<>
-					<div className="mt-4 space-y-5 rounded-lg border bg-background p-4">
-						<div>
-							<h4 className="text-xs font-semibold text-muted-foreground">
-								Current work
-							</h4>
-							{hasBrief && memory.summary !== "" ? (
-								<Suspense
-									fallback={
-										<p className="mt-2 whitespace-pre-wrap text-sm">
-											{memory.summary}
-										</p>
-									}
-								>
-									<MessageMarkdown text={memory.summary} />
-								</Suspense>
-							) : (
-								<p className="mt-2 text-sm text-muted-foreground">
-									No work context recorded yet.
-								</p>
-							)}
-						</div>
-						<BriefList
-							title="Decisions"
-							items={hasBrief ? memory.decisions : []}
-							empty="No decisions recorded."
-						/>
-						<BriefList
-							title="Open questions"
-							items={hasBrief ? memory.openQuestions : []}
-							empty="No unresolved questions recorded."
-						/>
-					</div>
-					<div className="mt-3 flex items-center justify-between gap-3">
-						<div className="text-xs text-muted-foreground">
-							<p role="status">{status}</p>
-							<p className="mt-1">
-								{memory.origin === "user"
-									? "Corrected by you"
-									: "Maintained automatically"}{" "}
-								· {memory.sourceMessageCount ?? 0} source messages
-							</p>
-						</div>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							disabled={busy || (memory.sourceMessageCount ?? 0) === 0}
-							onClick={() => {
-								void refresh();
-							}}
-						>
-							{busy ? "Updating…" : "Refresh brief"}
-						</Button>
-					</div>
-					{memory.origin === "user" ? (
-						<p className="mt-2 text-xs text-muted-foreground">
-							Your corrections are preserved. Refresh the brief to reconcile
-							them with newer conversation.
-						</p>
-					) : null}
-					{error === null ? null : (
-						<p role="alert" className="mt-2 text-xs text-destructive">
-							{error}
-						</p>
-					)}
-				</>
+				<ContextBriefViewer
+					memory={memory}
+					busy={busy}
+					error={error}
+					onRefresh={() => {
+						void refresh();
+					}}
+				/>
 			)}
 		</section>
+	);
+}
+
+function ContextBriefHeader({ children }: { children?: ReactNode }) {
+	return (
+		<div className="flex items-start justify-between gap-3">
+			<div>
+				<h3 className="font-heading text-sm font-semibold">Context brief</h3>
+				<p className="mt-1 text-xs text-muted-foreground">
+					What agents need to carry the work forward.
+				</p>
+			</div>
+			{children ?? null}
+		</div>
+	);
+}
+
+function ContextBriefViewer({
+	memory,
+	busy,
+	error,
+	onRefresh,
+}: {
+	memory: ChannelMemory;
+	busy: boolean;
+	error: string | null;
+	onRefresh: () => void;
+}) {
+	const hasBrief = hasContextBrief(memory);
+	return (
+		<>
+			<div className="mt-4 space-y-5 rounded-lg border bg-background p-4">
+				<div>
+					<h4 className="text-xs font-semibold text-muted-foreground">
+						Current work
+					</h4>
+					{hasBrief && memory.summary !== "" ? (
+						<Suspense
+							fallback={
+								<p className="mt-2 whitespace-pre-wrap text-sm">
+									{memory.summary}
+								</p>
+							}
+						>
+							<MessageMarkdown text={memory.summary} />
+						</Suspense>
+					) : (
+						<p className="mt-2 text-sm text-muted-foreground">
+							No work context recorded yet.
+						</p>
+					)}
+				</div>
+				<BriefList
+					title="Decisions"
+					items={hasBrief ? memory.decisions : []}
+					empty="No decisions recorded."
+				/>
+				<BriefList
+					title="Open questions"
+					items={hasBrief ? memory.openQuestions : []}
+					empty="No unresolved questions recorded."
+				/>
+			</div>
+			<div className="mt-3 flex items-center justify-between gap-3">
+				<div className="text-xs text-muted-foreground">
+					<p role="status">{contextBriefStatus(memory, busy)}</p>
+					<p className="mt-1">
+						{memory.origin === "user"
+							? "Corrected by you"
+							: "Maintained automatically"}{" "}
+						· {memory.sourceMessageCount ?? 0} source messages
+					</p>
+				</div>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					disabled={busy || (memory.sourceMessageCount ?? 0) === 0}
+					onClick={onRefresh}
+				>
+					{busy ? "Updating…" : "Refresh brief"}
+				</Button>
+			</div>
+			{memory.origin === "user" ? (
+				<p className="mt-2 text-xs text-muted-foreground">
+					Your corrections are preserved. Refresh the brief to reconcile them
+					with newer conversation.
+				</p>
+			) : null}
+			{error === null ? null : (
+				<p role="alert" className="mt-2 text-xs text-destructive">
+					{error}
+				</p>
+			)}
+		</>
 	);
 }
 
@@ -172,8 +207,7 @@ function ContextCorrectionEditor({
 	store,
 	onClose,
 }: BriefProps & { onClose: () => void }) {
-	const hasBrief =
-		channel.memory.origin === "inference" || channel.memory.origin === "user";
+	const hasBrief = hasContextBrief(channel.memory);
 	const [summary, setSummary] = useState(
 		hasBrief ? channel.memory.summary : "",
 	);

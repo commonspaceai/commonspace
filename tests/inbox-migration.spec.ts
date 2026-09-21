@@ -12,19 +12,27 @@ import { CommonspaceHostService } from "../server/src/service.ts";
 
 const roots: string[] = [];
 
+interface LoadStateOptions {
+	version: number;
+	inboxReadAt?: JsonValue;
+	inboxReadMessageIds?: JsonValue;
+	channels?: JsonValue[];
+	attentionPreferences?: JsonObject;
+}
+
 afterEach(async () => {
 	await Promise.all(
 		roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
 	);
 });
 
-async function loadState(
-	version: number,
-	inboxReadAt?: JsonValue,
-	inboxReadMessageIds?: JsonValue,
-	channels: JsonValue[] = [],
-	attentionPreferences: JsonObject = {},
-) {
+async function loadState({
+	version,
+	inboxReadAt,
+	inboxReadMessageIds,
+	channels = [],
+	attentionPreferences = {},
+}: LoadStateOptions) {
 	const root = await mkdtemp(join(tmpdir(), "commonspace-inbox-migration-"));
 	roots.push(root);
 	const persisted: JsonObject = {
@@ -81,7 +89,7 @@ async function loadState(
 
 describe("Commonspace Inbox state migration", () => {
 	it("migrates v12 without losing state and defaults missing read state", async () => {
-		const state = await loadState(12);
+		const state = await loadState({ version: 12 });
 
 		expect(state).toMatchObject({
 			version: COMMONSPACE_STATE_VERSION,
@@ -113,7 +121,7 @@ describe("Commonspace Inbox state migration", () => {
 		};
 
 		for (let version = 1; version < COMMONSPACE_STATE_VERSION; version += 1) {
-			const state = await loadState(version, undefined, undefined, [channel]);
+			const state = await loadState({ version, channels: [channel] });
 			expect(state.channels, `state version ${String(version)}`).toEqual([
 				{
 					id: "channel-1",
@@ -146,26 +154,25 @@ describe("Commonspace Inbox state migration", () => {
 	});
 
 	it("preserves only a valid persisted read cursor", async () => {
-		const valid = await loadState(
-			COMMONSPACE_STATE_VERSION,
-			"2026-08-27T10:00:00.000Z",
-		);
-		const malformed = await loadState(
-			COMMONSPACE_STATE_VERSION,
-			"/Users/private/native-session",
-		);
+		const valid = await loadState({
+			version: COMMONSPACE_STATE_VERSION,
+			inboxReadAt: "2026-08-27T10:00:00.000Z",
+		});
+		const malformed = await loadState({
+			version: COMMONSPACE_STATE_VERSION,
+			inboxReadAt: "/Users/private/native-session",
+		});
 
 		expect(valid.inboxReadAt).toBe("2026-08-27T10:00:00.000Z");
 		expect(malformed.inboxReadAt).toBeNull();
 	});
 
 	it("preserves only unique read IDs for persisted agent replies", async () => {
-		const state = await loadState(COMMONSPACE_STATE_VERSION, null, [
-			"reply-1",
-			"missing",
-			42,
-			"reply-1",
-		]);
+		const state = await loadState({
+			version: COMMONSPACE_STATE_VERSION,
+			inboxReadAt: null,
+			inboxReadMessageIds: ["reply-1", "missing", 42, "reply-1"],
+		});
 
 		expect(state.inboxReadMessageIds).toEqual(["reply-1"]);
 	});
@@ -196,10 +203,15 @@ describe("Commonspace Inbox state migration", () => {
 	});
 
 	it("sanitizes and preserves attention preferences", async () => {
-		const state = await loadState(COMMONSPACE_STATE_VERSION, null, [], [], {
-			inboxSavedItemIds: ["reply-1", "missing", "reply-1"],
-			followedSessionIds: ["reply-1:backend", "reply-1:backend", 42],
-			mutedSessionIds: ["other:backend", 42],
+		const state = await loadState({
+			version: COMMONSPACE_STATE_VERSION,
+			inboxReadAt: null,
+			inboxReadMessageIds: [],
+			attentionPreferences: {
+				inboxSavedItemIds: ["reply-1", "missing", "reply-1"],
+				followedSessionIds: ["reply-1:backend", "reply-1:backend", 42],
+				mutedSessionIds: ["other:backend", 42],
+			},
 		});
 
 		expect(state.inboxSavedItemIds).toEqual(["reply-1"]);
@@ -208,13 +220,12 @@ describe("Commonspace Inbox state migration", () => {
 	});
 
 	it("migrates v23 to opt-in notification defaults and preserves valid category choices", async () => {
-		const migrated = await loadState(23);
-		const configured = await loadState(
-			COMMONSPACE_STATE_VERSION,
-			null,
-			[],
-			[],
-			{
+		const migrated = await loadState({ version: 23 });
+		const configured = await loadState({
+			version: COMMONSPACE_STATE_VERSION,
+			inboxReadAt: null,
+			inboxReadMessageIds: [],
+			attentionPreferences: {
 				notifications: {
 					enabled: true,
 					replies: false,
@@ -224,7 +235,7 @@ describe("Commonspace Inbox state migration", () => {
 					sound: true,
 				},
 			},
-		);
+		});
 
 		expect(migrated.notifications).toEqual({
 			enabled: false,

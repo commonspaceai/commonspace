@@ -63,15 +63,17 @@ function kindLabel(item: CommonspaceInboxItem): string {
 	}
 }
 
+const inboxTimeFormatter = new Intl.DateTimeFormat(undefined, {
+	month: "short",
+	day: "numeric",
+	hour: "numeric",
+	minute: "2-digit",
+});
+
 function formattedTime(value: string): string {
 	const date = new Date(value);
 	if (Number.isNaN(date.valueOf())) return "";
-	return new Intl.DateTimeFormat(undefined, {
-		month: "short",
-		day: "numeric",
-		hour: "numeric",
-		minute: "2-digit",
-	}).format(date);
+	return inboxTimeFormatter.format(date);
 }
 
 function sessionStatusLabel(session: CommonspaceSessionItem): string {
@@ -107,6 +109,45 @@ function isAttentionItem(item: CommonspaceInboxItem): boolean {
 	);
 }
 
+function summarizeInboxItems(items: readonly CommonspaceInboxItem[]) {
+	const attentionItems: CommonspaceInboxItem[] = [];
+	const activityItems: CommonspaceInboxItem[] = [];
+	let unreadCount = 0;
+	let attentionUnreadCount = 0;
+	let activityUnreadCount = 0;
+	for (const item of items) {
+		const attention = isAttentionItem(item);
+		if (attention) attentionItems.push(item);
+		else activityItems.push(item);
+		if (!item.unread) continue;
+		unreadCount += 1;
+		if (attention) attentionUnreadCount += 1;
+		else activityUnreadCount += 1;
+	}
+	return {
+		activityItems,
+		activityUnreadCount,
+		attentionItems,
+		attentionUnreadCount,
+		unreadCount,
+	};
+}
+
+function groupSessionsByStatus(sessions: readonly CommonspaceSessionItem[]) {
+	const grouped: Record<
+		CommonspaceSessionItem["status"],
+		CommonspaceSessionItem[]
+	> = {
+		completed: [],
+		"needs-attention": [],
+		running: [],
+	};
+	for (const session of sessions) grouped[session.status].push(session);
+	return grouped;
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The cohesive page controller keeps view, filter, and mutation ownership together without a large callback surface.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: The cohesive page controller avoids splitting tightly coupled Inbox views into prop-heavy wrappers.
 export function CommonspaceInbox({
 	store,
 	onOpenItem,
@@ -137,11 +178,13 @@ export function CommonspaceInbox({
 		() => (state === undefined ? [] : deriveCommonspaceInboxItems(state)),
 		[state],
 	);
-	const attentionItems = useMemo(() => items.filter(isAttentionItem), [items]);
-	const activityItems = useMemo(
-		() => items.filter((item) => !isAttentionItem(item)),
-		[items],
-	);
+	const {
+		activityItems,
+		activityUnreadCount,
+		attentionItems,
+		attentionUnreadCount,
+		unreadCount,
+	} = useMemo(() => summarizeInboxItems(items), [items]);
 	const sessions = useMemo(
 		() =>
 			state === undefined
@@ -152,22 +195,21 @@ export function CommonspaceInbox({
 					),
 		[snapshot.bootstrap?.liveActivities, state],
 	);
-	const unreadCount = items.filter((item) => item.unread).length;
-	const runningCount = sessions.filter(
-		(session) => session.status === "running",
-	).length;
+	const sessionsByStatus = useMemo(
+		() => groupSessionsByStatus(sessions),
+		[sessions],
+	);
+	const runningCount = sessionsByStatus.running.length;
 	const currentItems = view === "attention" ? attentionItems : activityItems;
-	const currentUnreadCount = currentItems.filter((item) => item.unread).length;
-	const visibleItems =
-		filter === "unread"
-			? currentItems.filter((item) => item.unread)
-			: filter === "saved"
-				? currentItems.filter((item) => item.saved)
-				: currentItems;
+	const currentUnreadCount =
+		view === "attention" ? attentionUnreadCount : activityUnreadCount;
+	const visibleItems = useMemo(() => {
+		if (filter === "unread") return currentItems.filter((item) => item.unread);
+		if (filter === "saved") return currentItems.filter((item) => item.saved);
+		return currentItems;
+	}, [currentItems, filter]);
 	const visibleSessions =
-		sessionFilter === "all"
-			? sessions
-			: sessions.filter((session) => session.status === sessionFilter);
+		sessionFilter === "all" ? sessions : sessionsByStatus[sessionFilter];
 
 	const markAllRead = async () => {
 		if (unreadCount === 0 || markingRead) return;

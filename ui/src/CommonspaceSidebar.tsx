@@ -5,9 +5,11 @@ import {
 	COMMONSPACE_REASONING_VALUES,
 	type CommonspaceAgentProfile,
 	type CommonspaceDiagnostics,
+	type CommonspaceMessage,
 	type CommonspaceMutation,
 	type CommonspaceNotificationSettings,
 	type CommonspaceNotificationVerification,
+	type CommonspacePin,
 	CommonspaceReasoning,
 	CommonspaceRoutingProvider,
 	type CommonspaceSearchResult,
@@ -316,6 +318,16 @@ function copyText(value: string) {
 	void navigator.clipboard?.writeText(value).catch(() => undefined);
 }
 
+function collectionIds(
+	keys: readonly string[],
+	kind: SidebarCollectionKind,
+): string[] {
+	const prefix = `${kind}:`;
+	return keys.flatMap((key) =>
+		key.startsWith(prefix) ? [key.slice(prefix.length)] : [],
+	);
+}
+
 export function CommonspaceSidebar({
 	wide,
 	expandSidebar,
@@ -513,12 +525,19 @@ export function CommonspaceSidebar({
 		() => (state === undefined ? [] : deriveCommonspaceInboxItems(state)),
 		[state],
 	);
-	const inboxUnreadCount = inboxItems.filter((item) => item.unread).length;
-	const threadUnreadCount = new Set(
-		inboxItems
-			.filter((item) => item.unread && item.threadId !== undefined)
-			.map((item) => item.threadId),
-	).size;
+	const { inboxUnreadCount, threadUnreadCount } = useMemo(() => {
+		let unreadCount = 0;
+		const unreadThreadIds = new Set<string>();
+		for (const item of inboxItems) {
+			if (!item.unread) continue;
+			unreadCount += 1;
+			if (item.threadId !== undefined) unreadThreadIds.add(item.threadId);
+		}
+		return {
+			inboxUnreadCount: unreadCount,
+			threadUnreadCount: unreadThreadIds.size,
+		};
+	}, [inboxItems]);
 	const channelUnreadCounts = useMemo(() => {
 		const counts = new Map<string, number>();
 		for (const item of inboxItems) {
@@ -553,6 +572,18 @@ export function CommonspaceSidebar({
 		(agent) =>
 			agent.adapter === agentAdapter && !configuredAgentIds.has(agent.id),
 	);
+	const channelPinsById = useMemo<
+		ReadonlyMap<string, readonly CommonspacePin[]>
+	>(() => {
+		const pinsByChannel = new Map<string, CommonspacePin[]>();
+		for (const pin of state?.pins ?? []) {
+			if (pin.removedAt !== null || pin.scope.kind !== "channel") continue;
+			const pins = pinsByChannel.get(pin.scope.id);
+			if (pins === undefined) pinsByChannel.set(pin.scope.id, [pin]);
+			else pins.push(pin);
+		}
+		return pinsByChannel;
+	}, [state?.pins]);
 	const models = useMemo(
 		() => [
 			...new Set(
@@ -583,81 +614,106 @@ export function CommonspaceSidebar({
 	const effectivePinnedKeys = preferences.hasStoredPins
 		? preferences.pinnedKeys
 		: defaultPinnedKeys;
-	const pinnedIds = (kind: SidebarCollectionKind) =>
-		new Set(
-			effectivePinnedKeys
-				.filter((key) => key.startsWith(`${kind}:`))
-				.map((key) => key.slice(kind.length + 1)),
-		);
-	const recentIds = (kind: SidebarCollectionKind, ids: readonly string[]) => [
-		...preferences.recentKeys[kind].map((key) => key.slice(kind.length + 1)),
-		...ids,
-	];
-	const projectPinnedIds = pinnedIds("project");
-	const projectSections = sortSidebarSections({
-		items: projects,
-		pinnedIds: projectPinnedIds,
-		mode: preferences.sortModes.project,
-		customOrder: preferences.customOrders.project.map((key) =>
-			key.slice("project:".length),
-		),
-		recentOrder: recentIds(
-			"project",
-			projects.map((project) => project.id),
-		),
-		getName: (project) => project.name,
-	});
-	const projectItems = {
-		items: [
-			...projectSections.pinned,
-			...projectSections.unpinned.slice(0, 10),
+	const projectPinnedIds = useMemo(
+		() => new Set(collectionIds(effectivePinnedKeys, "project")),
+		[effectivePinnedKeys],
+	);
+	const projectSections = useMemo(
+		() =>
+			sortSidebarSections({
+				items: projects,
+				pinnedIds: projectPinnedIds,
+				mode: preferences.sortModes.project,
+				customOrder: collectionIds(preferences.customOrders.project, "project"),
+				recentOrder: [
+					...collectionIds(preferences.recentKeys.project, "project"),
+					...projects.map((project) => project.id),
+				],
+				getName: (project) => project.name,
+			}),
+		[
+			preferences.customOrders.project,
+			preferences.recentKeys.project,
+			preferences.sortModes.project,
+			projectPinnedIds,
+			projects,
 		],
-		pinnedCount: projectSections.pinned.length,
-	};
-	const channelPinnedIds = pinnedIds("channel");
-	const channelLastActiveAt = new Map(
-		channels.map((channel) => {
+	);
+	const projectItems = [
+		...projectSections.pinned,
+		...projectSections.unpinned.slice(0, 10),
+	];
+	const channelPinnedIds = useMemo(
+		() => new Set(collectionIds(effectivePinnedKeys, "channel")),
+		[effectivePinnedKeys],
+	);
+	const { channelLastActiveAt, latestChannelMessageById } = useMemo(() => {
+		const lastActiveAt = new Map<string, string>();
+		const latestMessageById = new Map<string, CommonspaceMessage>();
+		for (const channel of channels) {
 			const latestMessage = state?.messages[`channel:${channel.id}`]?.at(-1);
-			return [
+			lastActiveAt.set(
 				channel.id,
 				latestMessage?.createdAt ?? channel.createdAt,
-			] as const;
-		}),
-	);
-	const channelSections = sortChannelSections({
-		channels,
-		pinnedIds: channelPinnedIds,
-		mode: preferences.sortModes.channel,
-		customOrder: preferences.customOrders.channel.map((key) =>
-			key.slice("channel:".length),
-		),
-		lastActiveAt: channelLastActiveAt,
-	});
-	const channelItems = {
-		items: [
-			...channelSections.pinned,
-			...channelSections.unpinned.slice(0, 10),
+			);
+			if (latestMessage !== undefined)
+				latestMessageById.set(channel.id, latestMessage);
+		}
+		return {
+			channelLastActiveAt: lastActiveAt,
+			latestChannelMessageById: latestMessageById,
+		};
+	}, [channels, state?.messages]);
+	const channelSections = useMemo(
+		() =>
+			sortChannelSections({
+				channels,
+				pinnedIds: channelPinnedIds,
+				mode: preferences.sortModes.channel,
+				customOrder: collectionIds(preferences.customOrders.channel, "channel"),
+				lastActiveAt: channelLastActiveAt,
+			}),
+		[
+			channelLastActiveAt,
+			channelPinnedIds,
+			channels,
+			preferences.customOrders.channel,
+			preferences.sortModes.channel,
 		],
-		pinnedCount: channelSections.pinned.length,
-	};
-	const agentPinnedIds = pinnedIds("agent");
-	const agentSections = sortSidebarSections({
-		items: agents,
-		pinnedIds: agentPinnedIds,
-		mode: preferences.sortModes.agent,
-		customOrder: preferences.customOrders.agent.map((key) =>
-			key.slice("agent:".length),
-		),
-		recentOrder: recentIds(
-			"agent",
-			agents.map((agent) => agent.id),
-		),
-		getName: (agent) => agent.displayName,
-	});
-	const agentItems = {
-		items: [...agentSections.pinned, ...agentSections.unpinned.slice(0, 10)],
-		pinnedCount: agentSections.pinned.length,
-	};
+	);
+	const channelItems = [
+		...channelSections.pinned,
+		...channelSections.unpinned.slice(0, 10),
+	];
+	const agentPinnedIds = useMemo(
+		() => new Set(collectionIds(effectivePinnedKeys, "agent")),
+		[effectivePinnedKeys],
+	);
+	const agentSections = useMemo(
+		() =>
+			sortSidebarSections({
+				items: agents,
+				pinnedIds: agentPinnedIds,
+				mode: preferences.sortModes.agent,
+				customOrder: collectionIds(preferences.customOrders.agent, "agent"),
+				recentOrder: [
+					...collectionIds(preferences.recentKeys.agent, "agent"),
+					...agents.map((agent) => agent.id),
+				],
+				getName: (agent) => agent.displayName,
+			}),
+		[
+			agentPinnedIds,
+			agents,
+			preferences.customOrders.agent,
+			preferences.recentKeys.agent,
+			preferences.sortModes.agent,
+		],
+	);
+	const agentItems = [
+		...agentSections.pinned,
+		...agentSections.unpinned.slice(0, 10),
+	];
 	useEffect(() => {
 		sidebarPreferencesStore.ensurePinnedDefaults(defaultPinnedKeys);
 	}, [defaultPinnedKeys]);
@@ -2044,16 +2100,12 @@ export function CommonspaceSidebar({
 						</SidebarDialog>
 					)}
 
-					{channelItems.items.map((channel) => {
+					{channelItems.map((channel) => {
 						const unreadCount = channelUnreadCounts.get(channel.id) ?? 0;
-						const latestChannelMessage =
-							state?.messages[`channel:${channel.id}`]?.at(-1);
-						const channelPins = (state?.pins ?? []).filter(
-							(pin) =>
-								pin.removedAt === null &&
-								pin.scope.kind === "channel" &&
-								pin.scope.id === channel.id,
+						const latestChannelMessage = latestChannelMessageById.get(
+							channel.id,
 						);
+						const channelPins = channelPinsById.get(channel.id) ?? [];
 						return (
 							<div
 								key={channel.id}
@@ -2308,10 +2360,11 @@ export function CommonspaceSidebar({
 											</header>
 											{channelPins.map((pin) => {
 												const label =
-													pin.note ??
-													pin.attachmentId ??
-													pin.messageId ??
-													"Pinned source";
+													pin.kind === "note"
+														? pin.note
+														: pin.kind === "attachment"
+															? pin.attachmentId
+															: pin.messageId;
 												return (
 													<div key={pin.id}>
 														<p>{label}</p>
@@ -2374,7 +2427,7 @@ export function CommonspaceSidebar({
 							Create a channel and seat agents.
 						</div>
 					)}
-					{channels.length > channelItems.items.length && (
+					{channels.length > channelItems.length && (
 						<BrowseButton
 							label="View all"
 							ariaLabel="Browse all channels"
@@ -2654,7 +2707,7 @@ export function CommonspaceSidebar({
 							);
 						})()}
 
-					{agentItems.items.map((agent) => {
+					{agentItems.map((agent) => {
 						const effectiveStatus = activeAgentIds.has(agent.id)
 							? "running"
 							: agent.status;
@@ -2782,7 +2835,7 @@ export function CommonspaceSidebar({
 							</div>
 						);
 					})}
-					{agents.length > agentItems.items.length && (
+					{agents.length > agentItems.length && (
 						<BrowseButton
 							label="View all"
 							ariaLabel="Browse all agents"
@@ -2904,7 +2957,7 @@ export function CommonspaceSidebar({
 						</SidebarDialog>
 					)}
 
-					{projectItems.items.map((project) => {
+					{projectItems.map((project) => {
 						const active = !settingsOpen && activeProjectViewId === project.id;
 						const folderSummary =
 							project.paths.length === 1
@@ -3041,7 +3094,7 @@ export function CommonspaceSidebar({
 							Add a local filesystem project.
 						</div>
 					)}
-					{projects.length > projectItems.items.length && (
+					{projects.length > projectItems.length && (
 						<BrowseButton
 							label="View all"
 							ariaLabel="Browse all projects"

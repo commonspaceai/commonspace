@@ -5,10 +5,29 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const MAX_PICKER_OUTPUT_BYTES = 64 * 1024;
+const LINUX_DIRECTORY_PICKERS = [
+	{
+		command: "zenity",
+		args: [
+			"--file-selection",
+			"--directory",
+			"--title=Choose a Commonspace project folder",
+		],
+	},
+	{
+		command: "kdialog",
+		args: [
+			"--getexistingdirectory",
+			".",
+			"--title",
+			"Choose a Commonspace project folder",
+		],
+	},
+] as const;
 
 async function runPickerCommand(
 	command: string,
-	args: string[],
+	args: readonly string[],
 ): Promise<string> {
 	const { stdout } = await execFileAsync(command, args, {
 		encoding: "utf8",
@@ -19,36 +38,20 @@ async function runPickerCommand(
 }
 
 async function selectDirectoryOnLinux(): Promise<string> {
-	try {
-		return await runPickerCommand("zenity", [
-			"--file-selection",
-			"--directory",
-			"--title=Choose a Commonspace project folder",
-		]);
-	} catch (error) {
-		const code =
-			error instanceof Error && "code" in error ? error.code : undefined;
-		if (code === 1) return "";
-		if (code !== "ENOENT") throw error;
+	let unavailablePicker: Error | undefined;
+	for (const picker of LINUX_DIRECTORY_PICKERS) {
+		try {
+			return await runPickerCommand(picker.command, picker.args);
+		} catch (error) {
+			if (!(error instanceof Error) || !("code" in error)) throw error;
+			if (error.code === 1) return "";
+			if (error.code !== "ENOENT") throw error;
+			unavailablePicker = error;
+		}
 	}
-
-	try {
-		return await runPickerCommand("kdialog", [
-			"--getexistingdirectory",
-			".",
-			"--title",
-			"Choose a Commonspace project folder",
-		]);
-	} catch (error) {
-		const code =
-			error instanceof Error && "code" in error ? error.code : undefined;
-		if (code === 1) return "";
-		if (code === "ENOENT")
-			throw new Error("folder selection requires zenity or kdialog on Linux", {
-				cause: error,
-			});
-		throw error;
-	}
+	throw new Error("folder selection requires zenity or kdialog on Linux", {
+		cause: unavailablePicker,
+	});
 }
 
 async function selectedDirectoryOutput(

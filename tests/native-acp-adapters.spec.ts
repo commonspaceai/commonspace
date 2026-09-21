@@ -89,11 +89,11 @@ it.each([
 );
 
 it.each([
-	{ initial: true, updated: false, modes: ["allow", "ask"] },
-	{ initial: false, updated: true, modes: ["ask", "allow"] },
+	{ initial: true, updated: false, initialMode: "allow" },
+	{ initial: false, updated: true, initialMode: "ask" },
 ])(
-	"interrupts active OpenCode work when Full access changes $initial -> $updated",
-	async ({ initial, updated, modes }) => {
+	"invalidates admitted OpenCode work when Full access changes $initial -> $updated",
+	async ({ initial, updated, initialMode }) => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-opencode-revoke-"));
 		roots.push(root);
 		const framesPath = join(root, "frames.jsonl");
@@ -154,7 +154,7 @@ it.each([
 				.messages["dm:opencode"]?.find(
 					(message) => message.id === queued.accepted.id,
 				),
-		).toMatchObject({ replyStatus: "complete" });
+		).toMatchObject({ replyStatus: "cancelled" });
 		const frames = (await readFile(framesPath, "utf8"))
 			.trim()
 			.split("\n")
@@ -163,7 +163,7 @@ it.each([
 			frames
 				.filter((frame) => frame.event === "environment")
 				.map((frame) => JSON.parse(frame.opencodePermission)),
-		).toEqual(modes.map((mode) => ({ "*": mode })));
+		).toEqual([{ "*": initialMode }]);
 		const flushed = frames.findIndex(
 			(frame) => frame.event === "native-flushed",
 		);
@@ -173,7 +173,7 @@ it.each([
 				index > frames.findIndex((first) => first.event === "environment"),
 		);
 		expect(flushed).toBeGreaterThan(-1);
-		expect(replacement).toBeGreaterThan(flushed);
+		expect(replacement).toBe(-1);
 	},
 );
 

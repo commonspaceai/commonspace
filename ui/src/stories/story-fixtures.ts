@@ -334,7 +334,7 @@ const reviewThread: CommonspaceThread = {
 	createdAt: "2026-09-03T09:58:10.000Z",
 };
 
-export function createStoryState(
+function createStoryState(
 	overrides: Partial<CommonspaceState> = {},
 ): CommonspaceState {
 	return {
@@ -624,28 +624,184 @@ export const emptyBootstrap = createStoryBootstrap({
 	}),
 });
 
+interface StoryStoreOptions {
+	readonly interactive?: boolean;
+	readonly activeConversation?: ConversationRef | null;
+	readonly activeProjectId?: string | null;
+	readonly activeThreadId?: string | null;
+	readonly loading?: boolean;
+	readonly error?: string | null;
+	readonly notificationVerification?: CommonspaceNotificationVerification;
+	readonly pendingSubmissions?: CommonspaceClientSnapshot["pendingSubmissions"];
+	readonly send?: CommonspaceStore["send"];
+	readonly retryRouting?: CommonspaceStore["retryRouting"];
+	readonly diagnostics?: CommonspaceStore["diagnostics"];
+	readonly mutate?: CommonspaceStore["mutate"];
+	readonly compactChannelContext?: CommonspaceStore["compactChannelContext"];
+	readonly updateRoutingConfiguration?: CommonspaceStore["updateRoutingConfiguration"];
+	readonly addPin?: CommonspaceStore["addPin"];
+	readonly removePin?: CommonspaceStore["removePin"];
+	readonly discoverAgents?: CommonspaceStore["discoverAgents"];
+	readonly inspectAgentCapabilities?: CommonspaceStore["inspectAgentCapabilities"];
+}
+
+type StoryStoreHandlers = Readonly<Partial<CommonspaceStore>>;
+
+function createInteractiveStorySend(
+	getSnapshot: () => CommonspaceClientSnapshot,
+	updateSnapshot: (snapshot: CommonspaceClientSnapshot) => void,
+): CommonspaceStore["send"] {
+	return async ({ text, threadId }) => {
+		const snapshot = getSnapshot();
+		const bootstrap = snapshot.bootstrap;
+		const conversation = snapshot.activeConversation;
+		if (bootstrap === null || conversation === null) return;
+		const key = `${conversation.kind}:${conversation.id}`;
+		const message: CommonspaceMessage = {
+			id: crypto.randomUUID(),
+			conversation,
+			text,
+			authorType: "user",
+			authorId: "preview-user",
+			authorName: "You",
+			createdAt: new Date().toISOString(),
+			projectIds: [],
+		};
+		if (threadId !== undefined) {
+			const thread = bootstrap.state.threads.find(
+				(item) => item.id === threadId,
+			);
+			if (thread === undefined)
+				throw new Error("Preview thread no longer exists.");
+			message.threadId = threadId;
+			message.parentMessageId = thread.rootMessageId;
+		}
+		updateSnapshot({
+			...snapshot,
+			bootstrap: {
+				...bootstrap,
+				state: {
+					...bootstrap.state,
+					messages: {
+						...bootstrap.state.messages,
+						[key]: [...(bootstrap.state.messages[key] ?? []), message],
+					},
+				},
+			},
+		});
+	};
+}
+
+function storyStoreOptionHandlers(
+	options: StoryStoreOptions,
+): Partial<CommonspaceStore> {
+	const handlers: Partial<CommonspaceStore> = {};
+	if (options.send !== undefined) handlers.send = options.send;
+	if (options.mutate !== undefined) handlers.mutate = options.mutate;
+	if (options.compactChannelContext !== undefined)
+		handlers.compactChannelContext = options.compactChannelContext;
+	if (options.updateRoutingConfiguration !== undefined)
+		handlers.updateRoutingConfiguration = options.updateRoutingConfiguration;
+	if (options.diagnostics !== undefined)
+		handlers.diagnostics = options.diagnostics;
+	if (options.retryRouting !== undefined)
+		handlers.retryRouting = options.retryRouting;
+	if (options.addPin !== undefined) handlers.addPin = options.addPin;
+	if (options.removePin !== undefined) handlers.removePin = options.removePin;
+	if (options.discoverAgents !== undefined)
+		handlers.discoverAgents = options.discoverAgents;
+	if (options.inspectAgentCapabilities !== undefined)
+		handlers.inspectAgentCapabilities = options.inspectAgentCapabilities;
+	return handlers;
+}
+
+function createStoryStoreHandlers({
+	getSnapshot,
+	updateSnapshot,
+	listeners,
+	options,
+}: {
+	getSnapshot: () => CommonspaceClientSnapshot;
+	updateSnapshot: (snapshot: CommonspaceClientSnapshot) => void;
+	listeners: Set<() => void>;
+	options: StoryStoreOptions;
+}): StoryStoreHandlers {
+	const handlers: Partial<CommonspaceStore> = {
+		getSnapshot,
+		dismissError: () => {
+			updateSnapshot({ ...getSnapshot(), error: null });
+		},
+		messages: () => {
+			const snapshot = getSnapshot();
+			const conversation = snapshot.activeConversation;
+			if (conversation === null || snapshot.bootstrap === null) return [];
+			return (
+				snapshot.bootstrap.state.messages[
+					`${conversation.kind}:${conversation.id}`
+				] ?? []
+			);
+		},
+		subscribe: (listener) => {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+		selectThread: (threadId) => {
+			const snapshot = getSnapshot();
+			if (snapshot.activeThreadId === threadId) return;
+			updateSnapshot({ ...snapshot, activeThreadId: threadId });
+		},
+		connectEvents: () => undefined,
+		disconnectEvents: () => undefined,
+		selectConversation: (conversation) => {
+			if (!options.interactive) return;
+			updateSnapshot({
+				...getSnapshot(),
+				activeConversation: conversation,
+				activeThreadId: null,
+			});
+		},
+		selectProject: () => undefined,
+		selectDirectory: async () => null,
+		verifyDesktopNotifications: async () =>
+			options.notificationVerification ?? {
+				status: "delivered" as const,
+				message:
+					"Test notification delivered. Click it to verify Commonspace opens.",
+			},
+		...storyStoreOptionHandlers(options),
+	};
+	if (handlers.send === undefined && options.interactive)
+		handlers.send = createInteractiveStorySend(getSnapshot, updateSnapshot);
+	return handlers;
+}
+
+function isStoryStoreHandlerKey(
+	handlers: StoryStoreHandlers,
+	property: string,
+): property is Extract<keyof CommonspaceStore, string> {
+	return Object.hasOwn(handlers, property);
+}
+
+function createStoryStoreProxy(
+	store: CommonspaceClientStore,
+	handlers: StoryStoreHandlers,
+): CommonspaceStore {
+	return new Proxy(store, {
+		get(target, property) {
+			if (property === Symbol.toStringTag) return "CommonspaceStoryStore";
+			if (typeof property === "symbol") return undefined;
+			if (property === "toString")
+				return () => "[object CommonspaceStoryStore]";
+			if (property === "valueOf") return () => target;
+			if (isStoryStoreHandlerKey(handlers, property)) return handlers[property];
+			return async () => undefined;
+		},
+	});
+}
+
 export function createStoryStore(
 	bootstrap: CommonspaceBootstrap | null = storyBootstrap,
-	options: {
-		interactive?: boolean;
-		activeConversation?: ConversationRef | null;
-		activeProjectId?: string | null;
-		activeThreadId?: string | null;
-		loading?: boolean;
-		error?: string | null;
-		notificationVerification?: CommonspaceNotificationVerification;
-		pendingSubmissions?: CommonspaceClientSnapshot["pendingSubmissions"];
-		send?: CommonspaceStore["send"];
-		retryRouting?: CommonspaceStore["retryRouting"];
-		diagnostics?: CommonspaceStore["diagnostics"];
-		mutate?: CommonspaceStore["mutate"];
-		compactChannelContext?: CommonspaceStore["compactChannelContext"];
-		updateRoutingConfiguration?: CommonspaceStore["updateRoutingConfiguration"];
-		addPin?: CommonspaceStore["addPin"];
-		removePin?: CommonspaceStore["removePin"];
-		discoverAgents?: CommonspaceStore["discoverAgents"];
-		inspectAgentCapabilities?: CommonspaceStore["inspectAgentCapabilities"];
-	} = {},
+	options: StoryStoreOptions = {},
 ): CommonspaceStore {
 	let snapshot: CommonspaceClientSnapshot = {
 		bootstrap,
@@ -654,139 +810,25 @@ export function createStoryStore(
 		sending: false,
 		error: options.error ?? null,
 		activeConversation: options.activeConversation ?? null,
-		activeProjectId: options.activeProjectId ?? primaryProject.id,
+		activeProjectId:
+			options.activeProjectId === undefined
+				? primaryProject.id
+				: options.activeProjectId,
 		activeThreadId: options.activeThreadId ?? null,
 	};
-	const store = new CommonspaceClientStore();
 	const listeners = new Set<() => void>();
-	return new Proxy(store, {
-		get(target, property) {
-			if (property === Symbol.toStringTag) return "CommonspaceStoryStore";
-			if (typeof property === "symbol") return undefined;
-			if (property === "toString")
-				return () => "[object CommonspaceStoryStore]";
-			if (property === "valueOf") return () => target;
-			if (property === "getSnapshot") return () => snapshot;
-			if (property === "dismissError")
-				return () => {
-					snapshot = { ...snapshot, error: null };
-					for (const listener of listeners) listener();
-				};
-			if (property === "send" && options.send !== undefined)
-				return options.send;
-			if (property === "send" && options.interactive) {
-				const send: CommonspaceStore["send"] = async (text, threadId) => {
-					const current = snapshot.bootstrap;
-					const conversation = snapshot.activeConversation;
-					if (current === null || conversation === null) return;
-					const key = `${conversation.kind}:${conversation.id}`;
-					const message: CommonspaceMessage = {
-						id: crypto.randomUUID(),
-						conversation,
-						text,
-						authorType: "user",
-						authorId: "preview-user",
-						authorName: "You",
-						createdAt: new Date().toISOString(),
-						projectIds: [],
-					};
-					if (threadId !== undefined) {
-						const thread = current.state.threads.find(
-							(item) => item.id === threadId,
-						);
-						if (thread === undefined)
-							throw new Error("Preview thread no longer exists.");
-						message.threadId = threadId;
-						message.parentMessageId = thread.rootMessageId;
-					}
-					const next = {
-						...current,
-						state: {
-							...current.state,
-							messages: {
-								...current.state.messages,
-								[key]: [...(current.state.messages[key] ?? []), message],
-							},
-						},
-					};
-					snapshot = { ...snapshot, bootstrap: next };
-					for (const listener of listeners) listener();
-				};
-				return send;
-			}
-			if (property === "mutate" && options.mutate !== undefined)
-				return options.mutate;
-			if (
-				property === "compactChannelContext" &&
-				options.compactChannelContext !== undefined
-			)
-				return options.compactChannelContext;
-			if (
-				property === "updateRoutingConfiguration" &&
-				options.updateRoutingConfiguration !== undefined
-			)
-				return options.updateRoutingConfiguration;
-			if (property === "diagnostics" && options.diagnostics !== undefined)
-				return options.diagnostics;
-			if (property === "retryRouting" && options.retryRouting !== undefined)
-				return options.retryRouting;
-			if (property === "addPin" && options.addPin !== undefined)
-				return options.addPin;
-			if (property === "removePin" && options.removePin !== undefined)
-				return options.removePin;
-			if (property === "discoverAgents" && options.discoverAgents !== undefined)
-				return options.discoverAgents;
-			if (
-				property === "inspectAgentCapabilities" &&
-				options.inspectAgentCapabilities !== undefined
-			)
-				return options.inspectAgentCapabilities;
-			if (property === "messages") {
-				return () => {
-					const conversation = snapshot.activeConversation;
-					if (conversation === null || snapshot.bootstrap === null) return [];
-					return (
-						snapshot.bootstrap.state.messages[
-							`${conversation.kind}:${conversation.id}`
-						] ?? []
-					);
-				};
-			}
-			if (property === "subscribe")
-				return (listener: () => void) => {
-					listeners.add(listener);
-					return () => listeners.delete(listener);
-				};
-			if (property === "selectThread")
-				return (threadId: string | null) => {
-					if (snapshot.activeThreadId === threadId) return;
-					snapshot = { ...snapshot, activeThreadId: threadId };
-					for (const listener of listeners) listener();
-				};
-			if (property === "connectEvents" || property === "disconnectEvents")
-				return () => undefined;
-			if (property === "selectConversation")
-				return (conversation: ConversationRef) => {
-					if (!options.interactive) return;
-					snapshot = {
-						...snapshot,
-						activeConversation: conversation,
-						activeThreadId: null,
-					};
-					for (const listener of listeners) listener();
-				};
-			if (property === "selectProject") return () => undefined;
-			if (property === "selectDirectory") return async () => null;
-			if (property === "verifyDesktopNotifications")
-				return async () =>
-					options.notificationVerification ?? {
-						status: "delivered" as const,
-						message:
-							"Test notification delivered. Click it to verify Commonspace opens.",
-					};
-			return async () => undefined;
-		},
+	const getSnapshot = () => snapshot;
+	const updateSnapshot = (next: CommonspaceClientSnapshot) => {
+		snapshot = next;
+		for (const listener of listeners) listener();
+	};
+	const handlers = createStoryStoreHandlers({
+		getSnapshot,
+		updateSnapshot,
+		listeners,
+		options,
 	});
+	return createStoryStoreProxy(new CommonspaceClientStore(), handlers);
 }
 
 export const populatedCapabilityInventory: HarnessCapabilityInventory = {

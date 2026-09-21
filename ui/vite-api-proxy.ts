@@ -7,7 +7,7 @@ interface ProxyRequestHeaders {
 	setHeader(name: string, value: string): void;
 }
 
-export function forwardBrowserHost(
+function forwardBrowserHost(
 	proxyRequest: ProxyRequestHeaders,
 	request: { headers: Pick<IncomingHttpHeaders, "host"> },
 ): void {

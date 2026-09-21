@@ -1,5 +1,6 @@
 import type {
 	CommonspaceMessage,
+	CommonspacePin,
 	CommonspaceState,
 	CommonspaceThread,
 } from "@commonspace/shared";
@@ -32,6 +33,22 @@ const STOP_WORDS = new Set([
 	"with",
 	"you",
 ]);
+
+interface RetrievedRoutingContextInput {
+	state: CommonspaceState;
+	channelId: string;
+	query: string;
+	index: RoutingMessageIndex;
+	thread: CommonspaceThread | undefined;
+	scopeThreadId: string | undefined;
+}
+
+interface RoutingMemoryEvidence {
+	summary: string;
+	decisions: string[];
+	openQuestions: string[];
+	origin?: string;
+}
 
 function terms(text: string): string[] {
 	return (
@@ -76,80 +93,148 @@ function boundEvidence(
 	});
 }
 
-/** Only public conversation content enters the remote routing state. Order preserves authoritative notes first. */
-export function buildRetrievedRoutingContext(
-	state: CommonspaceState,
+function appendMemoryEvidence(
+	evidence: string[],
+	label: string,
+	value: RoutingMemoryEvidence,
+): void {
+	if (
+		value.summary === "" &&
+		value.decisions.length === 0 &&
+		value.openQuestions.length === 0
+	) {
+		return;
+	}
+	evidence.push(
+		`${label} (${value.origin ?? "automatic"}): ${JSON.stringify({ summary: value.summary, decisions: value.decisions, openQuestions: value.openQuestions })}`,
+	);
+}
+
+function latestThreadOwner(
+	messages: readonly CommonspaceMessage[],
+	threadId: string,
+): readonly string[] | undefined {
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index];
+		if (message?.threadId !== threadId) continue;
+		const agentIds = message.routing?.agentIds;
+		if (agentIds !== undefined && agentIds.length > 0) return agentIds;
+	}
+	return undefined;
+}
+
+function liveMessagesById(
+	messages: readonly CommonspaceMessage[],
+): ReadonlyMap<string, CommonspaceMessage> {
+	const live = new Map<string, CommonspaceMessage>();
+	for (const message of messages)
+		if (message.deletedAt === undefined) live.set(message.id, message);
+	return live;
+}
+
+function routingPinIsInScope(
+	scope: CommonspacePin["scope"],
 	channelId: string,
-	query: string,
-	index: RoutingMessageIndex,
-	thread?: CommonspaceThread,
-	scopeThreadId?: string,
+	threadId: string | undefined,
+): boolean {
+	return (
+		(scope.kind === "channel" && scope.id === channelId) ||
+		(scope.kind === "thread" && scope.id === threadId)
+	);
+}
+
+function pinnedRoutingEvidence(
+	state: CommonspaceState,
+	messages: readonly CommonspaceMessage[],
+	channelId: string,
+	scopeThreadId: string | undefined,
 ): string[] {
+	const evidence: string[] = [];
+	let messageById: ReadonlyMap<string, CommonspaceMessage> | undefined;
+	for (const pin of state.pins) {
+		if (pin.removedAt !== null) continue;
+		if (!routingPinIsInScope(pin.scope, channelId, scopeThreadId)) continue;
+		if (pin.kind === "note") {
+			if (pin.note !== "") evidence.push(`Pinned note ${pin.id}: ${pin.note}`);
+			continue;
+		}
+		if (pin.kind !== "message") continue;
+		messageById ??= liveMessagesById(messages);
+		const message = messageById.get(pin.messageId);
+		if (message !== undefined) {
+			evidence.push(
+				`Pinned message ${message.id}, ${message.authorName}: ${message.text}`,
+			);
+		}
+	}
+	return evidence;
+}
+
+function recentRoutingEvidence(
+	messages: readonly CommonspaceMessage[],
+	query: string,
+	scopeThreadId: string | undefined,
+): string[] {
+	const recent: CommonspaceMessage[] = [];
+	for (
+		let index = messages.length - 1;
+		index >= 0 && recent.length < 8;
+		index -= 1
+	) {
+		const message = messages[index];
+		if (
+			message === undefined ||
+			message.deletedAt !== undefined ||
+			message.authorType === "system" ||
+			(scopeThreadId !== undefined && message.threadId !== scopeThreadId)
+		) {
+			continue;
+		}
+		recent.push(message);
+	}
+	return recent
+		.reverse()
+		.flatMap((message) =>
+			message.text === query
+				? []
+				: [
+						`Recent message ${message.id}, ${message.authorName}: ${message.text.slice(0, 900)}`,
+					],
+		);
+}
+
+/** Only public conversation content enters the remote routing state. Order preserves authoritative notes first. */
+export function buildRetrievedRoutingContext({
+	state,
+	channelId,
+	query,
+	index,
+	thread,
+	scopeThreadId,
+}: RetrievedRoutingContextInput): string[] {
 	const channel = state.channels.find((c) => c.id === channelId);
 	const messages = state.messages[`channel:${channelId}`] ?? [];
 	index.sync(messages);
 	const evidence: string[] = [];
 	if (channel?.instructions)
 		evidence.push(`Channel instructions: ${channel.instructions}`);
-	function memory(
-		label: string,
-		value: {
-			summary: string;
-			decisions: string[];
-			openQuestions: string[];
-			origin?: string;
-		},
-	): void {
-		if (value.summary || value.decisions.length || value.openQuestions.length)
-			evidence.push(
-				`${label} (${value.origin ?? "automatic"}): ${JSON.stringify({ summary: value.summary, decisions: value.decisions, openQuestions: value.openQuestions })}`,
-			);
-	}
 	if (thread !== undefined) {
-		memory("Thread starting context", thread.context.channelSnapshot);
-		memory("Thread context", thread.context.memory);
-		const prior = [...messages]
-			.reverse()
-			.find((m) => m.threadId === thread.id && m.routing?.agentIds.length);
-		if (prior?.routing !== undefined)
-			evidence.push(
-				`Prior Thread ownership: ${JSON.stringify(prior.routing.agentIds)}`,
-			);
-	} else if (channel !== undefined) memory("Channel context", channel.memory);
-	for (const pin of state.pins) {
-		if (
-			pin.removedAt !== null ||
-			!(
-				(pin.scope.kind === "channel" && pin.scope.id === channelId) ||
-				(pin.scope.kind === "thread" && pin.scope.id === scopeThreadId)
-			)
-		)
-			continue;
-		if (pin.kind === "note" && pin.note)
-			evidence.push(`Pinned note ${pin.id}: ${pin.note}`);
-		if (pin.kind === "message") {
-			const message = messages.find(
-				(m) => m.id === pin.messageId && m.deletedAt === undefined,
-			);
-			if (message !== undefined)
-				evidence.push(
-					`Pinned message ${message.id}, ${message.authorName}: ${message.text}`,
-				);
-		}
+		appendMemoryEvidence(
+			evidence,
+			"Thread starting context",
+			thread.context.channelSnapshot,
+		);
+		appendMemoryEvidence(evidence, "Thread context", thread.context.memory);
+		const priorOwner = latestThreadOwner(messages, thread.id);
+		if (priorOwner !== undefined)
+			evidence.push(`Prior Thread ownership: ${JSON.stringify(priorOwner)}`);
+	} else if (channel !== undefined) {
+		appendMemoryEvidence(evidence, "Channel context", channel.memory);
 	}
-	const recent = messages
-		.filter(
-			(m) =>
-				m.deletedAt === undefined &&
-				m.authorType !== "system" &&
-				(scopeThreadId === undefined || m.threadId === scopeThreadId),
-		)
-		.slice(-8);
-	for (const message of recent)
-		if (message.text !== query)
-			evidence.push(
-				`Recent message ${message.id}, ${message.authorName}: ${message.text.slice(0, 900)}`,
-			);
+	evidence.push(
+		...pinnedRoutingEvidence(state, messages, channelId, scopeThreadId),
+		...recentRoutingEvidence(messages, query, scopeThreadId),
+	);
 	const retrieved = boundEvidence(
 		index
 			.search(query, scopeThreadId)
@@ -206,37 +291,7 @@ export class RoutingMessageIndex {
 				continue;
 			retained.add(message.id);
 			if (this.sources.get(message.id)?.message === message) continue;
-			this.remove(message.id);
-			const passageIds: string[] = [];
-			for (let offset = 0; offset < message.text.length; offset += 800) {
-				const text = message.text.slice(offset, offset + 900);
-				const tokens = terms(text);
-				const frequencies = new Map<string, number>();
-				for (const token of tokens)
-					frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
-				const id = `${message.id}:${String(offset)}`;
-				const passage: IndexedPassage = {
-					messageId: message.id,
-					start: offset,
-					author: message.authorName,
-					text,
-					length: tokens.length,
-					frequencies,
-				};
-				if (message.threadId !== undefined) passage.threadId = message.threadId;
-				this.passages.set(id, passage);
-				this.totalLength += tokens.length;
-				passageIds.push(id);
-				for (const [token, count] of frequencies) {
-					let posting = this.postings.get(token);
-					if (posting === undefined) {
-						posting = new Map();
-						this.postings.set(token, posting);
-					}
-					posting.set(id, count);
-				}
-			}
-			this.sources.set(message.id, { message, passageIds });
+			this.indexMessage(message);
 		}
 		for (const id of this.sources.keys())
 			if (!retained.has(id)) this.remove(id);
@@ -281,6 +336,40 @@ export class RoutingMessageIndex {
 				if (passage.threadId !== undefined) result.threadId = passage.threadId;
 				return [result];
 			});
+	}
+
+	private indexMessage(message: CommonspaceMessage): void {
+		this.remove(message.id);
+		const passageIds: string[] = [];
+		for (let offset = 0; offset < message.text.length; offset += 800) {
+			const text = message.text.slice(offset, offset + 900);
+			const tokens = terms(text);
+			const frequencies = new Map<string, number>();
+			for (const token of tokens)
+				frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
+			const id = `${message.id}:${String(offset)}`;
+			const passage: IndexedPassage = {
+				messageId: message.id,
+				start: offset,
+				author: message.authorName,
+				text,
+				length: tokens.length,
+				frequencies,
+			};
+			if (message.threadId !== undefined) passage.threadId = message.threadId;
+			this.passages.set(id, passage);
+			this.totalLength += tokens.length;
+			passageIds.push(id);
+			for (const [token, count] of frequencies) {
+				let posting = this.postings.get(token);
+				if (posting === undefined) {
+					posting = new Map();
+					this.postings.set(token, posting);
+				}
+				posting.set(id, count);
+			}
+		}
+		this.sources.set(message.id, { message, passageIds });
 	}
 
 	private remove(messageId: string): void {

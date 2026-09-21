@@ -21,6 +21,7 @@ import type {
 	ProjectGitFileStatus,
 	ProjectGitStatusResponse,
 } from "@commonspace/shared";
+import { z } from "zod";
 import { credentialBearingFileName } from "./credential-files.js";
 
 const execFileAsync = promisify(execFile);
@@ -131,6 +132,13 @@ interface ProjectPath {
 	relativePath: string;
 }
 
+interface ProjectPathLookup {
+	readonly projectId: string;
+	readonly rootIndex: number;
+	readonly path: string;
+	readonly allowRoot: boolean;
+}
+
 export interface OpenProjectFile extends ProjectPath {
 	/** Caller closes this descriptor after preview or diff consumption. */
 	handle: FileHandle;
@@ -140,12 +148,17 @@ export interface OpenProjectFile extends ProjectPath {
 	contentType: string;
 }
 
+export const ProjectEditorTarget = z.strictObject({
+	path: z.string(),
+	rootIndex: z.number(),
+	line: z.number(),
+});
+export type ProjectEditorTarget = z.infer<typeof ProjectEditorTarget>;
+
 export async function openProjectFileInEditor(
 	state: CommonspaceState,
 	projectId: string,
-	rootIndex: number,
-	path: string,
-	line: number,
+	{ rootIndex, path, line }: ProjectEditorTarget,
 	editorPath = process.env.COMMONSPACE_EDITOR_PATH ?? "code",
 ): Promise<{ opened: true }> {
 	if (!Number.isSafeInteger(line) || line < 1 || line > 10_000_000) {
@@ -155,13 +168,12 @@ export async function openProjectFileInEditor(
 			"Editor line must be a positive integer",
 		);
 	}
-	const target = await resolveProjectPath(
-		state,
+	const target = await resolveProjectPath(state, {
 		projectId,
 		rootIndex,
 		path,
-		false,
-	);
+		allowRoot: false,
+	});
 	const info = await stat(target.absolutePath);
 	if (!info.isFile())
 		throw new ProjectFileError(
@@ -189,6 +201,8 @@ interface ParsedGitChange {
 	worktreeStatus: string;
 	status: ProjectGitFileStatus;
 }
+
+type GitLineCounts = Pick<ProjectGitFileChange, "additions" | "deletions">;
 
 function safeRelativePath(value: string, allowRoot: boolean): string {
 	if (value === "" && allowRoot) return "";
@@ -234,10 +248,7 @@ function insideRoot(root: string, target: string): boolean {
 
 async function resolveProjectPath(
 	state: CommonspaceState,
-	projectId: string,
-	rootIndex: number,
-	path: string,
-	allowRoot: boolean,
+	{ projectId, rootIndex, path, allowRoot }: ProjectPathLookup,
 ): Promise<ProjectPath> {
 	const project = state.projects.find(
 		(candidate) => candidate.id === projectId,
@@ -364,13 +375,12 @@ export async function listProjectFiles(
 	rootIndex: number,
 	path: string,
 ): Promise<ProjectDirectoryResponse> {
-	const resolved = await resolveProjectPath(
-		state,
+	const resolved = await resolveProjectPath(state, {
 		projectId,
 		rootIndex,
 		path,
-		true,
-	);
+		allowRoot: true,
+	});
 	const directory = await stat(resolved.absolutePath);
 	if (!directory.isDirectory())
 		throw new ProjectFileError(
@@ -437,13 +447,12 @@ export async function openProjectFile(
 	rootIndex: number,
 	path: string,
 ): Promise<OpenProjectFile> {
-	const resolved = await resolveProjectPath(
-		state,
+	const resolved = await resolveProjectPath(state, {
 		projectId,
 		rootIndex,
 		path,
-		false,
-	);
+		allowRoot: false,
+	});
 	assertSafeFileName(resolved.relativePath);
 	assertSafeFileName(resolved.absolutePath);
 	const handle = await open(
@@ -693,8 +702,7 @@ function parseGitStatus(output: string): ParsedGitChange[] {
 		const code = record.slice(0, 2);
 		if (code === "!!") continue;
 		const path = record.slice(3);
-		const renamed =
-			code[0] === "R" || code[0] === "C" || code[1] === "R" || code[1] === "C";
+		const renamed = /[RC]/u.test(code);
 		const oldPath = renamed ? records[index + 1] : undefined;
 		if (renamed) index += 1;
 		const change: ParsedGitChange = {
@@ -709,13 +717,8 @@ function parseGitStatus(output: string): ParsedGitChange[] {
 	return changes;
 }
 
-function parseNumstat(
-	output: string,
-): Map<string, { additions: number | null; deletions: number | null }> {
-	const counts = new Map<
-		string,
-		{ additions: number | null; deletions: number | null }
-	>();
+function parseNumstat(output: string): Map<string, GitLineCounts> {
+	const counts = new Map<string, GitLineCounts>();
 	for (const line of output.split("\n")) {
 		if (line === "") continue;
 		const firstTab = line.indexOf("\t");
@@ -738,14 +741,12 @@ function lineCount(text: string): number {
 	return text.endsWith("\n") ? lines - 1 : lines;
 }
 
-async function untrackedCounts(
+async function untrackedTextCounts(
 	state: CommonspaceState,
 	projectId: string,
 	rootIndex: number,
 	path: string,
-	preview: ProjectFilePreview,
-): Promise<{ additions: number | null; deletions: number | null }> {
-	if (preview !== "text") return { additions: null, deletions: null };
+): Promise<GitLineCounts> {
 	try {
 		const file = await openProjectFile(state, projectId, rootIndex, path);
 		try {
@@ -766,13 +767,12 @@ export async function projectGitStatus(
 	projectId: string,
 	rootIndex: number,
 ): Promise<ProjectGitStatusResponse> {
-	const resolved = await resolveProjectPath(
-		state,
+	const resolved = await resolveProjectPath(state, {
 		projectId,
 		rootIndex,
-		"",
-		true,
-	);
+		path: "",
+		allowRoot: true,
+	});
 	const gitRoot = await exactGitRoot(resolved.root);
 	if (gitRoot === null)
 		return {
@@ -793,10 +793,7 @@ export async function projectGitStatus(
 	const parsed = parseGitStatus(statusOutput);
 	const numstat =
 		head === null
-			? new Map<
-					string,
-					{ additions: number | null; deletions: number | null }
-				>()
+			? new Map<string, GitLineCounts>()
 			: parseNumstat(
 					await runGit(gitRoot, [
 						"diff",
@@ -816,19 +813,22 @@ export async function projectGitStatus(
 					credentialBearingFileName(basename(change.oldPath))
 						? "blocked"
 						: namedClassification(change.path).preview;
-				const counts =
-					change.status === "untracked"
-						? await untrackedCounts(
-								state,
-								projectId,
-								rootIndex,
-								change.path,
-								preview,
-							)
-						: (numstat.get(change.path) ?? {
-								additions: null,
-								deletions: null,
-							});
+				let counts: GitLineCounts;
+				if (change.status !== "untracked") {
+					counts = numstat.get(change.path) ?? {
+						additions: null,
+						deletions: null,
+					};
+				} else if (preview === "text") {
+					counts = await untrackedTextCounts(
+						state,
+						projectId,
+						rootIndex,
+						change.path,
+					);
+				} else {
+					counts = { additions: null, deletions: null };
+				}
 				const file: ProjectGitFileChange = {
 					path: change.path,
 					status: change.status,
@@ -925,13 +925,12 @@ export async function projectGitDiff(
 			"Changed file not found",
 		);
 	if (change.oldPath !== undefined) assertSafeFileName(change.oldPath);
-	const resolved = await resolveProjectPath(
-		state,
+	const resolved = await resolveProjectPath(state, {
 		projectId,
 		rootIndex,
-		"",
-		true,
-	);
+		path: "",
+		allowRoot: true,
+	});
 	if (change.status === "untracked" || status.head === null) {
 		const file = await openProjectFile(
 			state,

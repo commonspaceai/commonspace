@@ -17,7 +17,13 @@ const options = {
 	root,
 	port: 0,
 	runBudgetSeconds: 30,
-	logger: { info: () => undefined, warn: (message) => console.error(message) },
+	logger: {
+		info: () => undefined,
+		warn: (message) =>
+			process.stderr.write(
+				`${message instanceof Error ? (message.stack ?? message.message) : message}\n`,
+			),
+	},
 };
 switch (adapter) {
 	case "claude-code": {

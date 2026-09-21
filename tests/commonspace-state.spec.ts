@@ -8,8 +8,63 @@ import {
 } from "../server/src/state.ts";
 
 describe("Commonspace local state", () => {
+	it("rejects unknown Agents in Channel membership", () => {
+		expect(() =>
+			applyMutation(
+				createInitialState(),
+				{
+					action: "create-channel",
+					name: "invalid",
+					agentIds: ["missing-agent"],
+				},
+				{ ids: () => "channel-1", now: () => "2026-08-25T00:00:00.000Z" },
+			),
+		).toThrow("unknown channel agent: missing-agent");
+		const channelState = applyMutation(
+			createInitialState(),
+			{ action: "create-channel", name: "valid", agentIds: [] },
+			{ ids: () => "channel-1", now: () => "2026-08-25T00:00:00.000Z" },
+		);
+		for (const mutation of [
+			{
+				action: "set-channel-agents" as const,
+				channelId: "channel-1",
+				agentIds: ["missing-agent"],
+			},
+			{
+				action: "set-channel-configuration" as const,
+				channelId: "channel-1",
+				agentIds: ["missing-agent"],
+				instructions: "",
+				summary: "",
+			},
+		]) {
+			expect(() => applyMutation(channelState, mutation)).toThrow(
+				"unknown channel agent: missing-agent",
+			);
+		}
+	});
+
 	it("creates filesystem projects and project-independent channels with real agent membership", () => {
-		const initial = createInitialState();
+		const initial = {
+			...createInitialState(),
+			agents: [
+				{
+					id: "frontend",
+					displayName: "Frontend",
+					adapter: "hermes" as const,
+					model: null,
+					createdAt: "2026-08-25T00:00:00.000Z",
+				},
+				{
+					id: "backend",
+					displayName: "Backend",
+					adapter: "hermes" as const,
+					model: null,
+					createdAt: "2026-08-25T00:00:00.000Z",
+				},
+			],
+		};
 		const withProject = applyMutation(
 			initial,
 			{

@@ -20,10 +20,26 @@ const MAX_PATCH_LINES = 2_000;
 const MAX_PATCH_CHARS = 128_000;
 const MAX_SNAPSHOT_FILE_BYTES = 2 * 1024 * 1024;
 
-interface SnapshotChange {
+interface FileStatusChange {
 	path: string;
 	status: CommonspaceRunFileChange["status"];
+}
+
+interface SnapshotChange extends FileStatusChange {
 	content: string | null;
+}
+
+interface BoundedPatch {
+	patch?: string;
+	patchTruncated?: boolean;
+}
+
+interface RunComparison {
+	before: RunSnapshot;
+	after: RunSnapshot;
+	beforeByPath: ReadonlyMap<string, SnapshotChange>;
+	afterByPath: ReadonlyMap<string, SnapshotChange>;
+	committedByPath: ReadonlyMap<string, FileStatusChange>;
 }
 
 export interface RunSnapshot {
@@ -68,14 +84,9 @@ function statusOf(code: string): CommonspaceRunFileChange["status"] {
 	return "modified";
 }
 
-function parseStatus(
-	output: string,
-): Array<{ path: string; status: CommonspaceRunFileChange["status"] }> {
+function parseStatus(output: string): FileStatusChange[] {
 	const records = output.split("\0");
-	const changes: Array<{
-		path: string;
-		status: CommonspaceRunFileChange["status"];
-	}> = [];
+	const changes: FileStatusChange[] = [];
 	for (let index = 0; index < records.length; index += 1) {
 		const record = records[index];
 		if (record === undefined || record.length < 4) continue;
@@ -179,7 +190,7 @@ async function unifiedPatch(
 	path: string,
 	before: string | null,
 	after: string | null,
-): Promise<{ patch?: string; patchTruncated?: boolean }> {
+): Promise<BoundedPatch> {
 	if (before === null && after === null) return {};
 	const directory = await mkdtemp(join(tmpdir(), "commonspace-run-diff-"));
 	try {
@@ -204,30 +215,36 @@ async function unifiedPatch(
 					? String(error.stdout)
 					: "";
 		}
-		const lines = output.split("\n");
-		if (lines[0]?.startsWith("diff --git "))
-			lines[0] = `diff --git a/${path} b/${path}`;
-		const oldLine = lines.findIndex((line) => line.startsWith("--- "));
-		const newLine = lines.findIndex((line) => line.startsWith("+++ "));
-		if (oldLine >= 0)
-			lines[oldLine] = before === null ? "--- /dev/null" : `--- a/${path}`;
-		if (newLine >= 0)
-			lines[newLine] = after === null ? "+++ /dev/null" : `+++ b/${path}`;
-		const full = lines.join("\n");
-		const boundedLines = full
-			.split("\n")
-			.slice(0, MAX_PATCH_LINES)
-			.join("\n")
-			.slice(0, MAX_PATCH_CHARS);
-		if (boundedLines === "") return {};
-		const result: { patch?: string; patchTruncated?: boolean } = {
-			patch: boundedLines,
-		};
-		if (boundedLines.length < full.length) result.patchTruncated = true;
-		return result;
+		return normalizePatch(path, before, after, output);
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}
+}
+
+function normalizePatch(
+	path: string,
+	before: string | null,
+	after: string | null,
+	output: string,
+): BoundedPatch {
+	const lines = output.split("\n");
+	if (lines[0]?.startsWith("diff --git "))
+		lines[0] = `diff --git a/${path} b/${path}`;
+	const oldLine = lines.findIndex((line) => line.startsWith("--- "));
+	const newLine = lines.findIndex((line) => line.startsWith("+++ "));
+	if (oldLine >= 0)
+		lines[oldLine] = before === null ? "--- /dev/null" : `--- a/${path}`;
+	if (newLine >= 0)
+		lines[newLine] = after === null ? "+++ /dev/null" : `+++ b/${path}`;
+	const full = lines.join("\n");
+	const patch = lines
+		.slice(0, MAX_PATCH_LINES)
+		.join("\n")
+		.slice(0, MAX_PATCH_CHARS);
+	if (patch === "") return {};
+	return patch.length < full.length
+		? { patch, patchTruncated: true }
+		: { patch };
 }
 
 function counts(patch: string | undefined): {
@@ -247,9 +264,7 @@ function counts(patch: string | undefined): {
 async function committedChanges(
 	before: RunSnapshot,
 	after: RunSnapshot,
-): Promise<
-	Array<{ path: string; status: CommonspaceRunFileChange["status"] }>
-> {
+): Promise<FileStatusChange[]> {
 	if (before.head === null || after.head === null || before.head === after.head)
 		return [];
 	const output = await git(after.root, [
@@ -260,10 +275,7 @@ async function committedChanges(
 		after.head,
 	]);
 	const tokens = output.split("\0");
-	const changes: Array<{
-		path: string;
-		status: CommonspaceRunFileChange["status"];
-	}> = [];
+	const changes: FileStatusChange[] = [];
 	for (let index = 0; index < tokens.length; ) {
 		const code = tokens[index++];
 		if (code === undefined || code === "") continue;
@@ -275,6 +287,41 @@ async function committedChanges(
 		changes.push({ path, status: statusOf(code) });
 	}
 	return changes;
+}
+
+async function observedChange(
+	path: string,
+	comparison: RunComparison,
+): Promise<CommonspaceRunFileChange | undefined> {
+	const prior = comparison.beforeByPath.get(path);
+	const current = comparison.afterByPath.get(path);
+	const committed = comparison.committedByPath.get(path);
+	const beforeContent =
+		prior === undefined
+			? await contentAtHead(
+					comparison.before.root,
+					comparison.before.head,
+					path,
+				)
+			: prior.content;
+	const afterContent =
+		current?.content ??
+		(current?.status === "deleted" || committed?.status === "deleted"
+			? null
+			: await textFile(join(comparison.after.root, ...path.split("/"))));
+	if (prior?.status === current?.status && beforeContent === afterContent)
+		return undefined;
+	const patch = await unifiedPatch(path, beforeContent, afterContent);
+	return {
+		path,
+		status:
+			current?.status === "untracked" && prior === undefined
+				? "added"
+				: (current?.status ?? committed?.status ?? "deleted"),
+		preExisting: prior !== undefined,
+		...counts(patch.patch),
+		...patch,
+	};
 }
 
 export async function completeRunAttribution(
@@ -314,33 +361,17 @@ export async function completeRunAttribution(
 			...committedByPath.keys(),
 		]),
 	].sort();
+	const comparison: RunComparison = {
+		before,
+		after,
+		beforeByPath,
+		afterByPath,
+		committedByPath,
+	};
 	const observed: CommonspaceRunFileChange[] = [];
 	for (const path of paths) {
-		const prior = beforeByPath.get(path);
-		const current = afterByPath.get(path);
-		const committed = committedByPath.get(path);
-		const beforeContent =
-			prior === undefined
-				? await contentAtHead(before.root, before.head, path)
-				: prior.content;
-		const afterContent =
-			current?.content ??
-			(current?.status === "deleted" || committed?.status === "deleted"
-				? null
-				: await textFile(join(after.root, ...path.split("/"))));
-		if (prior?.status === current?.status && beforeContent === afterContent)
-			continue;
-		const patch = await unifiedPatch(path, beforeContent, afterContent);
-		observed.push({
-			path,
-			status:
-				current?.status === "untracked" && prior === undefined
-					? "added"
-					: (current?.status ?? committed?.status ?? "deleted"),
-			preExisting: prior !== undefined,
-			...counts(patch.patch),
-			...patch,
-		});
+		const change = await observedChange(path, comparison);
+		if (change !== undefined) observed.push(change);
 	}
 	return {
 		available: true,

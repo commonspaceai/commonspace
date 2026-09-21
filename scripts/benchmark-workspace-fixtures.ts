@@ -23,7 +23,7 @@ export enum BenchmarkWorkspaceShape {
 	MultiChannel = "multi-channel",
 }
 
-export const benchmarkAgents: CommonspaceAgentProfile[] = [
+const benchmarkAgents: CommonspaceAgentProfile[] = [
 	{
 		id: "codex",
 		displayName: "Benchmark Agent",

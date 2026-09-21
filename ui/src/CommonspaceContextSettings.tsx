@@ -1,6 +1,8 @@
 import type {
 	CommonspaceAgentProfile,
 	CommonspaceBootstrap,
+	CommonspaceMessage,
+	CommonspacePin,
 	HarnessCapabilityGroup,
 	HarnessCapabilityInventory,
 } from "@commonspace/shared";
@@ -176,6 +178,40 @@ interface ChannelSettingsEditorProps extends SettingsPaneProps {
 	channel: CommonspaceBootstrap["state"]["channels"][number];
 }
 
+interface ChannelPinRow {
+	readonly label: string;
+	readonly pin: CommonspacePin;
+	readonly source: CommonspaceMessage | undefined;
+}
+
+function channelPinRow(
+	pin: CommonspacePin,
+	messagesById: ReadonlyMap<string, CommonspaceMessage>,
+): ChannelPinRow {
+	if (pin.kind === "note") {
+		return { label: pin.note, pin, source: undefined };
+	}
+	const source = messagesById.get(pin.messageId);
+	if (source?.deletedAt !== undefined) {
+		return { label: "Deleted message", pin, source };
+	}
+	if (pin.kind === "message") {
+		return {
+			label: source?.text || "Attachment message",
+			pin,
+			source,
+		};
+	}
+	const attachment =
+		source?.attachments?.find((file) => file.id === pin.attachmentId) ??
+		source?.files?.find((file) => file.id === pin.attachmentId);
+	return {
+		label: attachment?.name ?? "Unavailable attachment",
+		pin,
+		source,
+	};
+}
+
 export function ChannelSettingsPane(props: SettingsPaneProps) {
 	const channel = props.bootstrap.state.channels.find(
 		(candidate) => candidate.id === props.id,
@@ -216,11 +252,15 @@ function ChannelSettingsEditor({
 			);
 		});
 	}, [agentIds, agents, filter, query]);
-	const pins = bootstrap.state.pins.filter(
-		(pin) =>
-			pin.removedAt === null &&
-			pin.scope.kind === "channel" &&
-			pin.scope.id === id,
+	const pins = useMemo(
+		() =>
+			bootstrap.state.pins.filter(
+				(pin) =>
+					pin.removedAt === null &&
+					pin.scope.kind === "channel" &&
+					pin.scope.id === id,
+			),
+		[bootstrap.state.pins, id],
 	);
 
 	const messagesById = useMemo(
@@ -232,6 +272,10 @@ function ChannelSettingsEditor({
 				]),
 			),
 		[bootstrap.state.messages, id],
+	);
+	const pinRows = useMemo(
+		() => pins.map((pin) => channelPinRow(pin, messagesById)),
+		[messagesById, pins],
 	);
 
 	const save = async (event: FormEvent) => {
@@ -465,7 +509,7 @@ function ChannelSettingsEditor({
 								Pinned messages & notes
 							</h3>
 							<span className="text-xs text-muted-foreground">
-								{pins.length}
+								{pinRows.length}
 							</span>
 						</div>
 						<p className="mt-2 text-xs text-muted-foreground">
@@ -473,59 +517,35 @@ function ChannelSettingsEditor({
 							this channel.
 						</p>
 						<div className="mt-3 grid gap-2">
-							{pins.length === 0 && (
+							{pinRows.length === 0 && (
 								<p className="text-xs text-muted-foreground">
 									No pins yet. Open a message’s menu and choose Pin message, or
 									add a note below.
 								</p>
 							)}
-							{pins.map((pin) => {
-								const source =
-									pin.messageId === undefined
-										? undefined
-										: messagesById.get(pin.messageId);
-								const attachment =
-									pin.kind === "attachment"
-										? [
-												...(source?.attachments ?? []),
-												...(source?.files ?? []),
-											].find((file) => file.id === pin.attachmentId)
-										: undefined;
-								const label =
-									pin.kind === "note"
-										? pin.note
-										: source?.deletedAt !== undefined
-											? "Deleted message"
-											: pin.kind === "attachment"
-												? (attachment?.name ?? "Unavailable attachment")
-												: source?.text || "Attachment message";
-
-								return (
-									<div
-										key={pin.id}
-										className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-sm border bg-muted p-3 text-xs"
-									>
-										<div className="min-w-0">
-											{source !== undefined && (
-												<p className="mb-1 font-semibold">
-													{source.authorName}
-												</p>
-											)}
-											<p className="whitespace-pre-wrap break-words">{label}</p>
-										</div>
-										<button
-											type="button"
-											className="text-destructive"
-											aria-label={`Remove channel pin ${label}`}
-											onClick={() => {
-												void store.removePin(pin.id);
-											}}
-										>
-											Remove
-										</button>
+							{pinRows.map(({ label, pin, source }) => (
+								<div
+									key={pin.id}
+									className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-sm border bg-muted p-3 text-xs"
+								>
+									<div className="min-w-0">
+										{source !== undefined && (
+											<p className="mb-1 font-semibold">{source.authorName}</p>
+										)}
+										<p className="whitespace-pre-wrap break-words">{label}</p>
 									</div>
-								);
-							})}
+									<button
+										type="button"
+										className="text-destructive"
+										aria-label={`Remove channel pin ${label}`}
+										onClick={() => {
+											void store.removePin(pin.id);
+										}}
+									>
+										Remove
+									</button>
+								</div>
+							))}
 							<div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
 								<input
 									className="min-h-9 rounded-sm border px-3 text-[13px]"

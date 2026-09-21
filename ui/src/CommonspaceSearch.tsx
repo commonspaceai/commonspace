@@ -28,6 +28,7 @@ import {
 	useDeferredValue,
 	useEffect,
 	useId,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
@@ -324,6 +325,15 @@ function kindLabel(kind: CommonspaceSearchKind): string {
 	return `${kind.slice(0, 1).toLocaleUpperCase()}${kind.slice(1)}`;
 }
 
+const searchReceiptFormatter = new Intl.DateTimeFormat(undefined, {
+	month: "short",
+	day: "numeric",
+	hour: "numeric",
+	minute: "2-digit",
+});
+
+const emptySearchResults: readonly CommonspaceSearchResult[] = [];
+
 function resultReceiptLabel(result: CommonspaceSearchResult): string {
 	const receiptLocation = result.receipt.split(" · ")[0]?.trim();
 	const location =
@@ -336,12 +346,7 @@ function resultReceiptLabel(result: CommonspaceSearchResult): string {
 	const time =
 		occurredAt === undefined
 			? undefined
-			: new Intl.DateTimeFormat(undefined, {
-					month: "short",
-					day: "numeric",
-					hour: "numeric",
-					minute: "2-digit",
-				}).format(new Date(occurredAt));
+			: searchReceiptFormatter.format(new Date(occurredAt));
 	return [location, time]
 		.filter((value): value is string => value !== undefined)
 		.join(" · ");
@@ -364,7 +369,15 @@ function browseResultSections(
 ): SearchResultSection[] {
 	const indexed = results.map((result, index) => ({ result, index }));
 	const recent = indexed.slice(0, 4);
-	const remaining = indexed.slice(recent.length);
+	const remainingByKind = new Map<
+		CommonspaceSearchKind,
+		IndexedSearchResult[]
+	>();
+	for (const item of indexed.slice(recent.length)) {
+		const grouped = remainingByKind.get(item.result.kind);
+		if (grouped === undefined) remainingByKind.set(item.result.kind, [item]);
+		else grouped.push(item);
+	}
 	const sections: SearchResultSection[] = [];
 	if (recent.length > 0)
 		sections.push({
@@ -374,8 +387,8 @@ function browseResultSections(
 			mixedKinds: true,
 		});
 	for (const kind of COMMONSPACE_SEARCH_KINDS) {
-		const grouped = remaining.filter((item) => item.result.kind === kind);
-		if (grouped.length > 0)
+		const grouped = remainingByKind.get(kind);
+		if (grouped !== undefined)
 			sections.push({
 				id: kind,
 				label: searchTypes[kind].label,
@@ -455,6 +468,8 @@ function SearchResultOption({
 	);
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The cohesive dialog controller avoids a larger cross-component prop and callback surface.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: The cohesive dialog controller keeps request, focus, and keyboard ownership in one place.
 export function CommonspaceSearchDialog({
 	projects,
 	onClose,
@@ -487,18 +502,22 @@ export function CommonspaceSearchDialog({
 	const error =
 		currentOutcome?.kind === "error" ? currentOutcome.message : null;
 	const pending = currentOutcome === null;
-	const results = response?.results ?? [];
+	const results = response?.results ?? emptySearchResults;
 	const browsing = query.trim() === "";
-	const resultSections = browsing
-		? browseResultSections(results)
-		: [
-				{
-					id: "matches",
-					label: "Results",
-					results: results.map((result, index) => ({ result, index })),
-					mixedKinds: true,
-				},
-			];
+	const resultSections = useMemo(
+		() =>
+			browsing
+				? browseResultSections(results)
+				: [
+						{
+							id: "matches",
+							label: "Results",
+							results: results.map((result, index) => ({ result, index })),
+							mixedKinds: true,
+						},
+					],
+		[browsing, results],
+	);
 	const boundedActiveIndex =
 		results.length === 0 ? 0 : Math.min(activeIndex, results.length - 1);
 	const activeResult = results[boundedActiveIndex];

@@ -545,16 +545,33 @@ export type CommonspacePinScope =
 	| { kind: "channel"; id: string }
 	| { kind: "thread"; id: string };
 
-export interface CommonspacePin {
+interface CommonspacePinBase {
 	id: string;
 	scope: CommonspacePinScope;
-	kind: "message" | "attachment" | "note";
-	messageId?: string;
-	attachmentId?: string;
-	note?: string;
 	createdAt: string;
 	removedAt: string | null;
 }
+
+export interface CommonspaceMessagePin extends CommonspacePinBase {
+	kind: "message";
+	messageId: string;
+}
+
+export interface CommonspaceAttachmentPin extends CommonspacePinBase {
+	kind: "attachment";
+	messageId: string;
+	attachmentId: string;
+}
+
+export interface CommonspaceNotePin extends CommonspacePinBase {
+	kind: "note";
+	note: string;
+}
+
+export type CommonspacePin =
+	| CommonspaceMessagePin
+	| CommonspaceAttachmentPin
+	| CommonspaceNotePin;
 
 export interface CommonspacePermissionOption {
 	optionId: string;

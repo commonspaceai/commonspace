@@ -36,6 +36,7 @@ import {
 	listProjectFiles,
 	openProjectFile,
 	openProjectFileInEditor,
+	ProjectEditorTarget,
 	ProjectFileError,
 	projectGitDiff,
 	projectGitStatus,
@@ -52,12 +53,12 @@ import {
 const MAX_BODY_BYTES = 128 * 1024;
 const MAX_SEND_BODY_BYTES = 24 * 1024 * 1024;
 
-const conversationSchema = z.object({
+const conversationSchema = z.strictObject({
 	kind: z.enum(["channel", "dm"]),
 	id: z.string(),
 });
 const reasoningSchema = z.enum(COMMONSPACE_REASONING_VALUES);
-const notificationSettingsSchema = z.object({
+const notificationSettingsSchema = z.strictObject({
 	enabled: z.boolean(),
 	replies: z.boolean(),
 	mentions: z.boolean(),
@@ -65,41 +66,41 @@ const notificationSettingsSchema = z.object({
 	failures: z.boolean(),
 	sound: z.boolean(),
 });
-const contextRequestShape = z.object({
+const contextRequestShape = z.strictObject({
 	summary: z.string(),
 	decisions: z.array(z.string()).optional(),
 	openQuestions: z.array(z.string()).optional(),
 });
-const pinScopeSchema = z.object({
+const pinScopeSchema = z.strictObject({
 	kind: z.enum(["channel", "thread"]),
 	id: z.string(),
 });
-const imageAttachmentSchema = z.object({
+const imageAttachmentSchema = z.strictObject({
 	name: z.string(),
 	mimeType: z.enum(["image/png", "image/jpeg", "image/gif", "image/webp"], {
 		error: "unsupported image type",
 	}),
 	data: z.string(),
 });
-const fileAttachmentSchema = z.object({
+const fileAttachmentSchema = z.strictObject({
 	name: z.string(),
 	mimeType: z.string(),
 	data: z.string(),
 });
 
-const importWorkspaceBodySchema = z.object({
+const importWorkspaceBodySchema = z.strictObject({
 	archive: z.json(),
 	projectMappings: z.record(z.string(), z.array(z.string())),
 }) satisfies z.ZodType<{
 	archive: JsonValue;
 	projectMappings: Record<string, string[]>;
 }>;
-const retentionPreviewBodySchema = z.object({
+const retentionPreviewBodySchema = z.strictObject({
 	conversation: conversationSchema,
 }) satisfies z.ZodType<{
 	conversation: ConversationRef;
 }>;
-const applyRetentionRequestSchema = z.object({
+const applyRetentionRequestSchema = z.strictObject({
 	conversation: conversationSchema,
 	expectedRevision: z.number(),
 }) satisfies z.ZodType<ApplyRetentionRequest>;
@@ -107,75 +108,78 @@ const contextRequestSchema =
 	contextRequestShape satisfies z.ZodType<UpdateChannelContextRequest>;
 const threadContextRequestSchema =
 	contextRequestShape satisfies z.ZodType<UpdateThreadContextRequest>;
-const discoverAgentsRequestSchema = z.object({
+const discoverAgentsRequestSchema = z.strictObject({
 	adapter: z.enum(AGENT_ADAPTER_KINDS),
 }) satisfies z.ZodType<DiscoverAgentsRequest>;
 const mutationSchema = z.discriminatedUnion(
 	"action",
 	[
-		z.object({ action: z.literal("mark-inbox-read") }),
-		z.object({
+		z.strictObject({ action: z.literal("mark-inbox-read") }),
+		z.strictObject({
 			action: z.literal("mark-inbox-item-read"),
 			messageId: z.string(),
 		}),
-		z.object({
+		z.strictObject({
 			action: z.literal("set-inbox-item-unread"),
 			messageId: z.string(),
 			unread: z.boolean(),
 		}),
-		z.object({
+		z.strictObject({
 			action: z.literal("set-inbox-item-saved"),
 			messageId: z.string(),
 			saved: z.boolean(),
 		}),
-		z.object({
+		z.strictObject({
 			action: z.literal("set-session-followed"),
 			sessionId: z.string(),
 			followed: z.boolean(),
 		}),
-		z.object({
+		z.strictObject({
 			action: z.literal("set-session-muted"),
 			sessionId: z.string(),
 			muted: z.boolean(),
 		}),
-		z.object({
+		z.strictObject({
 			action: z.literal("set-notifications"),
 			notifications: notificationSettingsSchema,
 		}),
-		z.object({
+		z.strictObject({
 			action: z.literal("create-project"),
 			name: z.string(),
 			paths: z.array(z.string()),
 		}),
-		z.object({
+		z.strictObject({
 			action: z.literal("add-project-path"),
 			projectId: z.string(),
 			path: z.string(),
 		}),
-		z.object({ action: z.literal("remove-project"), projectId: z.string() }),
-		z.object({
+		z.strictObject({
+			action: z.literal("remove-project"),
+			projectId: z.string(),
+		}),
+		z.strictObject({
 			action: z.literal("create-channel"),
 			name: z.string(),
 			agentIds: z.array(z.string()),
 		}),
-		z.object({
+		z.strictObject({
 			action: z.literal("set-channel-agents"),
 			channelId: z.string(),
 			agentIds: z.array(z.string()),
 		}),
-		z.object({
+		z.strictObject({
 			action: z.literal("set-channel-context"),
 			channelId: z.string(),
 			instructions: z.string(),
 		}),
-		z.object({
+		z.strictObject({
 			action: z.literal("set-channel-memory"),
 			channelId: z.string(),
 			summary: z.string(),
 			decisions: z.array(z.string()).optional(),
 			openQuestions: z.array(z.string()).optional(),
 		}),
-		z.object({
+		z.strictObject({
 			action: z.literal("set-channel-configuration"),
 			channelId: z.string(),
 			agentIds: z.array(z.string()),
@@ -184,20 +188,20 @@ const mutationSchema = z.discriminatedUnion(
 			decisions: z.array(z.string()).optional(),
 			openQuestions: z.array(z.string()).optional(),
 		}),
-		z.object({
+		z.strictObject({
 			action: z.literal("set-defaults"),
 			model: z.string().nullable().optional(),
 			reasoning: reasoningSchema.optional(),
 			maxAgentsPerTurn: z.number().optional(),
 			memoryThreads: z.number().optional(),
 		}),
-		z.object({
+		z.strictObject({
 			action: z.literal("add-discovered-agent"),
 			agentId: z.string(),
 			adapter: z.enum(AGENT_ADAPTER_KINDS).optional(),
 			fullAccess: z.boolean().optional(),
 		}),
-		z.object({
+		z.strictObject({
 			action: z.literal("update-agent-profile"),
 			agentId: z.string(),
 			displayName: z.string(),
@@ -205,13 +209,16 @@ const mutationSchema = z.discriminatedUnion(
 			accentColor: z.string().optional(),
 			fullAccess: z.boolean().optional(),
 		}),
-		z.object({ action: z.literal("remove-agent"), agentId: z.string() }),
-		z.object({ action: z.literal("reset-dm"), agentId: z.string() }),
-		z.object({ action: z.literal("remove-channel"), channelId: z.string() }),
+		z.strictObject({ action: z.literal("remove-agent"), agentId: z.string() }),
+		z.strictObject({ action: z.literal("reset-dm"), agentId: z.string() }),
+		z.strictObject({
+			action: z.literal("remove-channel"),
+			channelId: z.string(),
+		}),
 	],
 	{ error: "unknown mutation" },
 ) satisfies z.ZodType<CommonspaceMutation>;
-const sendMessageRequestSchema = z.object({
+const sendMessageRequestSchema = z.strictObject({
 	conversation: conversationSchema,
 	text: z.string(),
 	projectIds: z.array(z.string()).optional(),
@@ -229,57 +236,51 @@ const rerouteAssignmentSchema = z.strictObject({
 	projectIds: z.array(z.string()),
 }) satisfies z.ZodType<RerouteAssignmentRequest>;
 const retryRoutingSchema = z.discriminatedUnion("mode", [
-	z.object({ sourceMessageId: z.string(), mode: z.literal("ai") }),
-	z.object({
+	z.strictObject({ sourceMessageId: z.string(), mode: z.literal("ai") }),
+	z.strictObject({
 		sourceMessageId: z.string(),
 		mode: z.literal("manual"),
 		agentId: z.string(),
 	}),
 ]) satisfies z.ZodType<RetryRoutingRequest>;
-const editMessageBodySchema = z.object({
+const editMessageBodySchema = z.strictObject({
 	text: z.string(),
 	projectIds: z.array(z.string()).optional(),
 }) satisfies z.ZodType<Omit<EditMessageRequest, "messageId">>;
 const addPinRequestSchema = z.discriminatedUnion("kind", [
-	z.object({
+	z.strictObject({
 		scope: pinScopeSchema,
 		kind: z.literal("message"),
 		messageId: z.string(),
 	}),
-	z.object({
+	z.strictObject({
 		scope: pinScopeSchema,
 		kind: z.literal("attachment"),
 		messageId: z.string(),
 		attachmentId: z.string(),
 	}),
-	z.object({
+	z.strictObject({
 		scope: pinScopeSchema,
 		kind: z.literal("note"),
 		note: z.string(),
 	}),
 ]) satisfies z.ZodType<AddPinRequest>;
-const stopAgentRunsSchema = z.object({
+const stopAgentRunsSchema = z.strictObject({
 	messageId: z.string(),
 	agentId: z.string().optional(),
 }) satisfies z.ZodType<StopAgentRunsRequest>;
-const reorderFollowupSchema = z.object({
+const reorderFollowupSchema = z.strictObject({
 	messageId: z.string(),
 	direction: z.enum(["up", "down"]),
 }) satisfies z.ZodType<ReorderFollowupRequest>;
-const removeFollowupSchema = z.object({
+const removeFollowupSchema = z.strictObject({
 	messageId: z.string(),
 }) satisfies z.ZodType<RemoveFollowupRequest>;
-const editorTargetSchema = z.object({
-	path: z.string(),
-	rootIndex: z.number(),
-	line: z.number(),
-});
-const permissionResponseSchema = z.object({ optionId: z.string() });
+const permissionResponseSchema = z.strictObject({ optionId: z.string() });
 const searchKindSet: ReadonlySet<string> = new Set(COMMONSPACE_SEARCH_KINDS);
 
 function requestErrorMessage(cause: unknown): string {
-	if (cause instanceof z.ZodError)
-		return cause.issues[0]?.message ?? "invalid request";
+	if (cause instanceof z.ZodError) return z.prettifyError(cause);
 	return cause instanceof Error ? cause.message : String(cause);
 }
 
@@ -429,15 +430,10 @@ function sendProjectError(res: Response, cause: unknown): void {
 	});
 }
 
-export function createCommonspaceApp({
-	service,
-	mcpGateway,
-	directoryPicker,
-	uiRoot,
-	workspaceImportBodyLimitBytes = MAX_WORKSPACE_IMPORT_BODY_BYTES,
-}: CreateCommonspaceAppOptions): Express {
-	const app = express();
-	const pickDirectory = directoryPicker ?? selectLocalDirectory;
+function configureApiTransport(
+	app: Express,
+	workspaceImportBodyLimitBytes: number,
+): void {
 	app.disable("x-powered-by");
 
 	app.use("/api", (req, res, next) => {
@@ -457,7 +453,13 @@ export function createCommonspaceApp({
 		express.json({ limit: workspaceImportBodyLimitBytes }),
 	);
 	app.use("/api", express.json({ limit: MAX_BODY_BYTES }));
+}
 
+function registerWorkspaceRoutes(
+	app: Express,
+	service: CommonspaceHostService,
+	mcpGateway: CommonspaceMcpGateway | undefined,
+): void {
 	app.get("/api/health", (_req, res) => {
 		res.json({ status: "ok" });
 	});
@@ -525,7 +527,12 @@ export function createCommonspaceApp({
 			});
 		}
 	});
+}
 
+function registerRetentionAndSearchRoutes(
+	app: Express,
+	service: CommonspaceHostService,
+): void {
 	app.post("/api/retention/preview", requireSameOrigin, (req, res) => {
 		try {
 			const body = retentionPreviewBodySchema.parse(req.body);
@@ -591,7 +598,12 @@ export function createCommonspaceApp({
 			});
 		}
 	});
+}
 
+function registerRoutingRoutes(
+	app: Express,
+	service: CommonspaceHostService,
+): void {
 	app.get("/api/routing", requireSameOrigin, (_req, res) => {
 		res.json(service.routing());
 	});
@@ -625,7 +637,12 @@ export function createCommonspaceApp({
 			});
 		}
 	});
+}
 
+function registerChannelContextRoutes(
+	app: Express,
+	service: CommonspaceHostService,
+): void {
 	app.get("/api/channels/:channelId/context", requireSameOrigin, (req, res) => {
 		try {
 			const channelId = req.params.channelId;
@@ -680,7 +697,12 @@ export function createCommonspaceApp({
 			}
 		},
 	);
+}
 
+function registerThreadContextRoutes(
+	app: Express,
+	service: CommonspaceHostService,
+): void {
 	app.get("/api/threads/:threadId/context", requireSameOrigin, (req, res) => {
 		try {
 			const threadId = req.params.threadId;
@@ -735,7 +757,12 @@ export function createCommonspaceApp({
 			}
 		},
 	);
+}
 
+function registerProjectRoutes(
+	app: Express,
+	service: CommonspaceHostService,
+): void {
 	app.get(
 		"/api/projects/:projectId/files",
 		requireSameOrigin,
@@ -786,14 +813,12 @@ export function createCommonspaceApp({
 		requireSameOrigin,
 		async (req, res) => {
 			try {
-				const body = editorTargetSchema.parse(req.body);
+				const body = ProjectEditorTarget.parse(req.body);
 				res.json(
 					await openProjectFileInEditor(
 						service.snapshot(),
 						projectIdParam(req.params.projectId),
-						body.rootIndex,
-						body.path,
-						body.line,
+						body,
 					),
 				);
 			} catch (error) {
@@ -838,7 +863,13 @@ export function createCommonspaceApp({
 			}
 		},
 	);
+}
 
+function registerAgentRoutes(
+	app: Express,
+	service: CommonspaceHostService,
+	pickDirectory: () => Promise<string | null>,
+): void {
 	app.get(
 		"/api/agents/:agentId/capabilities",
 		requireSameOrigin,
@@ -925,7 +956,12 @@ export function createCommonspaceApp({
 			});
 		}
 	});
+}
 
+function registerDeliveryRoutes(
+	app: Express,
+	service: CommonspaceHostService,
+): void {
 	app.post("/api/mutate", requireSameOrigin, async (req, res) => {
 		try {
 			await service.mutate(mutationSchema.parse(req.body));
@@ -980,7 +1016,12 @@ export function createCommonspaceApp({
 			});
 		}
 	});
+}
 
+function registerMessageAndPinRoutes(
+	app: Express,
+	service: CommonspaceHostService,
+): void {
 	app.post(
 		"/api/messages/:messageId/edit",
 		requireSameOrigin,
@@ -1049,7 +1090,12 @@ export function createCommonspaceApp({
 			});
 		}
 	});
+}
 
+function registerRunControlRoutes(
+	app: Express,
+	service: CommonspaceHostService,
+): void {
 	app.post(
 		"/api/permissions/:permissionId/respond",
 		requireSameOrigin,
@@ -1109,7 +1155,12 @@ export function createCommonspaceApp({
 			});
 		}
 	});
+}
 
+function registerAttachmentRoutes(
+	app: Express,
+	service: CommonspaceHostService,
+): void {
 	app.get(
 		"/api/attachments/:attachmentId",
 		requireSameOrigin,
@@ -1154,7 +1205,12 @@ export function createCommonspaceApp({
 			});
 		}
 	});
+}
 
+function registerFallbackRoutes(
+	app: Express,
+	uiRoot: string | undefined,
+): void {
 	app.use("/api", (_req, res) => {
 		res.status(404).json({ code: "not_found", error: "API route not found" });
 	});
@@ -1197,6 +1253,29 @@ export function createCommonspaceApp({
 		});
 	};
 	app.use(errorHandler);
+}
 
+export function createCommonspaceApp({
+	service,
+	mcpGateway,
+	directoryPicker,
+	uiRoot,
+	workspaceImportBodyLimitBytes = MAX_WORKSPACE_IMPORT_BODY_BYTES,
+}: CreateCommonspaceAppOptions): Express {
+	const app = express();
+	const pickDirectory = directoryPicker ?? selectLocalDirectory;
+	configureApiTransport(app, workspaceImportBodyLimitBytes);
+	registerWorkspaceRoutes(app, service, mcpGateway);
+	registerRetentionAndSearchRoutes(app, service);
+	registerRoutingRoutes(app, service);
+	registerChannelContextRoutes(app, service);
+	registerThreadContextRoutes(app, service);
+	registerProjectRoutes(app, service);
+	registerAgentRoutes(app, service, pickDirectory);
+	registerDeliveryRoutes(app, service);
+	registerMessageAndPinRoutes(app, service);
+	registerRunControlRoutes(app, service);
+	registerAttachmentRoutes(app, service);
+	registerFallbackRoutes(app, uiRoot);
 	return app;
 }

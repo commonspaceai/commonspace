@@ -12,7 +12,7 @@ import {
 	CommonspaceHostService,
 } from "../server/src/service.ts";
 
-export const enum SessionIsolationScenario {
+export enum SessionIsolationScenario {
 	Baseline = "baseline",
 	Contended = "contended",
 }

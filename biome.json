@@ -60,9 +60,34 @@
 		{
 			"includes": [
 				"packages/shared/src/contracts.ts",
+				"ui/src/CommonspaceThreads.tsx",
+				"ui/src/design-system/RoutingReceipt.tsx",
 				"ui/src/settings-operation.ts"
 			],
 			"linter": { "rules": { "suspicious": { "noConstEnum": "off" } } }
+		},
+		{
+			"includes": [
+				"tests/**/*.spec.ts",
+				"tests/**/*.spec.tsx",
+				"tests/**/*.spec.mjs"
+			],
+			"linter": {
+				"rules": {
+					"complexity": { "noExcessiveLinesPerFunction": "off" }
+				}
+			}
+		},
+		{
+			"includes": ["packages/shared/src/index.ts"],
+			"linter": {
+				"rules": {
+					"performance": {
+						"noBarrelFile": "off",
+						"noReExportAll": "off"
+					}
+				}
+			}
 		}
 	],
 	"javascript": {

@@ -4,6 +4,7 @@ import {
 	CheckCheckIcon,
 	CopyIcon,
 	FolderPlusIcon,
+	type LucideIcon,
 	MessageSquareIcon,
 	MoreHorizontalIcon,
 	PinIcon,
@@ -11,7 +12,7 @@ import {
 	SquarePenIcon,
 	Trash2Icon,
 } from "lucide-react";
-import { type ComponentProps, useState } from "react";
+import { type ComponentProps, Fragment, useState } from "react";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -90,6 +91,10 @@ function settingsLabel(kind: CommonspaceCollectionKind): string {
 	return `${kind.slice(0, 1).toLocaleUpperCase()}${kind.slice(1)} settings`;
 }
 
+function unsupportedCollectionKind(kind: never): never {
+	throw new Error(`Unsupported collection kind: ${String(kind)}`);
+}
+
 function ActionCopy({
 	label,
 	description,
@@ -109,37 +114,230 @@ function ActionCopy({
 	);
 }
 
-export function CollectionActionMenu({
-	kind,
-	label,
-	meta,
-	defaultOpen = false,
-	pinned = false,
-	triggerLabel,
-	onOpen,
-	onTogglePinned,
-	onSettings,
-	onAddFolder,
-	unread = false,
-	onMarkRead,
-	onMarkUnread,
-	onStartFreshChat,
-	onMention,
-	mentionLabel,
-	onViewSessions,
-	onCopy,
-	copyLabel,
-	onRemove,
-}: CollectionActionMenuProps) {
+type CollectionMenuActionId =
+	| "add-folder"
+	| "copy"
+	| "fresh-chat"
+	| "mention"
+	| "open"
+	| "pin"
+	| "read-state"
+	| "sessions"
+	| "settings";
+
+interface CollectionMenuActionBase {
+	readonly icon: LucideIcon;
+	readonly id: CollectionMenuActionId;
+	readonly label: string;
+	readonly onClick: () => void;
+	readonly separatorBefore: boolean;
+}
+
+type CollectionMenuAction = CollectionMenuActionBase &
+	(
+		| {
+				readonly description: string | undefined;
+				readonly presentation: "copy";
+		  }
+		| { readonly presentation: "plain" }
+	);
+
+function agentMenuActions(
+	props: CollectionActionMenuProps,
+	requestFreshChat: () => void,
+): CollectionMenuAction[] {
+	const actions: CollectionMenuAction[] = [];
+	if (props.onStartFreshChat !== undefined) {
+		actions.push({
+			description: "Keep history, reset agent context",
+			id: "fresh-chat",
+			icon: SquarePenIcon,
+			label: "Start fresh chat",
+			onClick: requestFreshChat,
+			presentation: "copy",
+			separatorBefore: false,
+		});
+	}
+	if (props.onMention !== undefined && props.mentionLabel !== undefined) {
+		actions.push({
+			description: "Add this agent to the composer",
+			id: "mention",
+			icon: AtSignIcon,
+			label: props.mentionLabel,
+			onClick: props.onMention,
+			presentation: "copy",
+			separatorBefore: false,
+		});
+	}
+	if (props.onViewSessions !== undefined) {
+		actions.push({
+			description: "Running, blocked, and completed work",
+			id: "sessions",
+			icon: ActivityIcon,
+			label: "View sessions",
+			onClick: props.onViewSessions,
+			presentation: "copy",
+			separatorBefore: true,
+		});
+	}
+	return actions;
+}
+
+function channelMenuActions(
+	props: CollectionActionMenuProps,
+): CollectionMenuAction[] {
+	const onClick = props.unread ? props.onMarkRead : props.onMarkUnread;
+	if (onClick === undefined) return [];
+	return [
+		{
+			id: "read-state",
+			icon: CheckCheckIcon,
+			label: props.unread ? "Mark read" : "Mark unread",
+			onClick,
+			presentation: "plain",
+			separatorBefore: false,
+		},
+	];
+}
+
+function projectMenuActions(
+	props: CollectionActionMenuProps,
+): CollectionMenuAction[] {
+	if (props.onAddFolder === undefined) return [];
+	return [
+		{
+			id: "add-folder",
+			icon: FolderPlusIcon,
+			label: "Add local folder",
+			onClick: props.onAddFolder,
+			presentation: "plain",
+			separatorBefore: false,
+		},
+	];
+}
+
+function commonMenuActions(
+	props: CollectionActionMenuProps,
+): CollectionMenuAction[] {
+	const actions: CollectionMenuAction[] = [];
+	if (props.onTogglePinned !== undefined) {
+		actions.push({
+			description:
+				props.kind === "agent"
+					? props.pinned
+						? "Remove from your quick access"
+						: "Keep this agent in quick access"
+					: undefined,
+			id: "pin",
+			icon: PinIcon,
+			label: props.pinned ? "Unpin from sidebar" : "Pin to sidebar",
+			onClick: props.onTogglePinned,
+			presentation: "copy",
+			separatorBefore: false,
+		});
+	}
+	if (props.onCopy !== undefined && props.copyLabel !== undefined) {
+		actions.push({
+			description: props.kind === "agent" ? `Copy @${props.label}` : undefined,
+			id: "copy",
+			icon: CopyIcon,
+			label: props.copyLabel,
+			onClick: props.onCopy,
+			presentation: "copy",
+			separatorBefore: true,
+		});
+	}
+	if (props.onSettings !== undefined) {
+		actions.push({
+			description:
+				props.kind === "agent"
+					? "Identity, runtime, tools, and skills"
+					: undefined,
+			id: "settings",
+			icon: SettingsIcon,
+			label: settingsLabel(props.kind),
+			onClick: props.onSettings,
+			presentation: "copy",
+			separatorBefore: false,
+		});
+	}
+	return actions;
+}
+
+function collectionMenuActions(
+	props: CollectionActionMenuProps,
+	requestFreshChat: () => void,
+): CollectionMenuAction[] {
+	let kindActions: CollectionMenuAction[];
+	const kind = props.kind;
+	switch (kind) {
+		case "agent":
+			kindActions = agentMenuActions(props, requestFreshChat);
+			break;
+		case "channel":
+			kindActions = channelMenuActions(props);
+			break;
+		case "project":
+			kindActions = projectMenuActions(props);
+			break;
+		default:
+			return unsupportedCollectionKind(kind);
+	}
+	return [
+		{
+			description:
+				props.kind === "agent"
+					? "Continue the private native session"
+					: undefined,
+			id: "open",
+			icon: MessageSquareIcon,
+			label: openLabel(props.kind),
+			onClick: props.onOpen,
+			presentation: "copy",
+			separatorBefore: false,
+		},
+		...kindActions,
+		...commonMenuActions(props),
+	];
+}
+
+function CollectionMenuActionItem({
+	action,
+}: {
+	action: CollectionMenuAction;
+}) {
+	const Icon = action.icon;
+	return (
+		<Fragment>
+			{action.separatorBefore === true && <DropdownMenuSeparator />}
+			<DropdownMenuItem
+				className="min-h-10 gap-2.5 px-2.5 text-[13px]"
+				onClick={action.onClick}
+			>
+				<Icon aria-hidden="true" />
+				{action.presentation === "copy" ? (
+					<ActionCopy label={action.label} description={action.description} />
+				) : (
+					action.label
+				)}
+			</DropdownMenuItem>
+		</Fragment>
+	);
+}
+
+export function CollectionActionMenu(props: CollectionActionMenuProps) {
 	const [confirmOpen, setConfirmOpen] = useState(false);
 	const [freshConfirmOpen, setFreshConfirmOpen] = useState(false);
+	const actions = collectionMenuActions(props, () => {
+		setFreshConfirmOpen(true);
+	});
 
 	return (
 		<>
-			<DropdownMenu defaultOpen={defaultOpen}>
+			<DropdownMenu defaultOpen={props.defaultOpen ?? false}>
 				<DropdownMenuTrigger
 					className={collectionActionTriggerClassName}
-					aria-label={triggerLabel ?? `More actions for ${label}`}
+					aria-label={props.triggerLabel ?? `More actions for ${props.label}`}
 				>
 					<MoreHorizontalIcon
 						className={collectionActionIconClassName}
@@ -150,149 +348,25 @@ export function CollectionActionMenu({
 					align="end"
 					className={cn(
 						"w-[272px] rounded-md border p-1.5 shadow-[var(--shadow-high)] ring-0",
-						kind === "agent" && "w-[336px]",
+						props.kind === "agent" && "w-[336px]",
 					)}
 				>
 					<DropdownMenuGroup>
 						<DropdownMenuLabel className="grid gap-0.5 border-b px-2.5 py-2.5">
 							<strong className="truncate text-[13px] font-semibold text-foreground">
-								{label}
+								{props.label}
 							</strong>
 							<span className="truncate font-mono text-xs font-normal text-muted-foreground">
-								{meta}
+								{props.meta}
 							</span>
 						</DropdownMenuLabel>
 					</DropdownMenuGroup>
 					<DropdownMenuGroup>
-						<DropdownMenuItem
-							className="min-h-10 gap-2.5 px-2.5 text-[13px]"
-							onClick={onOpen}
-						>
-							<MessageSquareIcon aria-hidden="true" />
-							<ActionCopy
-								label={openLabel(kind)}
-								description={
-									kind === "agent"
-										? "Continue the private native session"
-										: undefined
-								}
-							/>
-						</DropdownMenuItem>
-						{kind === "agent" && onStartFreshChat !== undefined && (
-							<DropdownMenuItem
-								className="min-h-10 gap-2.5 px-2.5 text-[13px]"
-								onClick={() => {
-									setFreshConfirmOpen(true);
-								}}
-							>
-								<SquarePenIcon aria-hidden="true" />
-								<ActionCopy
-									label="Start fresh chat"
-									description="Keep history, reset agent context"
-								/>
-							</DropdownMenuItem>
-						)}
-						{kind === "agent" &&
-							onMention !== undefined &&
-							mentionLabel !== undefined && (
-								<DropdownMenuItem
-									className="min-h-10 gap-2.5 px-2.5 text-[13px]"
-									onClick={onMention}
-								>
-									<AtSignIcon aria-hidden="true" />
-									<ActionCopy
-										label={mentionLabel}
-										description="Add this agent to the composer"
-									/>
-								</DropdownMenuItem>
-							)}
-						{kind === "channel" &&
-							(unread ? onMarkRead : onMarkUnread) !== undefined && (
-								<DropdownMenuItem
-									className="min-h-10 gap-2.5 px-2.5 text-[13px]"
-									onClick={unread ? onMarkRead : onMarkUnread}
-								>
-									<CheckCheckIcon aria-hidden="true" />
-									{unread ? "Mark read" : "Mark unread"}
-								</DropdownMenuItem>
-							)}
-						{kind === "project" && onAddFolder !== undefined && (
-							<DropdownMenuItem
-								className="min-h-10 gap-2.5 px-2.5 text-[13px]"
-								onClick={onAddFolder}
-							>
-								<FolderPlusIcon aria-hidden="true" />
-								Add local folder
-							</DropdownMenuItem>
-						)}
-						{kind === "agent" && onViewSessions !== undefined && (
-							<>
-								<DropdownMenuSeparator />
-								<DropdownMenuItem
-									className="min-h-10 gap-2.5 px-2.5 text-[13px]"
-									onClick={onViewSessions}
-								>
-									<ActivityIcon aria-hidden="true" />
-									<ActionCopy
-										label="View sessions"
-										description="Running, blocked, and completed work"
-									/>
-								</DropdownMenuItem>
-							</>
-						)}
-						{onTogglePinned !== undefined && (
-							<DropdownMenuItem
-								className="min-h-10 gap-2.5 px-2.5 text-[13px]"
-								onClick={onTogglePinned}
-							>
-								<PinIcon aria-hidden="true" />
-								<ActionCopy
-									label={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
-									description={
-										kind === "agent"
-											? pinned
-												? "Remove from your quick access"
-												: "Keep this agent in quick access"
-											: undefined
-									}
-								/>
-							</DropdownMenuItem>
-						)}
-						{onCopy !== undefined && copyLabel !== undefined && (
-							<>
-								<DropdownMenuSeparator />
-								<DropdownMenuItem
-									className="min-h-10 gap-2.5 px-2.5 text-[13px]"
-									onClick={onCopy}
-								>
-									<CopyIcon aria-hidden="true" />
-									<ActionCopy
-										label={copyLabel}
-										description={
-											kind === "agent" ? `Copy @${label}` : undefined
-										}
-									/>
-								</DropdownMenuItem>
-							</>
-						)}
-						{onSettings !== undefined && (
-							<DropdownMenuItem
-								className="min-h-10 gap-2.5 px-2.5 text-[13px]"
-								onClick={onSettings}
-							>
-								<SettingsIcon aria-hidden="true" />
-								<ActionCopy
-									label={settingsLabel(kind)}
-									description={
-										kind === "agent"
-											? "Identity, runtime, tools, and skills"
-											: undefined
-									}
-								/>
-							</DropdownMenuItem>
-						)}
+						{actions.map((action) => (
+							<CollectionMenuActionItem key={action.id} action={action} />
+						))}
 					</DropdownMenuGroup>
-					{onRemove !== undefined && (
+					{props.onRemove !== undefined && (
 						<>
 							<DropdownMenuSeparator />
 							<DropdownMenuItem
@@ -305,12 +379,12 @@ export function CollectionActionMenu({
 								<Trash2Icon aria-hidden="true" />
 								<ActionCopy
 									label={
-										kind === "agent"
+										props.kind === "agent"
 											? "Remove from Commonspace"
-											: `Remove ${kind}`
+											: `Remove ${props.kind}`
 									}
 									description={
-										kind === "agent"
+										props.kind === "agent"
 											? "Leave the native harness profile untouched"
 											: undefined
 									}
@@ -320,23 +394,23 @@ export function CollectionActionMenu({
 					)}
 				</DropdownMenuContent>
 			</DropdownMenu>
-			{onRemove !== undefined && (
+			{props.onRemove !== undefined && (
 				<ConfirmActionDialog
 					open={confirmOpen}
-					title={`Remove ${label}?`}
+					title={`Remove ${props.label}?`}
 					description="This can be added again later. Existing local agent credentials stay untouched."
 					onOpenChange={setConfirmOpen}
-					onConfirm={onRemove}
+					onConfirm={props.onRemove}
 				/>
 			)}
-			{onStartFreshChat !== undefined && (
+			{props.onStartFreshChat !== undefined && (
 				<ConfirmActionDialog
 					open={freshConfirmOpen}
-					title={`Start a new chat with ${label}?`}
+					title={`Start a new chat with ${props.label}?`}
 					description="Earlier messages stay visible. Your next message starts with fresh native agent context."
 					actionLabel="Start fresh"
 					onOpenChange={setFreshConfirmOpen}
-					onConfirm={onStartFreshChat}
+					onConfirm={props.onStartFreshChat}
 				/>
 			)}
 		</>

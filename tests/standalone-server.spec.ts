@@ -191,6 +191,22 @@ describe("standalone Commonspace server", () => {
 			code: "invalid_mutation",
 			error: expect.stringContaining("unknown mutation"),
 		});
+		const misspelledMutationResponse = await fetch(
+			`${running.url}/api/mutate`,
+			{
+				method: "POST",
+				headers: { origin: running.url, "content-type": "application/json" },
+				body: JSON.stringify({
+					action: "set-defaults",
+					maxAgentPerTurn: 5,
+				}),
+			},
+		);
+		expect(misspelledMutationResponse.status).toBe(400);
+		await expect(misspelledMutationResponse.json()).resolves.toMatchObject({
+			code: "invalid_mutation",
+			error: expect.stringContaining("maxAgentPerTurn"),
+		});
 		await running.service.discoverAgents("codex");
 		await running.service.mutate({
 			action: "add-discovered-agent",

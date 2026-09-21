@@ -48,8 +48,7 @@ export function compactionPins(
 					(pin.scope.kind === "thread" && pin.scope.id === threadId)),
 		)
 		.flatMap((pin) => {
-			if (pin.kind === "note")
-				return pin.note === undefined ? [] : [pin.note.slice(0, 2_000)];
+			if (pin.kind === "note") return [pin.note.slice(0, 2_000)];
 			const message = messages.find(
 				(candidate) =>
 					candidate.id === pin.messageId && candidate.deletedAt === undefined,

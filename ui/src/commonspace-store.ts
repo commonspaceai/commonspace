@@ -62,6 +62,25 @@ export interface CommonspacePendingSubmission {
 	error?: string;
 }
 
+export interface CommonspaceSendOptions {
+	text: string;
+	threadId?: string | undefined;
+	attachments?: readonly SendImageAttachment[] | undefined;
+	delivery?: SendMessageRequest["delivery"] | undefined;
+	projectIds?: readonly string[] | undefined;
+	files?: readonly SendFileAttachment[] | undefined;
+}
+
+export interface CommonspaceDirectReplyOptions
+	extends Omit<CommonspaceSendOptions, "delivery" | "threadId"> {
+	threadId: string;
+	targetAgentId: string;
+}
+
+interface CommonspaceMessageOptions extends CommonspaceSendOptions {
+	targetAgentId?: string | undefined;
+}
+
 export class CommonspaceSubmissionError extends Error {
 	readonly submissionId: string;
 
@@ -346,6 +365,47 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 	return value;
 }
 
+function prepareMessageAdmission(
+	conversation: ConversationRef,
+	submissionId: string,
+	options: CommonspaceMessageOptions,
+): {
+	request: SendMessageRequest;
+	submission: CommonspacePendingSubmission;
+} {
+	const attachments = [...(options.attachments ?? [])];
+	const files = [...(options.files ?? [])];
+	const request: SendMessageRequest = {
+		conversation,
+		text: options.text,
+	};
+	if (options.projectIds !== undefined)
+		request.projectIds = [...options.projectIds];
+	if (options.threadId !== undefined) request.threadId = options.threadId;
+	if (options.targetAgentId !== undefined)
+		request.targetAgentId = options.targetAgentId;
+	if (attachments.length > 0) request.attachments = attachments;
+	if (files.length > 0) request.files = files;
+	if (options.delivery !== undefined) request.delivery = options.delivery;
+
+	const submission: CommonspacePendingSubmission = {
+		id: submissionId,
+		conversation,
+		text: options.text,
+		attachments,
+		files,
+		createdAt: new Date().toISOString(),
+		status: "admitting",
+	};
+	if (options.threadId !== undefined) submission.threadId = options.threadId;
+	if (options.targetAgentId !== undefined)
+		submission.targetAgentId = options.targetAgentId;
+	if (options.delivery !== undefined) submission.delivery = options.delivery;
+	if (options.projectIds !== undefined)
+		submission.projectIds = [...options.projectIds];
+	return { request, submission };
+}
+
 export type CommonspaceStore = Pick<
 	CommonspaceClientStore,
 	keyof CommonspaceClientStore
@@ -515,11 +575,7 @@ export class CommonspaceClientStore {
 				error: null,
 			});
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -547,11 +603,7 @@ export class CommonspaceClientStore {
 			await this.refresh();
 			if (this.refreshPromise !== null) await this.refreshPromise;
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -612,11 +664,7 @@ export class CommonspaceClientStore {
 			this.set({ ...this.snapshot, error: null });
 			return result.path;
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -650,42 +698,12 @@ export class CommonspaceClientStore {
 		);
 	}
 
-	async send(
-		text: string,
-		threadId?: string,
-		attachments: readonly SendImageAttachment[] = [],
-		delivery?: SendMessageRequest["delivery"],
-		projectIds?: readonly string[],
-		files: readonly SendFileAttachment[] = [],
-	): Promise<void> {
-		return this.sendMessage(
-			text,
-			threadId,
-			undefined,
-			attachments,
-			delivery,
-			projectIds,
-			files,
-		);
+	async send(options: CommonspaceSendOptions): Promise<void> {
+		return this.sendMessage(options);
 	}
 
-	async sendDirectReply(
-		text: string,
-		threadId: string,
-		targetAgentId: string,
-		attachments: readonly SendImageAttachment[] = [],
-		projectIds?: readonly string[],
-		files: readonly SendFileAttachment[] = [],
-	): Promise<void> {
-		return this.sendMessage(
-			text,
-			threadId,
-			targetAgentId,
-			attachments,
-			undefined,
-			projectIds,
-			files,
-		);
+	async sendDirectReply(options: CommonspaceDirectReplyOptions): Promise<void> {
+		return this.sendMessage(options);
 	}
 
 	dismissPendingSubmission(submissionId: string): void {
@@ -725,11 +743,7 @@ export class CommonspaceClientStore {
 				error: null,
 			});
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -755,11 +769,7 @@ export class CommonspaceClientStore {
 				error: null,
 			});
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -777,11 +787,7 @@ export class CommonspaceClientStore {
 			);
 			await this.refresh();
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -793,11 +799,7 @@ export class CommonspaceClientStore {
 			);
 			await this.refresh();
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -809,11 +811,7 @@ export class CommonspaceClientStore {
 			);
 			await this.refresh();
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -825,11 +823,7 @@ export class CommonspaceClientStore {
 			});
 			await this.refresh();
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -841,11 +835,7 @@ export class CommonspaceClientStore {
 			);
 			await this.refresh();
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -879,11 +869,7 @@ export class CommonspaceClientStore {
 				error: null,
 			});
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -895,11 +881,7 @@ export class CommonspaceClientStore {
 			);
 			await this.refresh();
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -917,11 +899,7 @@ export class CommonspaceClientStore {
 			);
 			await this.refresh();
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -932,11 +910,7 @@ export class CommonspaceClientStore {
 			this.set({ ...this.snapshot, error: null });
 			return diagnostics;
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -978,11 +952,7 @@ export class CommonspaceClientStore {
 				error: null,
 			});
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -1006,11 +976,7 @@ export class CommonspaceClientStore {
 			});
 			await this.refresh();
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -1025,11 +991,7 @@ export class CommonspaceClientStore {
 			this.set({ ...this.snapshot, error: null });
 			return result.stoppedAgentIds;
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
@@ -1067,49 +1029,19 @@ export class CommonspaceClientStore {
 				};
 			this.set(next);
 		} catch (error) {
-			this.set({
-				...this.snapshot,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+			this.recordRequestFailure(error);
 		}
 	}
 
-	private async sendMessage(
-		text: string,
-		threadId?: string,
-		targetAgentId?: string,
-		attachments: readonly SendImageAttachment[] = [],
-		delivery?: SendMessageRequest["delivery"],
-		projectIds?: readonly string[],
-		files: readonly SendFileAttachment[] = [],
-	): Promise<void> {
+	private async sendMessage(options: CommonspaceMessageOptions): Promise<void> {
 		const conversation = this.snapshot.activeConversation;
 		if (conversation === null) return;
 		const navigationRevision = ++this.navigationRevision;
-		const request: SendMessageRequest = {
+		const { request, submission } = prepareMessageAdmission(
 			conversation,
-			text,
-		};
-		if (projectIds !== undefined) request.projectIds = [...projectIds];
-		if (threadId !== undefined) request.threadId = threadId;
-		if (targetAgentId !== undefined) request.targetAgentId = targetAgentId;
-		if (attachments.length > 0) request.attachments = [...attachments];
-		if (files.length > 0) request.files = [...files];
-		if (delivery !== undefined) request.delivery = delivery;
-		const submission: CommonspacePendingSubmission = {
-			id: `submission-${String(++this.submissionRequest)}`,
-			conversation,
-			text,
-			attachments: [...attachments],
-			files: [...files],
-			createdAt: new Date().toISOString(),
-			status: "admitting",
-		};
-		if (threadId !== undefined) submission.threadId = threadId;
-		if (targetAgentId !== undefined) submission.targetAgentId = targetAgentId;
-		if (delivery !== undefined) submission.delivery = delivery;
-		if (projectIds !== undefined) submission.projectIds = [...projectIds];
+			`submission-${String(++this.submissionRequest)}`,
+			options,
+		);
 		this.set({
 			...this.snapshot,
 			pendingSubmissions: [...this.snapshot.pendingSubmissions, submission],
@@ -1173,6 +1105,15 @@ export class CommonspaceClientStore {
 			});
 			throw new CommonspaceSubmissionError(message, submission.id, error);
 		}
+	}
+
+	// biome-ignore lint/plugin: JavaScript permits any thrown value; this boundary narrows it before recording.
+	private recordRequestFailure(error: unknown): never {
+		this.set({
+			...this.snapshot,
+			error: error instanceof Error ? error.message : String(error),
+		});
+		throw error;
 	}
 
 	private set(snapshot: CommonspaceClientSnapshot): void {

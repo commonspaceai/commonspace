@@ -136,7 +136,7 @@ async function inspectExperiencePage(page) {
 	});
 }
 
-async function captureExperienceState(page, index, id, action, note) {
+async function captureExperienceState(page, { index, id, action, note }) {
 	const segment = `${String(index).padStart(3, "0")}-${artifactSegment(id)}`;
 	const screenshot = join(experienceArtifactDir, `${segment}.png`);
 	const stateFile = join(experienceArtifactDir, `${segment}.json`);
@@ -213,13 +213,12 @@ async function runExperienceAudit(page) {
 	});
 
 	const capture = async (id, action, note) => {
-		const state = await captureExperienceState(
-			page,
-			stateIndex,
+		const state = await captureExperienceState(page, {
+			index: stateIndex,
 			id,
 			action,
 			note,
-		);
+		});
 		stateIndex += 1;
 		return state;
 	};

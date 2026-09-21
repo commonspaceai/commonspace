@@ -230,6 +230,13 @@ export function createWorkspaceMockApi(
 			? [...new Set([...items, value])]
 			: items.filter((item) => item !== value);
 	}
+	function channelAgentIds(agentIds: readonly string[]): string[] {
+		const unique = [...new Set(agentIds)];
+		const known = new Set(data.state.agents.map((agent) => agent.id));
+		if (unique.some((agentId) => !known.has(agentId)))
+			throw new Error("Channel references an unknown Agent.");
+		return unique;
+	}
 	function mutate(mutation: CommonspaceMutation) {
 		const state = data.state;
 		switch (mutation.action) {
@@ -318,7 +325,7 @@ export function createWorkspaceMockApi(
 				state.channels.push({
 					id: id(),
 					name: mutation.name,
-					agentIds: mutation.agentIds,
+					agentIds: channelAgentIds(mutation.agentIds),
 					instructions: "",
 					memory: { ...emptyMemory(), threadIds: [] },
 					routingMemory: {
@@ -344,7 +351,7 @@ export function createWorkspaceMockApi(
 				const channel = state.channels.find(
 					(item) => item.id === mutation.channelId,
 				);
-				if (channel) channel.agentIds = mutation.agentIds;
+				if (channel) channel.agentIds = channelAgentIds(mutation.agentIds);
 				break;
 			}
 			case "set-channel-context": {
@@ -372,7 +379,7 @@ export function createWorkspaceMockApi(
 					estimatedTokens: 0,
 				};
 				if (mutation.action === "set-channel-configuration") {
-					channel.agentIds = mutation.agentIds;
+					channel.agentIds = channelAgentIds(mutation.agentIds);
 					channel.instructions = mutation.instructions;
 				}
 				break;
@@ -410,6 +417,10 @@ export function createWorkspaceMockApi(
 				);
 				for (const channel of state.channels)
 					channel.agentIds = channel.agentIds.filter(
+						(agentId) => agentId !== mutation.agentId,
+					);
+				for (const thread of state.threads)
+					thread.agentIds = thread.agentIds.filter(
 						(agentId) => agentId !== mutation.agentId,
 					);
 				if (
@@ -562,13 +573,18 @@ export function createWorkspaceMockApi(
 		const list =
 			data.state.messages[`${conversation.kind}:${conversation.id}`] ?? [];
 		const messageIds = new Set(list.map((message) => message.id));
+		const threadIds = new Set(
+			conversation.kind === "channel"
+				? data.state.threads
+						.filter((thread) => thread.channelId === conversation.id)
+						.map((thread) => thread.id)
+				: [],
+		);
 		return {
 			revision: data.state.revision,
 			conversation,
 			messages: list.length,
-			threads: data.state.threads.filter((thread) =>
-				messageIds.has(thread.rootMessageId),
-			).length,
+			threads: threadIds.size,
 			attachments: list.reduce(
 				(count, message) =>
 					count +
@@ -576,9 +592,16 @@ export function createWorkspaceMockApi(
 					(message.files?.length ?? 0),
 				0,
 			),
-			pins: data.state.pins.filter(
-				(pin) => pin.messageId !== undefined && messageIds.has(pin.messageId),
-			).length,
+			pins: data.state.pins.filter((pin) => {
+				const messageId = pin.kind === "note" ? undefined : pin.messageId;
+				return (
+					(pin.scope.kind === "channel" &&
+						conversation.kind === "channel" &&
+						pin.scope.id === conversation.id) ||
+					(pin.scope.kind === "thread" && threadIds.has(pin.scope.id)) ||
+					(messageId !== undefined && messageIds.has(messageId))
+				);
+			}).length,
 			permissions: data.state.permissions.filter((permission) =>
 				messageIds.has(permission.sourceMessageId),
 			).length,
@@ -1077,13 +1100,17 @@ export function createWorkspaceMockApi(
 			data.state.threads = data.state.threads.filter(
 				(thread) => !threadIds.has(thread.id),
 			);
-			data.state.pins = data.state.pins.filter(
-				(pin) =>
-					!(
-						(pin.messageId && messageIds.has(pin.messageId)) ||
-						(pin.scope.kind === "thread" && threadIds.has(pin.scope.id))
-					),
-			);
+			data.state.pins = data.state.pins.filter((pin) => {
+				const referencesRemovedMessage =
+					pin.kind !== "note" && messageIds.has(pin.messageId);
+				return !(
+					referencesRemovedMessage ||
+					(pin.scope.kind === "channel" &&
+						conversation.kind === "channel" &&
+						pin.scope.id === conversation.id) ||
+					(pin.scope.kind === "thread" && threadIds.has(pin.scope.id))
+				);
+			});
 			data.state.permissions = data.state.permissions.filter(
 				(permission) => !messageIds.has(permission.sourceMessageId),
 			);
@@ -1129,7 +1156,7 @@ export function createWorkspaceMockApi(
 			const project = data.state.projects.find(
 				(item) => item.id === params.projectId,
 			);
-			if (!project || !project.paths[rootIndex])
+			if (!project?.paths[rootIndex])
 				return HttpResponse.json(
 					{ error: "Project folder not found." },
 					{ status: 404 },

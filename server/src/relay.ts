@@ -257,29 +257,3 @@ export function rankChannelAgents(
 				memberIds.indexOf(left.id) - memberIds.indexOf(right.id),
 		);
 }
-
-function topicalAgent(
-	memberIds: readonly string[],
-	text: string,
-	agents: readonly Pick<
-		CommonspaceAgentProfile,
-		"id" | "displayName" | "description"
-	>[],
-): string | undefined {
-	if (routingTerms(text).length === 0) return undefined;
-	return rankChannelAgents(memberIds, text, agents)[0]?.id;
-}
-
-export function routeChannelAgents(
-	memberIds: readonly string[],
-	text: string,
-	agents: readonly Pick<
-		CommonspaceAgentProfile,
-		"id" | "displayName" | "description"
-	>[],
-): string[] {
-	const mentioned = mentionedChannelAgents(memberIds, text, agents);
-	if (mentioned.length > 0) return mentioned;
-	const topical = topicalAgent(memberIds, text, agents);
-	return topical === undefined ? memberIds.slice(0, 1) : [topical];
-}

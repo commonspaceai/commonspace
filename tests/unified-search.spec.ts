@@ -1,13 +1,24 @@
 import { CommonspaceReasoning } from "@commonspace/shared";
 // @vitest-environment node
 
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
 	CommonspaceBootstrap,
 	CommonspaceState,
 } from "@commonspace/shared";
 import { COMMONSPACE_STATE_VERSION } from "@commonspace/shared";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { searchCommonspace } from "../server/src/search.ts";
+
+const searchRoots: string[] = [];
+
+afterEach(async () => {
+	await Promise.all(
+		searchRoots.splice(0).map((root) => rm(root, { recursive: true })),
+	);
+});
 
 function bootstrap(): CommonspaceBootstrap {
 	const state: CommonspaceState = {
@@ -275,5 +286,51 @@ describe("unified search", () => {
 			kinds: ["trace", "decision"],
 			projectId: "storefront",
 		});
+	});
+});
+
+describe("filesystem search", () => {
+	it("keeps the filesystem result budget global across missing and later roots", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-search-budget-"));
+		searchRoots.push(root);
+		const firstRoot = join(root, "first");
+		const laterRoot = join(root, "later");
+		await mkdir(join(firstRoot, "nested"), { recursive: true });
+		await mkdir(laterRoot);
+		await Promise.all(
+			Array.from({ length: 40 }, (_, index) =>
+				writeFile(
+					join(firstRoot, `budget-match-${String(index).padStart(2, "0")}.txt`),
+					"fixture",
+				),
+			),
+		);
+		await writeFile(
+			join(firstRoot, "nested", "budget-match-nested.txt"),
+			"fixture",
+		);
+		await writeFile(join(laterRoot, "budget-match-later.txt"), "fixture");
+
+		const input = bootstrap();
+		const project = input.state.projects[0];
+		if (project === undefined) throw new Error("Missing Project");
+		project.paths = [join(root, "missing"), firstRoot, laterRoot];
+		const result = await searchCommonspace(input, {
+			query: "budget-match",
+			kinds: ["file"],
+			projectId: project.id,
+			limit: 100,
+		});
+
+		expect(result.results).toHaveLength(40);
+		expect(
+			result.results.every(
+				(candidate) =>
+					candidate.target.kind === "project-file" &&
+					candidate.target.rootIndex === 1 &&
+					!candidate.target.path.includes("nested") &&
+					!candidate.target.path.includes("later"),
+			),
+		).toBe(true);
 	});
 });

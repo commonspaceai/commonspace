@@ -9,7 +9,7 @@ type SerializableProjectMappings = Readonly<Record<string, readonly string[]>>;
 export class WorkspacePortabilitySizeError extends Error {}
 
 /** Maximum UTF-8 JSON size of a version-1 workspace archive. */
-export const MAX_WORKSPACE_ARCHIVE_BYTES = 48 * MEBIBYTE;
+const MAX_WORKSPACE_ARCHIVE_BYTES = 48 * MEBIBYTE;
 
 /** Compatibility ceiling for importing version-1 archives from earlier builds. */
 export const MAX_WORKSPACE_IMPORT_ARCHIVE_BYTES = 64 * MEBIBYTE;

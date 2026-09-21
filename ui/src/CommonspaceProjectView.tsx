@@ -9,6 +9,7 @@ import { ArrowLeftIcon, FolderPlusIcon, SettingsIcon } from "lucide-react";
 import {
 	type CSSProperties,
 	useEffect,
+	useMemo,
 	useRef,
 	useState,
 	useSyncExternalStore,
@@ -42,42 +43,47 @@ export interface CommonspaceProjectViewProps {
 
 type ProjectTab = "conversations" | "files" | "changes";
 
-function conversationReferencesProject(
-	state: CommonspaceState,
-	conversation: ConversationRef,
+function deriveProjectConversations(
+	agents: CommonspaceBootstrap["agents"],
+	channels: CommonspaceState["channels"],
+	messages: CommonspaceState["messages"],
 	projectId: string,
-): boolean {
-	return (state.messages[`${conversation.kind}:${conversation.id}`] ?? []).some(
-		(message) => referencedProjectIds(message).includes(projectId),
-	);
+) {
+	const projectChannels = channels.flatMap((channel) => {
+		const latest = messages[`channel:${channel.id}`]?.findLast((message) =>
+			referencedProjectIds(message).includes(projectId),
+		);
+		return latest === undefined ? [] : [{ channel, latest }];
+	});
+	const directMessages = agents.flatMap((agent) => {
+		const latest = messages[`dm:${agent.id}`]?.findLast((message) =>
+			referencedProjectIds(message).includes(projectId),
+		);
+		return latest === undefined ? [] : [{ agent, latest }];
+	});
+	return { channels: projectChannels, directMessages };
 }
 
+type ProjectConversationsSummary = ReturnType<
+	typeof deriveProjectConversations
+>;
+
+const emptyProjectConversations: ProjectConversationsSummary = {
+	channels: [],
+	directMessages: [],
+};
+
 function ProjectConversations({
-	bootstrap,
-	state,
+	conversations,
 	project,
 	onOpenConversation,
 }: {
-	bootstrap: CommonspaceBootstrap;
-	state: CommonspaceState;
+	conversations: ProjectConversationsSummary;
 	project: CommonspaceProject;
 	onOpenConversation: (conversation: ConversationRef) => void;
 }) {
-	const channels = state.channels.filter((channel) =>
-		conversationReferencesProject(
-			state,
-			{ kind: "channel", id: channel.id },
-			project.id,
-		),
-	);
-	const directMessages = bootstrap.agents.filter((agent) =>
-		conversationReferencesProject(
-			state,
-			{ kind: "dm", id: agent.id },
-			project.id,
-		),
-	);
-	const conversationCount = channels.length + directMessages.length;
+	const conversationCount =
+		conversations.channels.length + conversations.directMessages.length;
 	return (
 		<section
 			className="mx-auto w-full max-w-[1280px] overflow-hidden bg-background"
@@ -95,10 +101,7 @@ function ProjectConversations({
 				</small>
 			</header>
 			<div>
-				{channels.map((channel) => {
-					const latest = state.messages[`channel:${channel.id}`]?.findLast(
-						(message) => referencedProjectIds(message).includes(project.id),
-					);
+				{conversations.channels.map(({ channel, latest }) => {
 					return (
 						<button
 							key={`channel:${channel.id}`}
@@ -120,10 +123,7 @@ function ProjectConversations({
 								<small className="block truncate text-xs text-muted-foreground">
 									Channel
 								</small>
-								<p className="mt-1 truncate text-sm">
-									{latest?.text ??
-										(channel.instructions.trim() || "No messages yet.")}
-								</p>
+								<p className="mt-1 truncate text-sm">{latest.text}</p>
 							</span>
 							<span className="text-muted-foreground" aria-hidden="true">
 								→
@@ -131,10 +131,7 @@ function ProjectConversations({
 						</button>
 					);
 				})}
-				{directMessages.map((agent) => {
-					const latest = state.messages[`dm:${agent.id}`]?.findLast((message) =>
-						referencedProjectIds(message).includes(project.id),
-					);
+				{conversations.directMessages.map(({ agent, latest }) => {
 					return (
 						<button
 							key={`dm:${agent.id}`}
@@ -149,9 +146,7 @@ function ProjectConversations({
 								<small className="block truncate text-xs text-muted-foreground">
 									Direct message
 								</small>
-								<p className="mt-1 truncate text-sm">
-									{latest?.text ?? "No messages yet."}
-								</p>
+								<p className="mt-1 truncate text-sm">{latest.text}</p>
 							</span>
 							<span className="text-muted-foreground" aria-hidden="true">
 								→
@@ -174,6 +169,7 @@ function ProjectConversations({
 	);
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: The cohesive project controller keeps tab, settings panel, and project mutation ownership together.
 export function CommonspaceProjectView({
 	projectId,
 	targetFile,
@@ -205,6 +201,25 @@ export function CommonspaceProjectView({
 	const state = bootstrap?.state;
 	const project = state?.projects.find(
 		(candidate) => candidate.id === projectId,
+	);
+	const agents = bootstrap?.agents;
+	const channels = state?.channels;
+	const messages = state?.messages;
+	const resolvedProjectId = project?.id;
+	const conversations = useMemo(
+		() =>
+			agents === undefined ||
+			channels === undefined ||
+			messages === undefined ||
+			resolvedProjectId === undefined
+				? emptyProjectConversations
+				: deriveProjectConversations(
+						agents,
+						channels,
+						messages,
+						resolvedProjectId,
+					),
+		[agents, channels, messages, resolvedProjectId],
 	);
 
 	useEffect(() => {
@@ -252,21 +267,8 @@ export function CommonspaceProjectView({
 		);
 	}
 
-	const channels = state.channels.filter((channel) =>
-		conversationReferencesProject(
-			state,
-			{ kind: "channel", id: channel.id },
-			project.id,
-		),
-	);
-	const directMessageCount = bootstrap.agents.filter((agent) =>
-		conversationReferencesProject(
-			state,
-			{ kind: "dm", id: agent.id },
-			project.id,
-		),
-	).length;
-	const conversationCount = channels.length + directMessageCount;
+	const conversationCount =
+		conversations.channels.length + conversations.directMessages.length;
 	const folderCount = project.paths.length;
 	const folderSummary =
 		folderCount === 1
@@ -360,8 +362,7 @@ export function CommonspaceProjectView({
 					className="min-h-0 flex-1 overflow-auto bg-background px-8 py-3"
 				>
 					<ProjectConversations
-						bootstrap={bootstrap}
-						state={state}
+						conversations={conversations}
 						project={project}
 						onOpenConversation={onOpenConversation}
 					/>

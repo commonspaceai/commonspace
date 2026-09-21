@@ -272,6 +272,169 @@ export interface QueuedFollowupsProps {
 	onFocusComposer?: () => void;
 }
 
+interface QueueFocusRequest {
+	control: HTMLButtonElement;
+	messageId: string | undefined;
+}
+
+function restoreQueueFocus({
+	followupCount,
+	onFocusComposer,
+	previewElements,
+	request,
+	tray,
+}: {
+	followupCount: number;
+	onFocusComposer: QueuedFollowupsProps["onFocusComposer"];
+	previewElements: ReadonlyMap<string, HTMLButtonElement>;
+	request: QueueFocusRequest;
+	tray: HTMLElement | null;
+}) {
+	const activeElement = document.activeElement;
+	if (activeElement !== document.body && activeElement !== request.control)
+		return;
+	const target =
+		request.messageId === undefined
+			? undefined
+			: previewElements.get(request.messageId);
+	if (target !== undefined) {
+		target.focus();
+		return;
+	}
+	if (followupCount === 0) {
+		onFocusComposer?.();
+		return;
+	}
+	tray?.focus();
+}
+
+function QueuedFollowupAction({
+	disabled = false,
+	icon: Icon,
+	label,
+	onActivate,
+	tooltip,
+}: {
+	disabled?: boolean;
+	icon: typeof ArrowUpIcon;
+	label: string;
+	onActivate: (control: HTMLButtonElement) => void;
+	tooltip: string;
+}) {
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						className="size-7"
+						disabled={disabled}
+						onClick={(event) => onActivate(event.currentTarget)}
+					/>
+				}
+				aria-label={label}
+			>
+				<Icon aria-hidden="true" />
+			</TooltipTrigger>
+			<TooltipContent>{tooltip}</TooltipContent>
+		</Tooltip>
+	);
+}
+
+function QueuedFollowupRow({
+	expanded,
+	focusMessageIdAfterRemove,
+	followup,
+	index,
+	itemCount,
+	itemLabel,
+	onMove,
+	onPreviewChange,
+	onRemove,
+	onRequestFocus,
+	onToggleExpanded,
+}: {
+	expanded: boolean;
+	focusMessageIdAfterRemove: string | undefined;
+	followup: CommonspaceQueuedFollowup;
+	index: number;
+	itemCount: number;
+	itemLabel: string;
+	onMove: QueuedFollowupsProps["onMove"];
+	onPreviewChange: (
+		messageId: string,
+		element: HTMLButtonElement | null,
+	) => void;
+	onRemove: QueuedFollowupsProps["onRemove"];
+	onRequestFocus: (request: QueueFocusRequest) => void;
+	onToggleExpanded: () => void;
+}) {
+	const option = deliveryOptions[followup.delivery];
+	const Icon = option.icon;
+	return (
+		<li className="flex min-w-0 items-start gap-2 px-2 py-2">
+			<div className="min-w-0 flex-1">
+				<button
+					ref={(element) => onPreviewChange(followup.messageId, element)}
+					type="button"
+					aria-expanded={expanded}
+					aria-label={`${expanded ? "Collapse" : "Expand"} ${itemLabel} ${index + 1}`}
+					className="block w-full rounded-sm px-1 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+					onClick={onToggleExpanded}
+				>
+					<span
+						className={cn(
+							"block whitespace-pre-wrap text-xs leading-5 [overflow-wrap:anywhere]",
+							!expanded && "line-clamp-2",
+						)}
+					>
+						{followup.text || "Message with attachments"}
+					</span>
+				</button>
+				<span className="mt-0.5 flex items-center gap-1 px-1 text-[10px] text-muted-foreground">
+					<Icon className="size-3" aria-hidden="true" />
+					{option.status}
+				</span>
+			</div>
+			<div className="flex shrink-0 items-center">
+				<QueuedFollowupAction
+					disabled={index === 0}
+					icon={ArrowUpIcon}
+					label={`Move ${itemLabel} up`}
+					tooltip="Move earlier"
+					onActivate={(control) => {
+						onRequestFocus({ control, messageId: followup.messageId });
+						onMove(followup.messageId, "up");
+					}}
+				/>
+				<QueuedFollowupAction
+					disabled={index === itemCount - 1}
+					icon={ArrowDownIcon}
+					label={`Move ${itemLabel} down`}
+					tooltip="Move later"
+					onActivate={(control) => {
+						onRequestFocus({ control, messageId: followup.messageId });
+						onMove(followup.messageId, "down");
+					}}
+				/>
+				<QueuedFollowupAction
+					icon={XIcon}
+					label={`Remove ${itemLabel}`}
+					tooltip="Remove from queue"
+					onActivate={(control) => {
+						onRequestFocus({
+							control,
+							messageId: focusMessageIdAfterRemove,
+						});
+						onRemove(followup.messageId);
+					}}
+				/>
+			</div>
+		</li>
+	);
+}
+
 export function QueuedFollowups({
 	followups,
 	thread = false,
@@ -283,31 +446,30 @@ export function QueuedFollowups({
 	const [expandedId, setExpandedId] = useState<string | null>(null);
 	const trayRef = useRef<HTMLElement>(null);
 	const previewRefs = useRef(new Map<string, HTMLButtonElement>());
-	const pendingFocus = useRef<{
-		control: HTMLButtonElement;
-		messageId: string | undefined;
-	} | null>(null);
+	const pendingFocus = useRef<QueueFocusRequest | null>(null);
 	useLayoutEffect(() => {
 		const pending = pendingFocus.current;
 		if (pending === null) return;
 		if (pending.control.isConnected && !pending.control.disabled) return;
 		pendingFocus.current = null;
 		// A delayed queue response must not pull focus back from another control.
-		if (
-			document.activeElement !== document.body &&
-			document.activeElement !== pending.control
-		)
-			return;
-		const target =
-			pending.messageId === undefined
-				? null
-				: previewRefs.current.get(pending.messageId);
-		if (target !== null && target !== undefined) target.focus();
-		else if (followups.length === 0) onFocusComposer?.();
-		else trayRef.current?.focus();
+		restoreQueueFocus({
+			followupCount: followups.length,
+			onFocusComposer,
+			previewElements: previewRefs.current,
+			request: pending,
+			tray: trayRef.current,
+		});
 	}, [followups, onFocusComposer]);
 	if (followups.length === 0) return null;
 	const itemLabel = thread ? "queued thread follow-up" : "queued follow-up";
+	const onPreviewChange = (
+		messageId: string,
+		element: HTMLButtonElement | null,
+	) => {
+		if (element === null) previewRefs.current.delete(messageId);
+		else previewRefs.current.set(messageId, element);
+	};
 	return (
 		<section
 			ref={trayRef}
@@ -328,116 +490,28 @@ export function QueuedFollowups({
 			</header>
 			<ol className="max-h-44 divide-y overflow-y-auto overscroll-contain">
 				{followups.map((followup, index) => {
-					const option = deliveryOptions[followup.delivery];
-					const Icon = option.icon;
 					const expanded = expandedId === followup.messageId;
 					return (
-						<li
+						<QueuedFollowupRow
 							key={followup.messageId}
-							className="flex min-w-0 items-start gap-2 px-2 py-2"
-						>
-							<div className="min-w-0 flex-1">
-								<button
-									ref={(element) => {
-										if (element === null)
-											previewRefs.current.delete(followup.messageId);
-										else previewRefs.current.set(followup.messageId, element);
-									}}
-									type="button"
-									aria-expanded={expanded}
-									aria-label={`${expanded ? "Collapse" : "Expand"} ${itemLabel} ${index + 1}`}
-									className="block w-full rounded-sm px-1 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
-									onClick={() =>
-										setExpandedId(expanded ? null : followup.messageId)
-									}
-								>
-									<span
-										className={cn(
-											"block whitespace-pre-wrap text-xs leading-5 [overflow-wrap:anywhere]",
-											!expanded && "line-clamp-2",
-										)}
-									>
-										{followup.text || "Message with attachments"}
-									</span>
-								</button>
-								<span className="mt-0.5 flex items-center gap-1 px-1 text-[10px] text-muted-foreground">
-									<Icon className="size-3" aria-hidden="true" />
-									{option.status}
-								</span>
-							</div>
-							<div className="flex shrink-0 items-center">
-								<Tooltip>
-									<TooltipTrigger
-										render={
-											<Button
-												variant="ghost"
-												size="icon-xs"
-												className="size-7"
-												disabled={index === 0}
-												onClick={(event) => {
-													pendingFocus.current = {
-														control: event.currentTarget,
-														messageId: followup.messageId,
-													};
-													onMove(followup.messageId, "up");
-												}}
-											/>
-										}
-										aria-label={`Move ${itemLabel} up`}
-									>
-										<ArrowUpIcon aria-hidden="true" />
-									</TooltipTrigger>
-									<TooltipContent>Move earlier</TooltipContent>
-								</Tooltip>
-								<Tooltip>
-									<TooltipTrigger
-										render={
-											<Button
-												variant="ghost"
-												size="icon-xs"
-												className="size-7"
-												disabled={index === followups.length - 1}
-												onClick={(event) => {
-													pendingFocus.current = {
-														control: event.currentTarget,
-														messageId: followup.messageId,
-													};
-													onMove(followup.messageId, "down");
-												}}
-											/>
-										}
-										aria-label={`Move ${itemLabel} down`}
-									>
-										<ArrowDownIcon aria-hidden="true" />
-									</TooltipTrigger>
-									<TooltipContent>Move later</TooltipContent>
-								</Tooltip>
-								<Tooltip>
-									<TooltipTrigger
-										render={
-											<Button
-												variant="ghost"
-												size="icon-xs"
-												className="size-7"
-												onClick={(event) => {
-													pendingFocus.current = {
-														control: event.currentTarget,
-														messageId: (
-															followups[index + 1] ?? followups[index - 1]
-														)?.messageId,
-													};
-													onRemove(followup.messageId);
-												}}
-											/>
-										}
-										aria-label={`Remove ${itemLabel}`}
-									>
-										<XIcon aria-hidden="true" />
-									</TooltipTrigger>
-									<TooltipContent>Remove from queue</TooltipContent>
-								</Tooltip>
-							</div>
-						</li>
+							expanded={expanded}
+							focusMessageIdAfterRemove={
+								(followups[index + 1] ?? followups[index - 1])?.messageId
+							}
+							followup={followup}
+							index={index}
+							itemCount={followups.length}
+							itemLabel={itemLabel}
+							onMove={onMove}
+							onPreviewChange={onPreviewChange}
+							onRemove={onRemove}
+							onRequestFocus={(request) => {
+								pendingFocus.current = request;
+							}}
+							onToggleExpanded={() => {
+								setExpandedId(expanded ? null : followup.messageId);
+							}}
+						/>
 					);
 				})}
 			</ol>

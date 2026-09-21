@@ -365,6 +365,531 @@ describe("Commonspace host authority", () => {
 		});
 	});
 
+	it("keeps an accepted turn running across cosmetic Agent profile edits", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-profile-edit-"));
+		roots.push(root);
+		const started = deferred<void>();
+		const completed = deferred<{ text: string }>();
+		const service = new CommonspaceHostService(
+			{},
+			{ root },
+			{
+				discoverAgents: discoverTestHarnesses,
+				runAgent: async () => {
+					started.resolve();
+					return completed.promise;
+				},
+			},
+		);
+		await service.initialize();
+		await addTestHarness(service, "codex", "Review Bot");
+
+		const sent = await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "Keep working.",
+		});
+		await started.promise;
+		await service.mutate({
+			action: "update-agent-profile",
+			agentId: "codex",
+			displayName: "Reviewer",
+			avatarEmoji: "🔎",
+		});
+		completed.resolve({ text: "Finished after the edit." });
+		await service.whenIdle();
+
+		expect(service.snapshot().messages["dm:codex"]).toEqual([
+			expect.objectContaining({
+				id: sent.accepted.id,
+				replyStatus: "complete",
+			}),
+			expect.objectContaining({
+				authorType: "agent",
+				text: "Finished after the edit.",
+			}),
+		]);
+	});
+
+	it("terminalizes active and queued turns when their Project is removed", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-project-removal-"));
+		roots.push(root);
+		const workspace = join(root, "workspace");
+		await mkdir(workspace);
+		const started = deferred<void>();
+		const completed = deferred<{ text: string }>();
+		const service = new CommonspaceHostService(
+			{},
+			{ root },
+			{
+				discoverAgents: discoverTestHarnesses,
+				runAgent: async () => {
+					started.resolve();
+					return completed.promise;
+				},
+			},
+		);
+		await service.initialize();
+		await addTestHarness(service, "codex", "Review Bot");
+		const project = mustExist(
+			(
+				await service.mutate({
+					action: "create-project",
+					name: "Removable",
+					paths: [workspace],
+				})
+			).projects[0],
+		);
+
+		const sent = await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			projectId: project.id,
+			text: "Work in this Project.",
+		});
+		await started.promise;
+		const queued = await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			projectId: project.id,
+			delivery: "queue",
+			text: "Continue in this Project.",
+		});
+		await service.mutate({ action: "remove-project", projectId: project.id });
+		expect(service.snapshot().messages["dm:codex"]).toEqual([
+			expect.objectContaining({
+				id: sent.accepted.id,
+				replyStatus: "cancelled",
+			}),
+			expect.objectContaining({
+				id: queued.accepted.id,
+				replyStatus: "cancelled",
+			}),
+		]);
+		completed.resolve({ text: "This result is no longer authoritative." });
+		await service.whenIdle();
+
+		expect(service.snapshot().messages["dm:codex"]).toEqual([
+			expect.objectContaining({
+				id: sent.accepted.id,
+				replyStatus: "cancelled",
+				replyError:
+					"Interrupted because a Project used by this run was removed.",
+			}),
+			expect.objectContaining({
+				id: queued.accepted.id,
+				replyStatus: "cancelled",
+				replyError:
+					"Interrupted because a Project used by this run was removed.",
+			}),
+		]);
+	});
+
+	it("terminalizes queued pending routing when its selected Project is removed", async () => {
+		const root = await mkdtemp(
+			join(tmpdir(), "commonspace-pending-routing-project-removal-"),
+		);
+		roots.push(root);
+		const workspace = join(root, "workspace");
+		await mkdir(workspace);
+		const firstStarted = deferred<void>();
+		const firstCompleted = deferred<{ text: string }>();
+		const runAgent = vi.fn(async () => {
+			if (runAgent.mock.calls.length === 1) {
+				firstStarted.resolve();
+				return firstCompleted.promise;
+			}
+			return { text: "The queued request ran without its selected Project." };
+		});
+		const routeAgents = vi.fn(async () => ({
+			assignments: [{ agentId: "codex", projectIds: [] }],
+			reason: "Route the queued request after the active turn.",
+		}));
+		const service = new CommonspaceHostService(
+			{},
+			{ root },
+			{
+				discoverAgents: discoverTestHarnesses,
+				runAgent: withHarnessUtilities(runAgent),
+				routeAgents,
+			},
+		);
+		await service.initialize();
+		await addTestHarness(service, "codex", "Review Bot");
+		const project = mustExist(
+			(
+				await service.mutate({
+					action: "create-project",
+					name: "Removable",
+					paths: [workspace],
+				})
+			).projects[0],
+		);
+		const channel = mustExist(
+			(
+				await service.mutate({
+					action: "create-channel",
+					name: "review",
+					agentIds: ["codex"],
+				})
+			).channels[0],
+		);
+
+		const first = await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			text: "@review-bot Start the review.",
+		});
+		await firstStarted.promise;
+		const queued = await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			threadId: mustExist(first.thread).id,
+			projectId: project.id,
+			delivery: "queue",
+			text: "Continue the review in the selected Project.",
+		});
+		await service.mutate({ action: "remove-project", projectId: project.id });
+		const afterRemoval = service.snapshot();
+		firstCompleted.resolve({ text: "The active request completed." });
+		await service.whenIdle();
+
+		const reason =
+			"Interrupted because a Project used by this run was removed.";
+		expect(afterRemoval.messages[`channel:${channel.id}`]).toContainEqual(
+			expect.objectContaining({
+				id: queued.accepted.id,
+				replyStatus: "failed",
+				replyError: reason,
+				routing: expect.objectContaining({ status: "failed", reason }),
+			}),
+		);
+		expect(routeAgents).not.toHaveBeenCalled();
+		expect(runAgent).toHaveBeenCalledOnce();
+	});
+
+	it("keeps an active Project turn running when another path is added", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-project-path-add-"));
+		roots.push(root);
+		const firstWorkspace = join(root, "workspace-a");
+		const secondWorkspace = join(root, "workspace-b");
+		await Promise.all([mkdir(firstWorkspace), mkdir(secondWorkspace)]);
+		const started = deferred<void>();
+		const completed = deferred<{ text: string }>();
+		const service = new CommonspaceHostService(
+			{},
+			{ root },
+			{
+				discoverAgents: discoverTestHarnesses,
+				runAgent: async () => {
+					started.resolve();
+					return completed.promise;
+				},
+			},
+		);
+		await service.initialize();
+		await addTestHarness(service, "codex", "Review Bot");
+		const project = mustExist(
+			(
+				await service.mutate({
+					action: "create-project",
+					name: "Expandable",
+					paths: [firstWorkspace],
+				})
+			).projects[0],
+		);
+
+		const sent = await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			projectId: project.id,
+			text: "Keep using the admitted roots.",
+		});
+		await started.promise;
+		await service.mutate({
+			action: "add-project-path",
+			projectId: project.id,
+			path: secondWorkspace,
+		});
+		completed.resolve({ text: "Completed with the original roots." });
+		await service.whenIdle();
+
+		expect(service.snapshot().messages["dm:codex"]).toEqual([
+			expect.objectContaining({
+				id: sent.accepted.id,
+				replyStatus: "complete",
+			}),
+			expect.objectContaining({
+				authorType: "agent",
+				text: "Completed with the original roots.",
+			}),
+		]);
+	});
+
+	it("invalidates a run while its attribution is still being collected", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-attribution-race-"));
+		roots.push(root);
+		const workspace = join(root, "workspace");
+		const bin = join(root, "bin");
+		const fakeGit = join(bin, "git");
+		const block = join(root, "block-git");
+		const reached = join(root, "git-reached");
+		const release = join(root, "release-git");
+		await Promise.all([mkdir(workspace), mkdir(bin)]);
+		await writeFile(
+			fakeGit,
+			`#!/bin/sh
+if [ -f "$FAKE_GIT_BLOCK" ]; then
+  : > "$FAKE_GIT_REACHED"
+  while [ ! -f "$FAKE_GIT_RELEASE" ]; do sleep 0.01; done
+fi
+case "$*" in
+  *"rev-parse --show-toplevel"*) printf '%s\\n' "$FAKE_GIT_ROOT" ;;
+  *"symbolic-ref"*) printf 'main\\n' ;;
+  *"rev-parse HEAD"*) printf '0123456789012345678901234567890123456789\\n' ;;
+esac
+`,
+		);
+		await chmod(fakeGit, 0o755);
+		vi.stubEnv("PATH", `${bin}:${process.env.PATH ?? ""}`);
+		vi.stubEnv("FAKE_GIT_ROOT", workspace);
+		vi.stubEnv("FAKE_GIT_BLOCK", block);
+		vi.stubEnv("FAKE_GIT_REACHED", reached);
+		vi.stubEnv("FAKE_GIT_RELEASE", release);
+		const service = new CommonspaceHostService(
+			{},
+			{ root },
+			{
+				discoverAgents: discoverTestHarnesses,
+				runAgent: async () => {
+					await writeFile(block, "block");
+					return { text: "This reply became stale during attribution." };
+				},
+			},
+		);
+		await service.initialize();
+		await addTestHarness(service, "codex", "Review Bot");
+		const project = mustExist(
+			(
+				await service.mutate({
+					action: "create-project",
+					name: "Attribution",
+					paths: [workspace],
+				})
+			).projects[0],
+		);
+
+		const sent = await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			projectId: project.id,
+			text: "Inspect this Project.",
+		});
+		await vi.waitFor(
+			async () => {
+				expect(await stat(reached)).toBeDefined();
+			},
+			{ timeout: 5_000 },
+		);
+		await service.mutate({ action: "remove-project", projectId: project.id });
+		await writeFile(release, "release");
+		await service.whenIdle();
+
+		expect(service.snapshot().messages["dm:codex"]).toEqual([
+			expect.objectContaining({
+				id: sent.accepted.id,
+				replyStatus: "cancelled",
+				replyError:
+					"Interrupted because a Project used by this run was removed.",
+			}),
+		]);
+	});
+
+	it("records a terminal Channel failure when an active Agent is removed", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-agent-removal-"));
+		roots.push(root);
+		const started = deferred<void>();
+		const completed = deferred<{ text: string }>();
+		const service = new CommonspaceHostService(
+			{},
+			{ root },
+			{
+				discoverAgents: discoverTestHarnesses,
+				runAgent: async () => {
+					started.resolve();
+					return completed.promise;
+				},
+			},
+		);
+		await service.initialize();
+		await addTestHarness(service, "codex", "Review Bot");
+		const channel = mustExist(
+			(
+				await service.mutate({
+					action: "create-channel",
+					name: "review",
+					agentIds: ["codex"],
+				})
+			).channels[0],
+		);
+
+		const sent = await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			text: "@review-bot Review this change.",
+		});
+		await started.promise;
+		await service.mutate({ action: "remove-agent", agentId: "codex" });
+		expect(service.snapshot().messages[`channel:${channel.id}`]).toContainEqual(
+			expect.objectContaining({
+				authorType: "system",
+				sourceMessageId: sent.accepted.id,
+				text: "@codex run failed: Interrupted because the Agent was removed.",
+			}),
+		);
+		completed.resolve({ text: "This stale response must be discarded." });
+		await service.whenIdle();
+
+		expect(
+			service
+				.snapshot()
+				.messages[`channel:${channel.id}`]?.filter(
+					(message) =>
+						message.authorType === "system" &&
+						message.sourceMessageId === sent.accepted.id,
+				),
+		).toHaveLength(1);
+		expect(
+			service.snapshot().threads.find((thread) => thread.id === sent.thread?.id)
+				?.agentIds,
+		).toEqual([]);
+	});
+
+	it("does not run a queued Channel turn after its Agent authority is replaced", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-queued-authority-"));
+		roots.push(root);
+		const firstStarted = deferred<void>();
+		const firstCompleted = deferred<{ text: string }>();
+		const runAgent = vi.fn(async () => {
+			if (runAgent.mock.calls.length === 1) {
+				firstStarted.resolve();
+				return firstCompleted.promise;
+			}
+			return { text: "A queued request ran with replacement authority." };
+		});
+		const service = new CommonspaceHostService(
+			{},
+			{ root },
+			{
+				discoverAgents: discoverTestHarnesses,
+				runAgent: withHarnessUtilities(runAgent),
+			},
+		);
+		await service.initialize();
+		await addTestHarness(service, "codex", "Review Bot");
+		const channel = mustExist(
+			(
+				await service.mutate({
+					action: "create-channel",
+					name: "review",
+					agentIds: ["codex"],
+				})
+			).channels[0],
+		);
+
+		const first = await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			text: "@review-bot Start the review.",
+		});
+		await firstStarted.promise;
+		const queued = await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			threadId: first.thread?.id,
+			targetAgentId: "codex",
+			delivery: "queue",
+			text: "Review the follow-up too.",
+		});
+		await service.mutate({ action: "remove-agent", agentId: "codex" });
+		expect(service.snapshot().messages[`channel:${channel.id}`]).toContainEqual(
+			expect.objectContaining({
+				authorType: "system",
+				sourceMessageId: queued.accepted.id,
+				text: "@codex run failed: Interrupted because the Agent was removed.",
+			}),
+		);
+		await addTestHarness(service, "codex", "Review Bot");
+		firstCompleted.resolve({ text: "The first response is also stale." });
+		await service.whenIdle();
+
+		expect(runAgent).toHaveBeenCalledOnce();
+		expect(service.snapshot().messages[`channel:${channel.id}`]).toContainEqual(
+			expect.objectContaining({
+				authorType: "system",
+				sourceMessageId: queued.accepted.id,
+				text: "@codex run failed: Interrupted because the Agent was removed.",
+			}),
+		);
+	});
+
+	it("does not run a queued Channel turn after Agent access changes", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-queued-access-"));
+		roots.push(root);
+		const firstStarted = deferred<void>();
+		const firstCompleted = deferred<{ text: string }>();
+		const runAgent = vi.fn(async () => {
+			firstStarted.resolve();
+			return firstCompleted.promise;
+		});
+		const service = new CommonspaceHostService(
+			{},
+			{ root },
+			{
+				discoverAgents: discoverTestHarnesses,
+				runAgent: withHarnessUtilities(runAgent),
+			},
+		);
+		await service.initialize();
+		await addTestHarness(service, "codex", "Review Bot");
+		const channel = mustExist(
+			(
+				await service.mutate({
+					action: "create-channel",
+					name: "review",
+					agentIds: ["codex"],
+				})
+			).channels[0],
+		);
+
+		const first = await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			text: "@review-bot Start the review.",
+		});
+		await firstStarted.promise;
+		const queued = await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			threadId: first.thread?.id,
+			targetAgentId: "codex",
+			delivery: "queue",
+			text: "Continue with the admitted access policy.",
+		});
+		await service.mutate({
+			action: "update-agent-profile",
+			agentId: "codex",
+			displayName: "Review Bot",
+			fullAccess: true,
+		});
+		expect(service.snapshot().messages[`channel:${channel.id}`]).toContainEqual(
+			expect.objectContaining({
+				authorType: "system",
+				sourceMessageId: queued.accepted.id,
+				text: "@codex run failed: Interrupted because agent permissions changed.",
+			}),
+		);
+		firstCompleted.resolve({ text: "This response used stale access." });
+		await service.whenIdle();
+
+		expect(runAgent).toHaveBeenCalledOnce();
+		expect(service.snapshot().messages[`channel:${channel.id}`]).toContainEqual(
+			expect.objectContaining({
+				authorType: "system",
+				sourceMessageId: queued.accepted.id,
+				text: "@codex run failed: Interrupted because agent permissions changed.",
+			}),
+		);
+	});
+
 	it("redacts host paths from agent failures before publishing them", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-private-error-"));
 		roots.push(root);
@@ -534,6 +1059,65 @@ describe("Commonspace host authority", () => {
 			version: COMMONSPACE_STATE_VERSION,
 			defaults: { reasoning: CommonspaceReasoning.Native },
 		});
+	});
+
+	it("skips an untaggable saved agent without discarding later valid agents", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-agent-recovery-"));
+		roots.push(root);
+		await writeFile(
+			join(root, "state.json"),
+			JSON.stringify({
+				version: COMMONSPACE_STATE_VERSION,
+				revision: 1,
+				inboxReadAt: null,
+				inboxReadMessageIds: [],
+				defaults: {
+					model: null,
+					reasoning: CommonspaceReasoning.Max,
+					maxAgentsPerTurn: 4,
+					memoryThreads: 12,
+				},
+				agents: [
+					{
+						id: "broken",
+						displayName: "!!!",
+						adapter: "hermes",
+						model: null,
+						createdAt: "before",
+					},
+					{
+						id: "hermes",
+						displayName: "Hermes",
+						adapter: "hermes",
+						model: null,
+						createdAt: "after",
+					},
+				],
+				dmSessions: {},
+				agentSessions: {},
+				projects: [],
+				channels: [],
+				threads: [],
+				messages: {},
+			}),
+		);
+		const service = new CommonspaceHostService(
+			{},
+			{ root },
+			{ discoverAgents: async () => [] },
+		);
+
+		await service.initialize();
+
+		expect(service.snapshot().agents).toEqual([
+			{
+				id: "hermes",
+				displayName: "Hermes",
+				adapter: "hermes",
+				model: null,
+				createdAt: "after",
+			},
+		]);
 	});
 
 	it("migrates v7 state to the Hermes and Codex roster", async () => {

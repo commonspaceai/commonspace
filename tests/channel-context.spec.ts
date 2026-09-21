@@ -522,6 +522,43 @@ describe("editable shared Channel context", () => {
 		}
 	});
 
+	it("includes evidence added after the compacting revision in the inference snapshot", async () => {
+		const { service } = await fixture();
+		const threadId = mustExist(service.snapshot().threads[0]).id;
+		let pin: ReturnType<typeof service.addPin> | undefined;
+		const unsubscribe = service.subscribeToRevisions(() => {
+			if (
+				pin === undefined &&
+				service.snapshot().threads.find((thread) => thread.id === threadId)
+					?.context.memory.status === "compacting"
+			) {
+				queueMicrotask(() => {
+					pin = service.addPin({
+						scope: { kind: "thread", id: threadId },
+						kind: "note",
+						note: "Deploy the reviewed change to Mercury.",
+					});
+				});
+			}
+		});
+		inferenceRequest = vi.fn(async () =>
+			inferenceResponse("Deploy the reviewed change to Mercury."),
+		);
+		try {
+			await expect(
+				service.compactThreadContext(threadId),
+			).resolves.toMatchObject({
+				memory: {
+					summary: "Deploy the reviewed change to Mercury.",
+					origin: "inference",
+				},
+			});
+			await pin;
+		} finally {
+			unsubscribe();
+		}
+	});
+
 	it("allows explicitly requested compaction of previously human-edited notes", async () => {
 		const { service, channel } = await fixture();
 		await service.updateChannelContext(channel.id, {

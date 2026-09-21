@@ -27,6 +27,7 @@ import {
 	type FormEvent,
 	Fragment,
 	lazy,
+	type KeyboardEvent as ReactKeyboardEvent,
 	type ReactNode,
 	type SetStateAction,
 	Suspense,
@@ -171,6 +172,14 @@ function restoreFiles(
 				),
 		),
 	];
+}
+
+function composerHasContent(
+	text: string,
+	images: readonly SendImageAttachment[],
+	files: readonly SendFileAttachment[],
+): boolean {
+	return text !== "" || images.length > 0 || files.length > 0;
 }
 
 function pendingAdmissionItem(
@@ -950,6 +959,79 @@ function suggestionLabel(suggestion: TagSuggestion): string {
 	return `Channel · ${suggestion.label}`;
 }
 
+function selectedItem<T>(items: readonly T[], index: number): T | undefined {
+	return items[index] ?? items[0];
+}
+
+interface ComposerSuggestionSelection {
+	readonly selectedIndex: number;
+	readonly slashSuggestions: ReturnType<typeof slashCommandSuggestions>;
+	readonly referenceSuggestions: readonly TagSuggestion[];
+	onSelectSlash: (name: string) => void;
+	onSelectTag: (suggestion: TagSuggestion) => void;
+}
+
+interface ComposerKeyDownOptions extends ComposerSuggestionSelection {
+	readonly setSelectedIndex: Dispatch<SetStateAction<number>>;
+	readonly slashCommandResolved: boolean;
+	readonly steerAvailable: boolean;
+}
+
+function acceptComposerSuggestion(
+	selection: ComposerSuggestionSelection,
+	includeSlash: boolean,
+): boolean {
+	const slashSuggestion = includeSlash
+		? selectedItem(selection.slashSuggestions, selection.selectedIndex)
+		: undefined;
+	if (slashSuggestion !== undefined) {
+		selection.onSelectSlash(slashSuggestion.name);
+		return true;
+	}
+	const referenceSuggestion = selectedItem(
+		selection.referenceSuggestions,
+		selection.selectedIndex,
+	);
+	if (referenceSuggestion === undefined) return false;
+	selection.onSelectTag(referenceSuggestion);
+	return true;
+}
+
+function handleComposerKeyDown(
+	event: ReactKeyboardEvent<HTMLTextAreaElement>,
+	options: ComposerKeyDownOptions,
+) {
+	const suggestionCount =
+		options.slashSuggestions.length + options.referenceSuggestions.length;
+	if (
+		suggestionCount > 0 &&
+		(event.key === "ArrowDown" || event.key === "ArrowUp")
+	) {
+		event.preventDefault();
+		const direction = event.key === "ArrowDown" ? 1 : -1;
+		options.setSelectedIndex(
+			(current) => (current + direction + suggestionCount) % suggestionCount,
+		);
+		return;
+	}
+	if (suggestionCount > 0 && event.key === "Tab") {
+		event.preventDefault();
+		acceptComposerSuggestion(options, true);
+		return;
+	}
+	if (event.key !== "Enter" || event.shiftKey) return;
+	event.preventDefault();
+	if (acceptComposerSuggestion(options, !options.slashCommandResolved)) return;
+	const form = event.currentTarget.form;
+	const steer =
+		options.steerAvailable && (event.metaKey || event.ctrlKey)
+			? form?.querySelector<HTMLButtonElement>(
+					'button[name="delivery"][value="steer"]:not(:disabled)',
+				)
+			: undefined;
+	form?.requestSubmit(steer);
+}
+
 interface SuggestionMenuProps {
 	id: string;
 	selectedSuggestion: number;
@@ -1054,6 +1136,80 @@ function liveActivitiesFor(
 			activity.conversation.id === conversation.id &&
 			activity.threadId === threadId,
 	);
+}
+
+interface ChannelMessageIndex {
+	readonly messageById: ReadonlyMap<string, CommonspaceMessage>;
+	readonly repliesByThread: ReadonlyMap<
+		string,
+		ReadonlyMap<string, readonly CommonspaceMessage[]>
+	>;
+	readonly roots: readonly CommonspaceMessage[];
+}
+
+function indexChannelMessages(
+	messages: readonly CommonspaceMessage[],
+): ChannelMessageIndex {
+	const messageById = new Map<string, CommonspaceMessage>();
+	const repliesByThread = new Map<string, Map<string, CommonspaceMessage[]>>();
+	const roots: CommonspaceMessage[] = [];
+	for (const message of messages) {
+		messageById.set(message.id, message);
+		if (message.authorType === "user" && message.parentMessageId === undefined)
+			roots.push(message);
+		if (message.threadId === undefined || message.parentMessageId === undefined)
+			continue;
+		let repliesByRoot = repliesByThread.get(message.threadId);
+		if (repliesByRoot === undefined) {
+			repliesByRoot = new Map();
+			repliesByThread.set(message.threadId, repliesByRoot);
+		}
+		const replies = repliesByRoot.get(message.parentMessageId);
+		if (replies === undefined) {
+			repliesByRoot.set(message.parentMessageId, [message]);
+		} else {
+			replies.push(message);
+		}
+	}
+	return { messageById, repliesByThread, roots };
+}
+
+interface ThreadPinRow {
+	readonly label: string;
+	readonly pin: CommonspacePin;
+	readonly sourceLabel: string;
+}
+
+function threadPinRow(
+	pin: CommonspacePin,
+	messageById: ReadonlyMap<string, CommonspaceMessage> | undefined,
+): ThreadPinRow {
+	if (pin.kind === "note") {
+		return {
+			label: pin.note,
+			pin,
+			sourceLabel: pin.scope.kind === "channel" ? "Channel" : "Note",
+		};
+	}
+	const source = messageById?.get(pin.messageId);
+	if (pin.kind === "message") {
+		return {
+			label: source?.text ?? "Pinned message",
+			pin,
+			sourceLabel:
+				pin.scope.kind === "channel"
+					? "Channel"
+					: (source?.authorName ?? "Message"),
+		};
+	}
+	const attachment =
+		source?.attachments?.find((item) => item.id === pin.attachmentId) ??
+		source?.files?.find((item) => item.id === pin.attachmentId);
+	return {
+		label: attachment?.name ?? "Pinned attachment",
+		pin,
+		sourceLabel: pin.scope.kind === "channel" ? "Channel" : "File",
+	};
 }
 
 function ThreadAgentActivity({
@@ -1305,32 +1461,49 @@ export function CommonspaceConversation({
 	const handledComposerInsertToken = useRef<number | null>(null);
 	const suppressThreadAutoScroll = useRef(false);
 	const bootstrap = snapshot.bootstrap;
+	const state = bootstrap?.state;
+	const activeConversation = snapshot.activeConversation;
+	const activeChannelId =
+		activeConversation?.kind === "channel" ? activeConversation.id : null;
 	const messages = store.messages();
-	const conversationPendingSubmissions = snapshot.pendingSubmissions.filter(
-		(submission) =>
-			snapshot.activeConversation !== null &&
-			submission.conversation.kind === snapshot.activeConversation.kind &&
-			submission.conversation.id === snapshot.activeConversation.id,
+	const conversationPendingSubmissions = useMemo(
+		() =>
+			activeConversation === null
+				? []
+				: snapshot.pendingSubmissions.filter(
+						(submission) =>
+							submission.conversation.kind === activeConversation.kind &&
+							submission.conversation.id === activeConversation.id,
+					),
+		[activeConversation, snapshot.pendingSubmissions],
 	);
-	const unreadMessageIds = new Set(
-		bootstrap === null
-			? []
-			: [
-					...deriveCommonspaceInboxItems(bootstrap.state)
-						.filter((item) => item.unread)
-						.map((item) => item.messageId),
-					...(bootstrap.state.inboxUnreadMessageIds ?? []),
-				],
+	const unreadMessageIds = useMemo(
+		() =>
+			new Set(
+				state === undefined
+					? []
+					: [
+							...deriveCommonspaceInboxItems(state)
+								.filter((item) => item.unread)
+								.map((item) => item.messageId),
+							...(state.inboxUnreadMessageIds ?? []),
+						],
+			),
+		[state],
 	);
-	const savedMessageIds = new Set(bootstrap?.state.inboxSavedItemIds ?? []);
-	const heading = conversationTitle(store, snapshot.activeConversation);
-	const isChannel = snapshot.activeConversation?.kind === "channel";
-	const activeChannel =
-		isChannel && bootstrap !== null
-			? bootstrap.state.channels.find(
-					(channel) => channel.id === snapshot.activeConversation?.id,
-				)
-			: undefined;
+	const savedMessageIds = useMemo(
+		() => new Set(state?.inboxSavedItemIds ?? []),
+		[state?.inboxSavedItemIds],
+	);
+	const heading = conversationTitle(store, activeConversation);
+	const isChannel = activeChannelId !== null;
+	const activeChannel = useMemo(
+		() =>
+			activeChannelId === null
+				? undefined
+				: state?.channels.find((channel) => channel.id === activeChannelId),
+		[activeChannelId, state?.channels],
+	);
 	const slashSuggestions =
 		snapshot.activeConversation === null ||
 		pendingImages.length > 0 ||
@@ -1352,14 +1525,19 @@ export function CommonspaceConversation({
 		suggestionCount > 0
 			? `${suggestionListId}-option-${String(selectedSuggestion)}`
 			: undefined;
-	const channelThreads =
-		isChannel && bootstrap !== null
-			? bootstrap.state.threads.filter(
-					(thread) => thread.channelId === snapshot.activeConversation?.id,
-				)
-			: [];
-	const activeThread = channelThreads.find(
-		(thread) => thread.id === snapshot.activeThreadId,
+	const channelThreads = useMemo(
+		() =>
+			activeChannelId === null
+				? []
+				: (state?.threads ?? []).filter(
+						(thread) => thread.channelId === activeChannelId,
+					),
+		[activeChannelId, state?.threads],
+	);
+	const activeThread = useMemo(
+		() =>
+			channelThreads.find((thread) => thread.id === snapshot.activeThreadId),
+		[channelThreads, snapshot.activeThreadId],
 	);
 	useEffect(() => {
 		if (threadOverlay && snapshot.activeThreadId !== null) {
@@ -1368,21 +1546,21 @@ export function CommonspaceConversation({
 				?.focus();
 		}
 	}, [threadOverlay, snapshot.activeThreadId]);
-	const activeThreadProject =
-		activeThread === undefined || bootstrap === null
-			? undefined
-			: bootstrap.state.projects.find(
-					(project) => project.id === activeThread.projectId,
-				);
+	const activeThreadProject = useMemo(
+		() =>
+			activeThread === undefined
+				? undefined
+				: state?.projects.find(
+						(project) => project.id === activeThread.projectId,
+					),
+		[activeThread, state?.projects],
+	);
 	const sessions = useMemo(
 		() =>
-			bootstrap === null
+			state === undefined
 				? []
-				: deriveCommonspaceSessions(
-						bootstrap.state,
-						bootstrap.liveActivities ?? [],
-					),
-		[bootstrap],
+				: deriveCommonspaceSessions(state, bootstrap?.liveActivities ?? []),
+		[bootstrap?.liveActivities, state],
 	);
 	const activeThreadSessions = useMemo(
 		() =>
@@ -1450,58 +1628,98 @@ export function CommonspaceConversation({
 		threadSuggestionCount > 0
 			? `${threadSuggestionListId}-option-${String(selectedThreadSuggestion)}`
 			: undefined;
-	const roots = isChannel
-		? messages.filter(
-				(message) =>
-					message.authorType === "user" &&
-					message.parentMessageId === undefined,
-			)
-		: messages;
-	const channelThreadByRoot = new Map(
-		channelThreads.map((thread) => [thread.rootMessageId, thread]),
+	const channelMessageIndex = useMemo(
+		() => (isChannel ? indexChannelMessages(messages) : null),
+		[isChannel, messages],
 	);
-	const runningThreadIds = new Set(
-		sessions
-			.filter((session) => session.status === "running")
-			.flatMap((session) =>
-				session.threadId === undefined ? [] : [session.threadId],
-			),
+	const unreadRepliesByThread = useMemo(() => {
+		const unreadByThread = new Map<
+			string,
+			Map<string, readonly CommonspaceMessage[]>
+		>();
+		for (const [
+			threadId,
+			repliesByRoot,
+		] of channelMessageIndex?.repliesByThread ?? []) {
+			for (const [rootId, replies] of repliesByRoot) {
+				const unreadReplies = replies.filter((reply) =>
+					unreadMessageIds.has(reply.id),
+				);
+				if (unreadReplies.length === 0) continue;
+				let unreadByRoot = unreadByThread.get(threadId);
+				if (unreadByRoot === undefined) {
+					unreadByRoot = new Map();
+					unreadByThread.set(threadId, unreadByRoot);
+				}
+				unreadByRoot.set(rootId, unreadReplies);
+			}
+		}
+		return unreadByThread;
+	}, [channelMessageIndex, unreadMessageIds]);
+	const roots = channelMessageIndex?.roots ?? messages;
+	const channelThreadByRoot = useMemo(
+		() =>
+			new Map(channelThreads.map((thread) => [thread.rootMessageId, thread])),
+		[channelThreads],
 	);
-	const followedThreadIds = new Set(
-		sessions
-			.filter((session) => session.followed)
-			.flatMap((session) =>
-				session.threadId === undefined ? [] : [session.threadId],
-			),
+	const { followedThreadIds, runningThreadIds } = useMemo(() => {
+		const followed = new Set<string>();
+		const running = new Set<string>();
+		for (const session of sessions) {
+			if (session.threadId === undefined) continue;
+			if (session.followed) followed.add(session.threadId);
+			if (session.status === "running") running.add(session.threadId);
+		}
+		return { followedThreadIds: followed, runningThreadIds: running };
+	}, [sessions]);
+	const rootsForChannelThreadView = useMemo(
+		() =>
+			roots.filter((root) => {
+				if (!isChannel || channelThreadView === "all") return true;
+				const threadId = channelThreadByRoot.get(root.id)?.id;
+				if (threadId === undefined) return false;
+				return channelThreadView === "running"
+					? runningThreadIds.has(threadId)
+					: followedThreadIds.has(threadId);
+			}),
+		[
+			channelThreadByRoot,
+			channelThreadView,
+			followedThreadIds,
+			isChannel,
+			roots,
+			runningThreadIds,
+		],
 	);
-	const rootsForChannelThreadView = roots.filter((root) => {
-		if (!isChannel || channelThreadView === "all") return true;
-		const threadId = channelThreadByRoot.get(root.id)?.id;
-		if (threadId === undefined) return false;
-		return channelThreadView === "running"
-			? runningThreadIds.has(threadId)
-			: followedThreadIds.has(threadId);
-	});
-	const runningThreadCount = channelThreads.filter((thread) =>
-		runningThreadIds.has(thread.id),
-	).length;
-	const followedThreadCount = channelThreads.filter((thread) =>
-		followedThreadIds.has(thread.id),
-	).length;
-	const conversationUnreadMessages = messages.filter((message) =>
-		unreadMessageIds.has(message.id),
+	const { followedThreadCount, runningThreadCount } = useMemo(() => {
+		let followed = 0;
+		let running = 0;
+		for (const thread of channelThreads) {
+			if (followedThreadIds.has(thread.id)) followed += 1;
+			if (runningThreadIds.has(thread.id)) running += 1;
+		}
+		return { followedThreadCount: followed, runningThreadCount: running };
+	}, [channelThreads, followedThreadIds, runningThreadIds]);
+	const { conversationUnreadMessages, unreadRootMessageIds } = useMemo(() => {
+		const unreadMessages: CommonspaceMessage[] = [];
+		const unreadRoots = new Set<string>();
+		for (const message of messages) {
+			if (!unreadMessageIds.has(message.id)) continue;
+			unreadMessages.push(message);
+			unreadRoots.add(message.parentMessageId ?? message.id);
+		}
+		return {
+			conversationUnreadMessages: unreadMessages,
+			unreadRootMessageIds: unreadRoots,
+		};
+	}, [messages, unreadMessageIds]);
+	const firstUnreadRootId = useMemo(
+		() =>
+			isChannel
+				? roots.find((root) => unreadRootMessageIds.has(root.id))?.id
+				: undefined,
+		[isChannel, roots, unreadRootMessageIds],
 	);
-	const firstUnreadRootId = isChannel
-		? roots.find(
-				(root) =>
-					unreadMessageIds.has(root.id) ||
-					messages.some(
-						(message) =>
-							message.parentMessageId === root.id &&
-							unreadMessageIds.has(message.id),
-					),
-			)?.id
-		: undefined;
 	const pendingDirectMessage = isChannel
 		? undefined
 		: messages.findLast(
@@ -1549,15 +1767,13 @@ export function CommonspaceConversation({
 	const activeRoot =
 		activeThread === undefined
 			? undefined
-			: messages.find((message) => message.id === activeThread.rootMessageId);
+			: channelMessageIndex?.messageById.get(activeThread.rootMessageId);
 	const replies =
 		activeThread === undefined
 			? []
-			: messages.filter(
-					(message) =>
-						message.threadId === activeThread.id &&
-						message.parentMessageId === activeThread.rootMessageId,
-				);
+			: (channelMessageIndex?.repliesByThread
+					.get(activeThread.id)
+					?.get(activeThread.rootMessageId) ?? []);
 	const activeThreadActivities = liveActivitiesFor(
 		bootstrap?.liveActivities,
 		snapshot.activeConversation,
@@ -1583,17 +1799,27 @@ export function CommonspaceConversation({
 						permission.status === "pending" &&
 						permission.threadId === activeThread.id,
 				);
-	const activeThreadPins =
-		activeThread === undefined || bootstrap === null
-			? []
-			: (bootstrap.state.pins ?? []).filter(
-					(pin) =>
-						pin.removedAt === null &&
-						((pin.scope.kind === "thread" &&
-							pin.scope.id === activeThread.id) ||
-							(pin.scope.kind === "channel" &&
-								pin.scope.id === activeThread.channelId)),
-				);
+	const activeThreadPins = useMemo(
+		() =>
+			activeThread === undefined
+				? []
+				: (state?.pins ?? []).filter(
+						(pin) =>
+							pin.removedAt === null &&
+							((pin.scope.kind === "thread" &&
+								pin.scope.id === activeThread.id) ||
+								(pin.scope.kind === "channel" &&
+									pin.scope.id === activeThread.channelId)),
+					),
+		[activeThread, state?.pins],
+	);
+	const activeThreadPinRows = useMemo(
+		() =>
+			activeThreadPins.map((pin) =>
+				threadPinRow(pin, channelMessageIndex?.messageById),
+			),
+		[activeThreadPins, channelMessageIndex?.messageById],
+	);
 	const threadContextDirty =
 		activeThread !== undefined &&
 		(threadContextSummary !== activeThread.context.memory.summary ||
@@ -1601,12 +1827,16 @@ export function CommonspaceConversation({
 				activeThread.context.memory.decisions.join("\n") ||
 			contextLines(threadContextQuestions).join("\n") !==
 				activeThread.context.memory.openQuestions.join("\n"));
-	const rootComposerHasContent =
-		draft !== "" || pendingImages.length > 0 || pendingFiles.length > 0;
-	const threadComposerHasContent =
-		threadDraft !== "" ||
-		pendingThreadImages.length > 0 ||
-		pendingThreadFiles.length > 0;
+	const rootComposerHasContent = composerHasContent(
+		draft,
+		pendingImages,
+		pendingFiles,
+	);
+	const threadComposerHasContent = composerHasContent(
+		threadDraft,
+		pendingThreadImages,
+		pendingThreadFiles,
+	);
 	const rootComposerEmphasized =
 		focusedComposer === "channel" ||
 		(focusedComposer === null && rootComposerHasContent);
@@ -2026,32 +2256,23 @@ export function CommonspaceConversation({
 				const projectIds = referencedProjectIds(previous);
 				if (replay.images.length === 0 && replay.files.length === 0) {
 					if (threadId === undefined)
-						await store.send(
-							previous.text,
-							undefined,
-							[],
-							undefined,
-							projectIds,
-						);
+						await store.send({ text: previous.text, projectIds });
 					else if (projectIds.length === 0)
-						await store.send(previous.text, threadId);
+						await store.send({ text: previous.text, threadId });
 					else
-						await store.send(
-							previous.text,
+						await store.send({
+							text: previous.text,
 							threadId,
-							[],
-							undefined,
 							projectIds,
-						);
+						});
 				} else {
-					await store.send(
-						previous.text,
+					await store.send({
+						text: previous.text,
 						threadId,
-						replay.images,
-						undefined,
+						attachments: replay.images,
 						projectIds,
-						replay.files,
-					);
+						files: replay.files,
+					});
 				}
 			} catch (error) {
 				setCommandFeedback({
@@ -2163,120 +2384,92 @@ export function CommonspaceConversation({
 		store.dismissPendingSubmission(submission.id);
 	};
 
-	const sendRoot = async (event: FormEvent<HTMLFormElement>) => {
-		event.preventDefault();
-		const text = draft.trim();
-		if (text === "" && pendingImages.length === 0 && pendingFiles.length === 0)
-			return;
-		const attachments = pendingImages;
-		const files = pendingFiles;
-		const delivery =
-			directMessageActivities.length > 0 && !isChannel
-				? submittedFollowupDelivery(event)
-				: undefined;
-		setDraft("");
-		if (rootIsCommand) {
-			await executeSlashCommand(text);
-			return;
-		}
-		setPendingImages([]);
-		setPendingFiles([]);
-		setCommandFeedback(null);
-		try {
-			if (files.length > 0)
-				await store.send(
-					text,
-					undefined,
-					attachments,
-					delivery,
-					undefined,
-					files,
-				);
-			else if (delivery !== undefined)
-				await store.send(text, undefined, attachments, delivery);
-			else if (attachments.length > 0)
-				await store.send(text, undefined, attachments);
-			else await store.send(text);
-		} catch (error) {
-			if (!rootInputOccupied.current) {
-				setDraft(text);
-				setPendingImages(attachments);
-				setPendingFiles(files);
-				if (error instanceof CommonspaceSubmissionError)
-					store.dismissPendingSubmission(error.submissionId);
+	const sendRoot =
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Sending owns one ordered reset, dispatch, and conditional recovery transaction.
+		async (event: FormEvent<HTMLFormElement>) => {
+			event.preventDefault();
+			const text = draft.trim();
+			if (!composerHasContent(text, pendingImages, pendingFiles)) return;
+			const attachments = pendingImages;
+			const files = pendingFiles;
+			const delivery =
+				directMessageActivities.length > 0 && !isChannel
+					? submittedFollowupDelivery(event)
+					: undefined;
+			setDraft("");
+			if (rootIsCommand) {
+				await executeSlashCommand(text);
+				return;
 			}
-		}
-	};
+			setPendingImages([]);
+			setPendingFiles([]);
+			setCommandFeedback(null);
+			try {
+				await store.send({ text, attachments, delivery, files });
+			} catch (error) {
+				if (!rootInputOccupied.current) {
+					setDraft(text);
+					setPendingImages(attachments);
+					setPendingFiles(files);
+					if (error instanceof CommonspaceSubmissionError)
+						store.dismissPendingSubmission(error.submissionId);
+				}
+			}
+		};
 
-	const sendThreadReply = async (event: FormEvent<HTMLFormElement>) => {
-		event.preventDefault();
-		const text = threadDraft.trim();
-		if (
-			(text === "" &&
-				pendingThreadImages.length === 0 &&
-				pendingThreadFiles.length === 0) ||
-			activeThread === undefined
-		)
-			return;
-		const attachments = pendingThreadImages;
-		const files = pendingThreadFiles;
-		const delivery =
-			activeThreadActivities.length > 0 && threadReplyTarget === null
-				? submittedFollowupDelivery(event)
-				: undefined;
-		setThreadDraft("");
-		if (threadIsCommand) {
-			setThreadReplyTarget(null);
-			await executeSlashCommand(text, activeThread.id);
-			return;
-		}
-		setPendingThreadImages([]);
-		setPendingThreadFiles([]);
-		setCommandFeedback(null);
-		scrollThreadToBottom();
-		try {
-			if (threadReplyTarget === null) {
-				if (files.length > 0)
-					await store.send(
+	const sendThreadReply =
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Thread sending owns one ordered reset, dispatch/direct-reply choice, and conditional recovery transaction.
+		async (event: FormEvent<HTMLFormElement>) => {
+			event.preventDefault();
+			if (activeThread === undefined) return;
+			const text = threadDraft.trim();
+			if (!composerHasContent(text, pendingThreadImages, pendingThreadFiles))
+				return;
+			const attachments = pendingThreadImages;
+			const files = pendingThreadFiles;
+			const delivery =
+				activeThreadActivities.length > 0 && threadReplyTarget === null
+					? submittedFollowupDelivery(event)
+					: undefined;
+			setThreadDraft("");
+			if (threadIsCommand) {
+				setThreadReplyTarget(null);
+				await executeSlashCommand(text, activeThread.id);
+				return;
+			}
+			setPendingThreadImages([]);
+			setPendingThreadFiles([]);
+			setCommandFeedback(null);
+			scrollThreadToBottom();
+			try {
+				if (threadReplyTarget === null) {
+					await store.send({
 						text,
-						activeThread.id,
+						threadId: activeThread.id,
 						attachments,
 						delivery,
-						undefined,
 						files,
-					);
-				else if (delivery !== undefined)
-					await store.send(text, activeThread.id, attachments, delivery);
-				else await store.send(text, activeThread.id, attachments);
-			} else {
-				if (files.length > 0)
-					await store.sendDirectReply(
+					});
+				} else {
+					await store.sendDirectReply({
 						text,
-						activeThread.id,
-						threadReplyTarget.agentId,
+						threadId: activeThread.id,
+						targetAgentId: threadReplyTarget.agentId,
 						attachments,
-						undefined,
 						files,
-					);
-				else
-					await store.sendDirectReply(
-						text,
-						activeThread.id,
-						threadReplyTarget.agentId,
-						attachments,
-					);
+					});
+				}
+				setThreadReplyTarget(null);
+			} catch (error) {
+				if (!threadInputOccupied.current) {
+					setThreadDraft(text);
+					setPendingThreadImages(attachments);
+					setPendingThreadFiles(files);
+					if (error instanceof CommonspaceSubmissionError)
+						store.dismissPendingSubmission(error.submissionId);
+				}
 			}
-			setThreadReplyTarget(null);
-		} catch (error) {
-			if (!threadInputOccupied.current) {
-				setThreadDraft(text);
-				setPendingThreadImages(attachments);
-				setPendingThreadFiles(files);
-				if (error instanceof CommonspaceSubmissionError)
-					store.dismissPendingSubmission(error.submissionId);
-			}
-		}
-	};
+		};
 
 	const replyDirectlyToAgent = (message: CommonspaceMessage) => {
 		setThreadReplyTarget({
@@ -2335,12 +2528,7 @@ export function CommonspaceConversation({
 	const pinnedMessagesByScope = useMemo(() => {
 		const scopes = new Map<string, Set<string>>();
 		for (const pin of bootstrap?.state.pins ?? []) {
-			if (
-				pin.removedAt !== null ||
-				pin.kind !== "message" ||
-				pin.messageId === undefined
-			)
-				continue;
+			if (pin.removedAt !== null || pin.kind !== "message") continue;
 			const key = `${pin.scope.kind}:${pin.scope.id}`;
 			const messages = scopes.get(key) ?? new Set<string>();
 			messages.add(pin.messageId);
@@ -2594,162 +2782,166 @@ export function CommonspaceConversation({
 								</div>
 							)}
 							{isChannel
-								? rootsForChannelThreadView.map((root) => {
-										const thread = channelThreads.find(
-											(candidate) => candidate.rootMessageId === root.id,
-										);
-										const threadIsActive = thread?.id === activeThread?.id;
-										const threadIsFocused =
-											threadIsActive || root.id === focusedRootMessageId;
-										const threadReplies =
-											thread === undefined
-												? []
-												: messages.filter(
-														(message) =>
-															message.threadId === thread.id &&
-															message.parentMessageId === root.id,
-													);
-										const replyCount = threadReplies.length;
-										const unreadReplies = threadReplies.filter((reply) =>
-											unreadMessageIds.has(reply.id),
-										);
-										const unreadCount = unreadReplies.length;
-										const threadActivities = liveActivitiesFor(
-											bootstrap?.liveActivities,
-											snapshot.activeConversation,
-											thread?.id,
-										);
-										return (
-											<Fragment key={root.id}>
-												{root.id === firstUnreadRootId &&
-													conversationUnreadMessages.length > 0 && (
-														<button
-															type="button"
-															className="mx-auto mb-1 grid min-h-8 w-full max-w-[920px] grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 border-0 bg-transparent px-3 text-xs font-medium text-muted-foreground before:h-px before:bg-border hover:[&>span:last-child]:text-foreground hover:[&>span:last-child]:underline"
-															aria-label={`${String(conversationUnreadMessages.length)} new ${conversationUnreadMessages.length === 1 ? "message" : "messages"}, mark read`}
-															onClick={markConversationRead}
-														>
-															<span>
-																{String(conversationUnreadMessages.length)} new{" "}
-																{conversationUnreadMessages.length === 1
-																	? "message"
-																	: "messages"}
-															</span>
-															<span className="text-muted-foreground">
-																Mark read
-															</span>
-														</button>
-													)}
-												<article
-													id={`commonspace-message-${root.id}`}
-													tabIndex={threadIsFocused ? -1 : undefined}
-													className={cn(
-														"relative mx-auto mb-2 w-full max-w-[920px] px-1.5 py-1 focus-visible:outline-none",
-														threadIsFocused &&
-															"before:absolute before:inset-y-3 before:left-0 before:w-0.5 before:rounded-full before:bg-border",
-													)}
-													aria-current={threadIsFocused ? "true" : undefined}
-												>
-													<MessageRow
-														message={root}
-														replyLink={
-															replyCount === 0 &&
-															threadActivities.length === 0 ? null : (
-																<button
-																	type="button"
-																	className={cn(
-																		"relative inline-flex min-h-7 w-fit items-center gap-2 rounded-sm border-0 bg-transparent py-0.5 pr-2 pl-0 text-xs font-normal text-primary hover:underline",
-																		unreadCount > 0 && "text-primary",
-																	)}
-																	aria-label={`${String(replyCount)} ${replyCount === 1 ? "reply" : "replies"}${unreadCount === 0 ? "" : `, ${String(unreadCount)} unread`}`}
-																	onClick={() => {
-																		if (thread === undefined) return;
-																		setContextSettingsOpen(false);
-																		selectThread(thread.id);
-																		for (const reply of unreadReplies) {
-																			void store.mutate({
-																				action: "mark-inbox-item-read",
-																				messageId: reply.id,
-																			});
-																		}
-																	}}
-																>
-																	<span className="inline-flex min-w-0 items-center gap-2">
-																		{bootstrap !== null && (
-																			<ThreadReplyAgents
-																				replies={threadReplies}
-																				agents={bootstrap.agents}
-																			/>
+								? rootsForChannelThreadView.map(
+										// biome-ignore lint/complexity/noExcessiveLinesPerFunction: A channel root owns its unread marker, thread summary, activity, and message actions as one visual row.
+										// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The row's conditional UI states are cohesive and its expensive lookups are preindexed above.
+										(root) => {
+											const thread = channelThreadByRoot.get(root.id);
+											const threadIsActive = thread?.id === activeThread?.id;
+											const threadIsFocused =
+												threadIsActive || root.id === focusedRootMessageId;
+											const threadReplies =
+												thread === undefined
+													? []
+													: (channelMessageIndex?.repliesByThread
+															.get(thread.id)
+															?.get(root.id) ?? []);
+											const replyCount = threadReplies.length;
+											const unreadReplies =
+												thread === undefined
+													? []
+													: (unreadRepliesByThread
+															.get(thread.id)
+															?.get(root.id) ?? []);
+											const unreadCount = unreadReplies.length;
+											const threadActivities = liveActivitiesFor(
+												bootstrap?.liveActivities,
+												snapshot.activeConversation,
+												thread?.id,
+											);
+											return (
+												<Fragment key={root.id}>
+													{root.id === firstUnreadRootId &&
+														conversationUnreadMessages.length > 0 && (
+															<button
+																type="button"
+																className="mx-auto mb-1 grid min-h-8 w-full max-w-[920px] grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 border-0 bg-transparent px-3 text-xs font-medium text-muted-foreground before:h-px before:bg-border hover:[&>span:last-child]:text-foreground hover:[&>span:last-child]:underline"
+																aria-label={`${String(conversationUnreadMessages.length)} new ${conversationUnreadMessages.length === 1 ? "message" : "messages"}, mark read`}
+																onClick={markConversationRead}
+															>
+																<span>
+																	{String(conversationUnreadMessages.length)}{" "}
+																	new{" "}
+																	{conversationUnreadMessages.length === 1
+																		? "message"
+																		: "messages"}
+																</span>
+																<span className="text-muted-foreground">
+																	Mark read
+																</span>
+															</button>
+														)}
+													<article
+														id={`commonspace-message-${root.id}`}
+														tabIndex={threadIsFocused ? -1 : undefined}
+														className={cn(
+															"relative mx-auto mb-2 w-full max-w-[920px] px-1.5 py-1 focus-visible:outline-none",
+															threadIsFocused &&
+																"before:absolute before:inset-y-3 before:left-0 before:w-0.5 before:rounded-full before:bg-border",
+														)}
+														aria-current={threadIsFocused ? "true" : undefined}
+													>
+														<MessageRow
+															message={root}
+															replyLink={
+																replyCount === 0 &&
+																threadActivities.length === 0 ? null : (
+																	<button
+																		type="button"
+																		className={cn(
+																			"relative inline-flex min-h-7 w-fit items-center gap-2 rounded-sm border-0 bg-transparent py-0.5 pr-2 pl-0 text-xs font-normal text-primary hover:underline",
+																			unreadCount > 0 && "text-primary",
 																		)}
-																		<span>
-																			{unreadCount > 0
-																				? `${String(unreadCount)} new ${unreadCount === 1 ? "reply" : "replies"}`
-																				: replyCount === 0
-																					? "Reply"
-																					: `${String(replyCount)} ${replyCount === 1 ? "reply" : "replies"}`}
-																		</span>
-																	</span>
-																	{threadActivities.length > 0 && (
-																		<span className="inline-flex items-center gap-2">
-																			{thread !== undefined &&
-																				bootstrap !== null && (
-																					<ThreadAgentActivity
-																						thread={thread}
-																						agents={bootstrap.agents}
-																						{...(threadActivities.length === 0
-																							? {}
-																							: {
-																									respondingAgentIds:
-																										threadActivities.map(
-																											(activity) =>
-																												activity.agentId,
-																										),
-																								})}
-																					/>
-																				)}
-																			<span className="rounded-full bg-[color-mix(in_oklch,var(--status-warning)_11%,var(--background))] px-2 py-1 text-[10px] text-foreground">
-																				Agents working
+																		aria-label={`${String(replyCount)} ${replyCount === 1 ? "reply" : "replies"}${unreadCount === 0 ? "" : `, ${String(unreadCount)} unread`}`}
+																		onClick={() => {
+																			if (thread === undefined) return;
+																			setContextSettingsOpen(false);
+																			selectThread(thread.id);
+																			for (const reply of unreadReplies) {
+																				void store.mutate({
+																					action: "mark-inbox-item-read",
+																					messageId: reply.id,
+																				});
+																			}
+																		}}
+																	>
+																		<span className="inline-flex min-w-0 items-center gap-2">
+																			{bootstrap !== null && (
+																				<ThreadReplyAgents
+																					replies={threadReplies}
+																					agents={bootstrap.agents}
+																				/>
+																			)}
+																			<span>
+																				{unreadCount > 0
+																					? `${String(unreadCount)} new ${unreadCount === 1 ? "reply" : "replies"}`
+																					: replyCount === 0
+																						? "Reply"
+																						: `${String(replyCount)} ${replyCount === 1 ? "reply" : "replies"}`}
 																			</span>
 																		</span>
-																	)}
-																	{unreadCount > 0 && (
-																		<span
-																			className="absolute -top-1 -right-1 size-2.5 rounded-full border-2 border-background bg-primary"
-																			aria-hidden="true"
-																		/>
-																	)}
-																</button>
-															)
-														}
-														bootstrap={bootstrap}
-														flush
-														onPin={pinChannelMessage}
-														pinned={
-															pinnedMessagesByScope
-																.get(`channel:${root.conversation.id}`)
-																?.has(root.id) ?? false
-														}
-														onEdit={editDeliveredMessage}
-														onDelete={deleteDeliveredMessage}
-														onOpenVersion={openMessageVersion}
-														saved={savedMessageIds.has(root.id)}
-														onToggleSaved={toggleSavedMessage}
-														onMarkUnread={markMessageUnread}
-														onCopyLink={copyMessageLink}
-														onRetryRouting={retryFailedRouting}
-														{...(thread === undefined
-															? {}
-															: {
-																	onReplyInThread: () => {
-																		setContextSettingsOpen(false);
-																		selectThread(thread.id);
-																	},
-																})}
-													/>
-												</article>
-											</Fragment>
-										);
-									})
+																		{threadActivities.length > 0 && (
+																			<span className="inline-flex items-center gap-2">
+																				{thread !== undefined &&
+																					bootstrap !== null && (
+																						<ThreadAgentActivity
+																							thread={thread}
+																							agents={bootstrap.agents}
+																							{...(threadActivities.length === 0
+																								? {}
+																								: {
+																										respondingAgentIds:
+																											threadActivities.map(
+																												(activity) =>
+																													activity.agentId,
+																											),
+																									})}
+																						/>
+																					)}
+																				<span className="rounded-full bg-[color-mix(in_oklch,var(--status-warning)_11%,var(--background))] px-2 py-1 text-[10px] text-foreground">
+																					Agents working
+																				</span>
+																			</span>
+																		)}
+																		{unreadCount > 0 && (
+																			<span
+																				className="absolute -top-1 -right-1 size-2.5 rounded-full border-2 border-background bg-primary"
+																				aria-hidden="true"
+																			/>
+																		)}
+																	</button>
+																)
+															}
+															bootstrap={bootstrap}
+															flush
+															onPin={pinChannelMessage}
+															pinned={
+																pinnedMessagesByScope
+																	.get(`channel:${root.conversation.id}`)
+																	?.has(root.id) ?? false
+															}
+															onEdit={editDeliveredMessage}
+															onDelete={deleteDeliveredMessage}
+															onOpenVersion={openMessageVersion}
+															saved={savedMessageIds.has(root.id)}
+															onToggleSaved={toggleSavedMessage}
+															onMarkUnread={markMessageUnread}
+															onCopyLink={copyMessageLink}
+															onRetryRouting={retryFailedRouting}
+															{...(thread === undefined
+																? {}
+																: {
+																		onReplyInThread: () => {
+																			setContextSettingsOpen(false);
+																			selectThread(thread.id);
+																		},
+																	})}
+														/>
+													</article>
+												</Fragment>
+											);
+										},
+									)
 								: roots.map((message) => (
 										<MessageRow
 											key={message.id}
@@ -2948,61 +3140,17 @@ export function CommonspaceConversation({
 											void attachPastedImages(files, setPendingImages);
 									}}
 									onKeyDown={(event) => {
-										if (
-											suggestionCount > 0 &&
-											(event.key === "ArrowDown" || event.key === "ArrowUp")
-										) {
-											event.preventDefault();
-											setSelectedSuggestion((current) =>
-												event.key === "ArrowDown"
-													? (current + 1) % suggestionCount
-													: (current - 1 + suggestionCount) % suggestionCount,
-											);
-										} else if (suggestionCount > 0 && event.key === "Tab") {
-											event.preventDefault();
-											if (slashSuggestions.length > 0) {
-												const suggestion =
-													slashSuggestions[selectedSuggestion] ??
-													slashSuggestions[0];
-												if (suggestion !== undefined)
-													selectSlashSuggestion(suggestion.name);
-											} else {
-												const suggestion =
-													referenceSuggestions[selectedSuggestion] ??
-													referenceSuggestions[0];
-												if (suggestion !== undefined)
-													selectSuggestion(suggestion);
-											}
-										} else if (event.key === "Enter" && !event.shiftKey) {
-											event.preventDefault();
-											if (
-												slashSuggestions.length > 0 &&
-												resolvedDraftCommand === null
-											) {
-												const suggestion =
-													slashSuggestions[selectedSuggestion] ??
-													slashSuggestions[0];
-												if (suggestion !== undefined)
-													selectSlashSuggestion(suggestion.name);
-											} else if (referenceSuggestions.length > 0) {
-												const suggestion =
-													referenceSuggestions[selectedSuggestion] ??
-													referenceSuggestions[0];
-												if (suggestion !== undefined)
-													selectSuggestion(suggestion);
-											} else {
-												const form = event.currentTarget.form;
-												const steer =
-													directMessageActivities.length > 0 &&
-													!isChannel &&
-													(event.metaKey || event.ctrlKey)
-														? form?.querySelector<HTMLButtonElement>(
-																'button[name="delivery"][value="steer"]:not(:disabled)',
-															)
-														: undefined;
-												form?.requestSubmit(steer);
-											}
-										}
+										handleComposerKeyDown(event, {
+											onSelectSlash: selectSlashSuggestion,
+											onSelectTag: selectSuggestion,
+											referenceSuggestions,
+											selectedIndex: selectedSuggestion,
+											setSelectedIndex: setSelectedSuggestion,
+											slashCommandResolved: resolvedDraftCommand !== null,
+											slashSuggestions,
+											steerAvailable:
+												directMessageActivities.length > 0 && !isChannel,
+										});
 									}}
 								/>
 								<PendingImageStrip
@@ -3372,51 +3520,23 @@ export function CommonspaceConversation({
 									>
 										<header>
 											<strong>Pins</strong>
-											<span>{activeThreadPins.length}</span>
+											<span>{activeThreadPinRows.length}</span>
 										</header>
-										{activeThreadPins.map((pin) => {
-											const source =
-												pin.messageId === undefined
-													? undefined
-													: messages.find(
-															(message) => message.id === pin.messageId,
-														);
-											const attachment =
-												pin.attachmentId === undefined
-													? undefined
-													: source?.attachments?.find(
-															(candidate) => candidate.id === pin.attachmentId,
-														);
-											const label =
-												pin.kind === "note"
-													? (pin.note ?? "Pinned note")
-													: pin.kind === "attachment"
-														? (attachment?.name ?? "Pinned attachment")
-														: (source?.text ?? "Pinned message");
-											return (
-												<div key={pin.id}>
-													<span>
-														{pin.scope.kind === "channel"
-															? "Channel"
-															: pin.kind === "note"
-																? "Note"
-																: pin.kind === "attachment"
-																	? "File"
-																	: (source?.authorName ?? "Message")}
-													</span>
-													<p>{label}</p>
-													<button
-														type="button"
-														aria-label={`Remove pin ${label}`}
-														onClick={() => {
-															void store.removePin(pin.id);
-														}}
-													>
-														Remove
-													</button>
-												</div>
-											);
-										})}
+										{activeThreadPinRows.map(({ label, pin, sourceLabel }) => (
+											<div key={pin.id}>
+												<span>{sourceLabel}</span>
+												<p>{label}</p>
+												<button
+													type="button"
+													aria-label={`Remove pin ${label}`}
+													onClick={() => {
+														void store.removePin(pin.id);
+													}}
+												>
+													Remove
+												</button>
+											</div>
+										))}
 										<form
 											aria-label="Add Thread pin note"
 											onSubmit={(event) => {
@@ -3653,69 +3773,18 @@ export function CommonspaceConversation({
 													);
 											}}
 											onKeyDown={(event) => {
-												if (
-													threadSuggestionCount > 0 &&
-													(event.key === "ArrowDown" || event.key === "ArrowUp")
-												) {
-													event.preventDefault();
-													setSelectedThreadSuggestion((current) =>
-														event.key === "ArrowDown"
-															? (current + 1) % threadSuggestionCount
-															: (current - 1 + threadSuggestionCount) %
-																threadSuggestionCount,
-													);
-												} else if (
-													threadSuggestionCount > 0 &&
-													event.key === "Tab"
-												) {
-													event.preventDefault();
-													if (threadSlashSuggestions.length > 0) {
-														const suggestion =
-															threadSlashSuggestions[
-																selectedThreadSuggestion
-															] ?? threadSlashSuggestions[0];
-														if (suggestion !== undefined)
-															selectThreadSlashSuggestion(suggestion.name);
-													} else {
-														const suggestion =
-															threadReferenceSuggestions[
-																selectedThreadSuggestion
-															] ?? threadReferenceSuggestions[0];
-														if (suggestion !== undefined)
-															selectThreadSuggestion(suggestion);
-													}
-												} else if (event.key === "Enter" && !event.shiftKey) {
-													event.preventDefault();
-													if (
-														threadSlashSuggestions.length > 0 &&
-														resolvedThreadCommand === null
-													) {
-														const suggestion =
-															threadSlashSuggestions[
-																selectedThreadSuggestion
-															] ?? threadSlashSuggestions[0];
-														if (suggestion !== undefined)
-															selectThreadSlashSuggestion(suggestion.name);
-													} else if (threadReferenceSuggestions.length > 0) {
-														const suggestion =
-															threadReferenceSuggestions[
-																selectedThreadSuggestion
-															] ?? threadReferenceSuggestions[0];
-														if (suggestion !== undefined)
-															selectThreadSuggestion(suggestion);
-													} else {
-														const form = event.currentTarget.form;
-														const steer =
-															activeThreadActivities.length > 0 &&
-															threadReplyTarget === null &&
-															(event.metaKey || event.ctrlKey)
-																? form?.querySelector<HTMLButtonElement>(
-																		'button[name="delivery"][value="steer"]:not(:disabled)',
-																	)
-																: undefined;
-														form?.requestSubmit(steer);
-													}
-												}
+												handleComposerKeyDown(event, {
+													onSelectSlash: selectThreadSlashSuggestion,
+													onSelectTag: selectThreadSuggestion,
+													referenceSuggestions: threadReferenceSuggestions,
+													selectedIndex: selectedThreadSuggestion,
+													setSelectedIndex: setSelectedThreadSuggestion,
+													slashCommandResolved: resolvedThreadCommand !== null,
+													slashSuggestions: threadSlashSuggestions,
+													steerAvailable:
+														activeThreadActivities.length > 0 &&
+														threadReplyTarget === null,
+												});
 											}}
 										/>
 										<PendingImageStrip

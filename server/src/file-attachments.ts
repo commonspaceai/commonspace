@@ -5,11 +5,12 @@ import { fileURLToPath } from "node:url";
 import type { CommonspaceFileAttachment } from "@commonspace/shared";
 import { credentialBearingFileName } from "./credential-files.js";
 
-export { credentialBearingFileName } from "./credential-files.js";
-
 export const MAX_FILE_ATTACHMENTS = 8;
 export const MAX_FILE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const MAX_FILE_ATTACHMENTS_BYTES = 16 * 1024 * 1024;
+
+const MIME_TYPE_PATTERN =
+	/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/u;
 
 export interface AgentGeneratedFile {
 	name: string;
@@ -21,6 +22,12 @@ export interface AgentGeneratedFile {
 export interface PreparedFileAttachment {
 	metadata: CommonspaceFileAttachment;
 	data: Buffer;
+}
+
+interface ValidatedAgentFileCandidate {
+	path: string;
+	name: string;
+	mimeType: string;
 }
 
 export interface BoundedAttachmentReader {
@@ -52,6 +59,84 @@ export async function readBoundedAttachmentBytes(
 	return buffer.subarray(0, expectedSize);
 }
 
+function pathIsWithinAllowedRoots(
+	path: string,
+	allowedRoots: readonly string[],
+): boolean {
+	return allowedRoots.some((root) => {
+		const child = relative(root, path);
+		return child === "" || (!child.startsWith("..") && !isAbsolute(child));
+	});
+}
+
+async function validateAgentFileCandidate(
+	candidate: AgentGeneratedFile,
+	allowedRoots: readonly string[],
+): Promise<ValidatedAgentFileCandidate | null> {
+	const url = new URL(candidate.uri);
+	if (url.protocol !== "file:") return null;
+	const sourcePath = fileURLToPath(url);
+	const sourceName = basename(sourcePath).normalize("NFKC");
+	if (credentialBearingFileName(sourceName)) return null;
+
+	const path = await realpath(sourcePath);
+	const resolvedName = basename(path).normalize("NFKC");
+	if (
+		credentialBearingFileName(resolvedName) ||
+		!pathIsWithinAllowedRoots(path, allowedRoots)
+	)
+		return null;
+
+	const requestedName = candidate.name.normalize("NFKC").trim();
+	const name = requestedName === "" ? basename(path) : requestedName;
+	if (
+		name.includes("/") ||
+		name.includes("\\") ||
+		credentialBearingFileName(name)
+	)
+		return null;
+
+	const mimeType =
+		candidate.mimeType?.trim().toLocaleLowerCase() ??
+		"application/octet-stream";
+	if (!MIME_TYPE_PATTERN.test(mimeType)) return null;
+	return { path, name, mimeType };
+}
+
+/** Bytes leave this resource boundary only after the descriptor closes successfully. */
+async function readValidatedAgentFile(
+	candidate: ValidatedAgentFileCandidate,
+): Promise<Buffer | null> {
+	const file = await open(
+		candidate.path,
+		constants.O_RDONLY | constants.O_NOFOLLOW,
+	);
+	try {
+		const info = await file.stat();
+		if (
+			!info.isFile() ||
+			info.size < 1 ||
+			info.size > MAX_FILE_ATTACHMENT_BYTES
+		)
+			return null;
+		if ((await realpath(candidate.path)) !== candidate.path) return null;
+		const current = await stat(candidate.path);
+		if (current.dev !== info.dev || current.ino !== info.ino) return null;
+		const data = await readBoundedAttachmentBytes(
+			{
+				read: async (buffer, offset, length, position) =>
+					(await file.read(buffer, offset, length, position)).bytesRead,
+				size: async () => (await file.stat()).size,
+			},
+			info.size,
+		);
+		if (data === null) return null;
+		return data;
+	} finally {
+		await file.close();
+	}
+}
+
 export async function prepareAgentFileAttachments(
 	files: readonly AgentGeneratedFile[] | undefined,
 	allowedRoots: readonly string[],
@@ -61,71 +146,24 @@ export async function prepareAgentFileAttachments(
 	let totalBytes = 0;
 	for (const candidate of files?.slice(0, MAX_FILE_ATTACHMENTS) ?? []) {
 		try {
-			const url = new URL(candidate.uri);
-			if (url.protocol !== "file:") continue;
-			const sourcePath = fileURLToPath(url);
-			const sourceName = basename(sourcePath).normalize("NFKC");
-			if (credentialBearingFileName(sourceName)) continue;
-			const path = await realpath(sourcePath);
-			const resolvedName = basename(path).normalize("NFKC");
-			if (credentialBearingFileName(resolvedName)) continue;
-			const insideAllowedRoot = allowedRoots.some((root) => {
-				const child = relative(root, path);
-				return child === "" || (!child.startsWith("..") && !isAbsolute(child));
+			const validated = await validateAgentFileCandidate(
+				candidate,
+				allowedRoots,
+			);
+			if (validated === null) continue;
+			const data = await readValidatedAgentFile(validated);
+			if (data === null) continue;
+			totalBytes += data.length;
+			if (totalBytes > MAX_FILE_ATTACHMENTS_BYTES) break;
+			prepared.push({
+				metadata: {
+					id: crypto.randomUUID(),
+					name: validated.name,
+					mimeType: validated.mimeType,
+					size: data.length,
+				},
+				data,
 			});
-			if (!insideAllowedRoot) continue;
-			const requestedName = candidate.name.normalize("NFKC").trim();
-			const name = requestedName === "" ? basename(path) : requestedName;
-			if (
-				name.includes("/") ||
-				name.includes("\\") ||
-				credentialBearingFileName(name)
-			)
-				continue;
-			const mimeType =
-				candidate.mimeType?.trim().toLocaleLowerCase() ??
-				"application/octet-stream";
-			if (
-				!/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/u.test(
-					mimeType,
-				)
-			)
-				continue;
-			const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-			try {
-				const info = await file.stat();
-				if (
-					!info.isFile() ||
-					info.size < 1 ||
-					info.size > MAX_FILE_ATTACHMENT_BYTES
-				)
-					continue;
-				if ((await realpath(path)) !== path) continue;
-				const current = await stat(path);
-				if (current.dev !== info.dev || current.ino !== info.ino) continue;
-				const data = await readBoundedAttachmentBytes(
-					{
-						read: async (buffer, offset, length, position) =>
-							(await file.read(buffer, offset, length, position)).bytesRead,
-						size: async () => (await file.stat()).size,
-					},
-					info.size,
-				);
-				if (data === null) continue;
-				totalBytes += data.length;
-				if (totalBytes > MAX_FILE_ATTACHMENTS_BYTES) break;
-				prepared.push({
-					metadata: {
-						id: crypto.randomUUID(),
-						name,
-						mimeType,
-						size: data.length,
-					},
-					data,
-				});
-			} finally {
-				await file.close();
-			}
 		} catch {
 			onInvalid();
 		}

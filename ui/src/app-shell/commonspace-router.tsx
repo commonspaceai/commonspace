@@ -136,7 +136,7 @@ const unmatchedRoute = createRoute({
 	path: "/$",
 });
 
-export const commonspaceRouteTree = rootRoute.addChildren([
+const commonspaceRouteTree = rootRoute.addChildren([
 	indexRoute,
 	inboxRoute,
 	inboxSessionsRoute,

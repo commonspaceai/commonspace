@@ -31,6 +31,7 @@ const sendResponseSchema = z.object({
 			.optional(),
 	}),
 });
+const errorResponseSchema = z.object({ error: z.string() });
 
 afterEach(async () => {
 	await Promise.all(servers.splice(0).map((server) => server.close()));
@@ -213,9 +214,9 @@ describe("managed chat image attachments", () => {
 		});
 
 		expect(response.status).toBe(400);
-		await expect(response.json()).resolves.toMatchObject({
-			error: "unsupported image type",
-		});
+		const failure = errorResponseSchema.parse(await response.json());
+		expect(failure.error).toContain("unsupported image type");
+		expect(failure.error).toContain("attachments[0].mimeType");
 		expect(runAgent).not.toHaveBeenCalled();
 	});
 });

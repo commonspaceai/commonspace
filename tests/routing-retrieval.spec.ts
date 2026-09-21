@@ -46,15 +46,39 @@ describe("routing retrieval", () => {
 				message(String(i), "Recent screen status. ".repeat(70)),
 			),
 		];
-		const context = buildRetrievedRoutingContext(
+		state.pins.unshift({
+			id: "source",
+			kind: "message",
+			messageId: "old",
+			scope: { kind: "channel", id: channel.id },
+			createdAt: "now",
+			removedAt: null,
+		});
+		state.pins.unshift({
+			id: "empty-note",
+			kind: "note",
+			note: "",
+			scope: { kind: "channel", id: channel.id },
+			createdAt: "now",
+			removedAt: null,
+		});
+		const context = buildRetrievedRoutingContext({
 			state,
-			channel.id,
-			"refresh tokens",
-			new RoutingMessageIndex(),
-		);
+			channelId: channel.id,
+			query: "refresh tokens",
+			index: new RoutingMessageIndex(),
+			thread: undefined,
+			scopeThreadId: undefined,
+		});
 		expect(context.some((item) => item.includes("Retrieved message old"))).toBe(
 			true,
 		);
+		expect(context.some((item) => item.includes("Pinned message old"))).toBe(
+			true,
+		);
+		expect(
+			context.some((item) => item.startsWith("Pinned note empty-note")),
+		).toBe(false);
 		expect(
 			context.find((item) => item.startsWith("Channel context")),
 		).toContain("Backend ownership");
@@ -96,7 +120,7 @@ describe("routing retrieval", () => {
 		index.sync([
 			message(
 				"long",
-				"status ".repeat(600) + "Do not change the refresh-token protocol.",
+				`${"status ".repeat(600)}Do not change the refresh-token protocol.`,
 			),
 		]);
 		expect(index.search("refresh-token protocol", "auth")[0]?.text).toContain(

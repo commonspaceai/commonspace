@@ -48,6 +48,8 @@ function entryIcon(entry: ProjectFileEntry): ReactNode {
 	return <FileIcon />;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The cohesive file browser keeps directory, selection, and preview resource ownership together.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: The cohesive file browser avoids splitting tightly coupled request and object-URL lifecycles across prop-heavy wrappers.
 export function CommonspaceProjectFiles({
 	projectId,
 	roots,
@@ -66,18 +68,25 @@ export function CommonspaceProjectFiles({
 	const [previewError, setPreviewError] = useState<string | null>(null);
 	const [previewAttempt, setPreviewAttempt] = useState(0);
 	const [imageSizing, setImageSizing] = useState<"fit" | "actual">("fit");
+	const targetRootIndex = targetFile?.rootIndex;
+	const targetPath = targetFile?.path;
+	const selectedPath = selected?.path;
+	const selectedFilePath =
+		selected?.kind === "file" ? selected.path : undefined;
+	const selectedPreview =
+		selected?.kind === "file" ? selected.preview : undefined;
 
 	useEffect(() => {
-		if (targetFile === null) return;
-		setRootIndex(targetFile.rootIndex);
-		setDirectoryPath(targetFile.path.split("/").slice(0, -1).join("/"));
+		if (targetRootIndex === undefined || targetPath === undefined) return;
+		setRootIndex(targetRootIndex);
+		setDirectoryPath(targetPath.split("/").slice(0, -1).join("/"));
 		setSelected(null);
-	}, [targetFile]);
+	}, [targetPath, targetRootIndex]);
 
 	useEffect(() => {
-		void selected?.path;
+		void selectedPath;
 		setImageSizing("fit");
-	}, [selected?.path]);
+	}, [selectedPath]);
 
 	useEffect(() => {
 		const controller = new AbortController();
@@ -106,10 +115,10 @@ export function CommonspaceProjectFiles({
 		void previewAttempt;
 		setText(null);
 		setPreviewError(null);
-		if (selected?.kind !== "file" || selected.preview !== "text") return;
+		if (selectedFilePath === undefined || selectedPreview !== "text") return;
 		const controller = new AbortController();
 		void fetchProjectText(
-			projectApiUrl(projectId, "file", rootIndex, selected.path),
+			projectApiUrl(projectId, "file", rootIndex, selectedFilePath),
 			controller.signal,
 			fetcher,
 		)
@@ -123,22 +132,29 @@ export function CommonspaceProjectFiles({
 		return () => {
 			controller.abort();
 		};
-	}, [fetcher, previewAttempt, projectId, rootIndex, selected]);
+	}, [
+		fetcher,
+		previewAttempt,
+		projectId,
+		rootIndex,
+		selectedFilePath,
+		selectedPreview,
+	]);
 
 	useEffect(() => {
 		void previewAttempt;
 		setMediaUrl(null);
 		setPreviewError(null);
 		if (
-			selected?.kind !== "file" ||
-			(selected.preview !== "image" && selected.preview !== "video")
+			selectedFilePath === undefined ||
+			(selectedPreview !== "image" && selectedPreview !== "video")
 		)
 			return;
 		const controller = new AbortController();
 		let objectUrl: string | null = null;
-		const previewKind = selected.preview;
+		const previewKind = selectedPreview;
 		void fetchProjectBlob(
-			projectApiUrl(projectId, "file", rootIndex, selected.path),
+			projectApiUrl(projectId, "file", rootIndex, selectedFilePath),
 			controller.signal,
 			previewKind === "image" ? "image/*" : "video/*",
 			fetcher,
@@ -160,27 +176,36 @@ export function CommonspaceProjectFiles({
 			controller.abort();
 			if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
 		};
-	}, [fetcher, previewAttempt, projectId, rootIndex, selected]);
+	}, [
+		fetcher,
+		previewAttempt,
+		projectId,
+		rootIndex,
+		selectedFilePath,
+		selectedPreview,
+	]);
 
 	useEffect(() => {
 		if (
-			targetFile === null ||
+			targetRootIndex === undefined ||
+			targetPath === undefined ||
 			listing === null ||
-			listing.rootIndex !== targetFile.rootIndex
+			listing.rootIndex !== targetRootIndex
 		)
 			return;
 		const match = listing.entries.find(
-			(entry) => entry.kind === "file" && entry.path === targetFile.path,
+			(entry) => entry.kind === "file" && entry.path === targetPath,
 		);
 		if (match !== undefined) setSelected(match);
-	}, [listing, targetFile]);
+	}, [listing, targetPath, targetRootIndex]);
 
 	const breadcrumbs = useMemo(() => {
 		const segments = directoryPath === "" ? [] : directoryPath.split("/");
-		return segments.map((name, index) => ({
-			name,
-			path: segments.slice(0, index + 1).join("/"),
-		}));
+		let path = "";
+		return segments.map((name) => {
+			path = path === "" ? name : `${path}/${name}`;
+			return { name, path };
+		});
 	}, [directoryPath]);
 
 	if (roots.length === 0) {

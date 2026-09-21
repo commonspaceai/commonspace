@@ -224,6 +224,44 @@ export class CommonspaceMcpGateway {
 		);
 	}
 
+	#registerHandoffTool(server: McpServer, scope: CommonspaceMcpScope) {
+		const peerIds = [
+			...new Set(
+				(scope.peers ?? [])
+					.map((peer) => peer.id)
+					.filter((peerId) => peerId !== scope.agentId),
+			),
+		];
+		const [firstPeerId, ...remainingPeerIds] = peerIds;
+		if (scope.conversation.kind !== "channel" || firstPeerId === undefined)
+			return;
+
+		const peerDirectory = (scope.peers ?? []).map((peer) => ({
+			targetAgentId: peer.id,
+			displayName: peer.displayName,
+		}));
+		server.registerTool(
+			"commonspace_handoff",
+			{
+				title: "Hand off to a Channel peer",
+				description: `Queue one concrete request for one current Channel peer. Commonspace delivers it after this turn and keeps the handoff visible in the Thread. Current peer identifiers: ${JSON.stringify(peerDirectory)}.`,
+				inputSchema: {
+					targetAgentId: z.enum([firstPeerId, ...remainingPeerIds]),
+					request: z.string().trim().min(1).max(4_000),
+				},
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: false,
+					openWorldHint: false,
+				},
+			},
+			async ({ targetAgentId, request }) =>
+				toolResult(
+					await this.#provider.handoff(scope, { targetAgentId, request }),
+				),
+		);
+	}
+
 	#createServer(scope: CommonspaceMcpScope): McpServer {
 		const server = new McpServer({
 			name: "commonspace",
@@ -309,40 +347,7 @@ export class CommonspaceMcpGateway {
 					await this.#provider.searchMessages(scope, { query, limit }),
 				),
 		);
-		const peerIds = [
-			...new Set(
-				(scope.peers ?? [])
-					.map((peer) => peer.id)
-					.filter((peerId) => peerId !== scope.agentId),
-			),
-		];
-		const [firstPeerId, ...remainingPeerIds] = peerIds;
-		if (scope.conversation.kind === "channel" && firstPeerId !== undefined) {
-			const peerDirectory = (scope.peers ?? []).map((peer) => ({
-				targetAgentId: peer.id,
-				displayName: peer.displayName,
-			}));
-			server.registerTool(
-				"commonspace_handoff",
-				{
-					title: "Hand off to a Channel peer",
-					description: `Queue one concrete request for one current Channel peer. Commonspace delivers it after this turn and keeps the handoff visible in the Thread. Current peer identifiers: ${JSON.stringify(peerDirectory)}.`,
-					inputSchema: {
-						targetAgentId: z.enum([firstPeerId, ...remainingPeerIds]),
-						request: z.string().trim().min(1).max(4_000),
-					},
-					annotations: {
-						readOnlyHint: false,
-						destructiveHint: false,
-						openWorldHint: false,
-					},
-				},
-				async ({ targetAgentId, request }) =>
-					toolResult(
-						await this.#provider.handoff(scope, { targetAgentId, request }),
-					),
-			);
-		}
+		this.#registerHandoffTool(server, scope);
 		server.registerTool(
 			"commonspace_post_progress",
 			{

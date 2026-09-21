@@ -115,6 +115,48 @@ it("shows pinned message content and keeps memory editing out of the default set
 	expect(screen.queryByLabelText("Channel instructions")).toBeNull();
 });
 
+it("shows the source filename for a file pinned in a Thread", async () => {
+	const bootstrap = structuredClone(storyBootstrap);
+	const source = bootstrap.state.messages["channel:channel-design"]?.find(
+		(message) => message.id === "message-root",
+	);
+	if (source === undefined) throw new Error("Story root message is missing");
+	source.files = [
+		{
+			id: "file-review-plan",
+			name: "review-plan.md",
+			mimeType: "text/markdown",
+			size: 128,
+		},
+	];
+	bootstrap.state.pins.push({
+		id: "thread-file-pin",
+		scope: { kind: "thread", id: "thread-review" },
+		kind: "attachment",
+		messageId: source.id,
+		attachmentId: "file-review-plan",
+		createdAt: "2026-09-18T00:00:00.000Z",
+		removedAt: null,
+	});
+	render(
+		<CommonspaceConversation
+			store={createStoryStore(bootstrap, {
+				activeConversation: { kind: "channel", id: "channel-design" },
+				activeThreadId: "thread-review",
+			})}
+		/>,
+	);
+	await userEvent
+		.setup()
+		.click(screen.getByRole("button", { name: "Open thread context" }));
+
+	expect(
+		within(screen.getByRole("region", { name: "Thread pins" })).getByText(
+			"review-plan.md",
+		),
+	).toBeTruthy();
+});
+
 it("unpins only the Channel copy when the same message is also pinned in a Thread", async () => {
 	const bootstrap = structuredClone(storyBootstrap);
 	bootstrap.state.pins.push(

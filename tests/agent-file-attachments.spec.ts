@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { credentialBearingFileName } from "../server/src/credential-files.ts";
 import {
-	credentialBearingFileName,
 	prepareAgentFileAttachments,
 	readBoundedAttachmentBytes,
 } from "../server/src/file-attachments.ts";

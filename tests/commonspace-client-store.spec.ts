@@ -262,7 +262,7 @@ describe("CommonspaceClientStore message admission", () => {
 			store.selectConversation(response.accepted.conversation);
 			const pending =
 				operation === "send"
-					? store.send("Delayed admission")
+					? store.send({ text: "Delayed admission" })
 					: store.editMessage(original.rootMessageId, {
 							text: "Delayed admission",
 						});
@@ -288,7 +288,7 @@ describe("CommonspaceClientStore message admission", () => {
 		await store.refresh();
 		store.selectConversation(response.accepted.conversation);
 		store.selectThread(original.id);
-		const pending = store.send("Delayed admission");
+		const pending = store.send({ text: "Delayed admission" });
 		store.selectThread(null);
 		admission.resolve(jsonResponse(response));
 		await pending;
@@ -306,7 +306,7 @@ describe("CommonspaceClientStore message admission", () => {
 		const store = new CommonspaceClientStore();
 		await store.refresh();
 		store.selectConversation(response.accepted.conversation);
-		const pending = store.send("Delayed admission");
+		const pending = store.send({ text: "Delayed admission" });
 		admission.resolve(jsonResponse(response));
 		await pending;
 		expect(store.getSnapshot().activeThreadId).toBe(response.thread?.id);
@@ -326,9 +326,11 @@ describe("CommonspaceClientStore message admission", () => {
 		await store.refresh();
 		store.selectConversation({ kind: "dm", id: "agent-hermes" });
 
-		const first = store.send("First follow-up").catch(() => undefined);
+		const first = store
+			.send({ text: "First follow-up" })
+			.catch(() => undefined);
 		const second = store
-			.send("Second follow-up", undefined, [], "queue")
+			.send({ text: "Second follow-up", delivery: "queue" })
 			.catch(() => undefined);
 
 		expect(fetch).toHaveBeenCalledTimes(3);
@@ -365,7 +367,7 @@ describe("CommonspaceClientStore message admission", () => {
 		const store = new CommonspaceClientStore();
 		await store.refresh();
 		store.selectConversation({ kind: "dm", id: "agent-hermes" });
-		const sending = store.send("Admit me");
+		const sending = store.send({ text: "Admit me" });
 		const pending = store.getSnapshot().pendingSubmissions[0];
 		if (pending === undefined) throw new Error("pending submission missing");
 		const state: CommonspaceBootstrap["state"] = {
@@ -408,8 +410,8 @@ describe("CommonspaceClientStore message admission", () => {
 		const store = new CommonspaceClientStore();
 		await store.refresh();
 		store.selectConversation({ kind: "dm", id: "agent-hermes" });
-		const first = store.send("Restore this").catch(() => undefined);
-		const second = store.send("Keep pending").catch(() => undefined);
+		const first = store.send({ text: "Restore this" }).catch(() => undefined);
+		const second = store.send({ text: "Keep pending" }).catch(() => undefined);
 		admissions[0]?.reject(new Error("offline"));
 		await vi.waitFor(() => {
 			expect(store.getSnapshot().pendingSubmissions[0]?.status).toBe("failed");
