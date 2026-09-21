@@ -398,6 +398,7 @@ describe("ACP agent process", () => {
 				...process.env,
 				FAKE_ACP_TRACE: "1",
 				FAKE_ACP_COMPACTION_TRACE: "1",
+				FAKE_ACP_TOOL_CONTENT_VARIANTS: "1",
 			},
 		});
 
@@ -446,7 +447,8 @@ describe("ACP agent process", () => {
 							toolKind: "read",
 							status: "completed",
 							input: '{\n  "path": "/private/project/package.json"\n}',
-							output: 'Package metadata loaded.\n{\n  "ok": true\n}',
+							output:
+								'Package metadata loaded.\nResource: package.json\nImage output\nAudio output\nChanged /private/project/package.json\n--- before\n{}\n+++ after\n{"name":"commonspace"}\nTerminal output attached\n{\n  "ok": true\n}',
 						}),
 						expect.objectContaining({
 							type: "usage",
@@ -456,6 +458,9 @@ describe("ACP agent process", () => {
 					],
 				},
 			});
+			expect(JSON.stringify(result.trace)).not.toContain(
+				"Embedded resource stays out of the trace.",
+			);
 		} finally {
 			await processClient.close();
 		}
@@ -564,8 +569,9 @@ describe("ACP agent process", () => {
 					'"method":"session/new"',
 				),
 			);
-			controller.abort(new Error("Stopped during session creation."));
-			await expect(running).rejects.toThrow("Stopped during session creation.");
+			const abortReason = new Error("Stopped during session creation.");
+			controller.abort(abortReason);
+			await expect(running).rejects.toBe(abortReason);
 
 			await processClient.run({
 				cwd: root,

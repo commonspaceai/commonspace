@@ -5,11 +5,47 @@ import type { HarnessCapabilityGroup } from "@commonspace/shared";
 import { type ParseError, parse } from "jsonc-parser";
 import { z } from "zod";
 
-const serverEntrySchema = z.looseObject({ enabled: z.boolean().optional() });
-const serverMetadataSchema = z.looseObject({
+const MAX_CONFIGURATION_BYTES = 1024 * 1024;
+const MAX_RESOURCE_ENTRIES = 2_000;
+const MCP_SERVER_NAME_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N} ._:@()+-]{0,119}$/u;
+const RESOURCE_NAME_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N} ._@()+-]{0,119}$/u;
+
+const serverEntrySchema = z.object({ enabled: z.boolean().optional() });
+const serverMetadataSchema = z.object({
 	mcpServers: z.record(z.string(), serverEntrySchema).optional(),
 	mcp: z.record(z.string(), serverEntrySchema).optional(),
 });
+type ServerEntries = NonNullable<z.infer<typeof serverMetadataSchema>["mcp"]>;
+
+async function readMcpServers(
+	path: string,
+	key: "mcp" | "mcpServers",
+): Promise<ServerEntries | undefined> {
+	let file: FileHandle;
+	try {
+		file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+	} catch (error) {
+		if (error instanceof Error && isMissingMetadata(error)) return undefined;
+		throw error;
+	}
+	try {
+		if (!(await file.stat()).isFile())
+			throw new Error("Not a configuration file");
+		const buffer = Buffer.alloc(MAX_CONFIGURATION_BYTES + 1);
+		const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+		if (bytesRead === buffer.length)
+			throw new Error("Configuration exceeds limit");
+		const errors: ParseError[] = [];
+		const raw: unknown = parse(buffer.toString("utf8", 0, bytesRead), errors, {
+			allowTrailingComma: key === "mcp",
+			disallowComments: key !== "mcp",
+		});
+		if (errors.length > 0) throw new Error("Invalid native configuration");
+		return serverMetadataSchema.parse(raw)[key] ?? {};
+	} finally {
+		await file.close();
+	}
+}
 
 /** Fixed native configuration sources, never commands, arguments, URLs, or credentials. */
 export async function inspectMcpMetadata(
@@ -20,40 +56,14 @@ export async function inspectMcpMetadata(
 	try {
 		const servers = new Map<string, "configured" | "disabled">();
 		for (const path of paths) {
-			let file: FileHandle;
-			try {
-				file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
-			} catch (error) {
-				if (error instanceof Error && isMissingMetadata(error)) continue;
-				throw error;
-			}
-			try {
-				if (!(await file.stat()).isFile())
-					throw new Error("Not a configuration file");
-				const buffer = Buffer.alloc(1024 * 1024 + 1);
-				const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-				if (bytesRead === buffer.length)
-					throw new Error("Configuration exceeds limit");
-				const errors: ParseError[] = [];
-				const raw: unknown = parse(
-					buffer.toString("utf8", 0, bytesRead),
-					errors,
-					{
-						allowTrailingComma: key === "mcp",
-						disallowComments: key !== "mcp",
-					},
-				);
-				if (errors.length > 0) throw new Error("Invalid native configuration");
-				const metadata = serverMetadataSchema.parse(raw);
-				for (const [name, value] of Object.entries(metadata[key] ?? {})) {
-					if (/^[\p{L}\p{N}][\p{L}\p{N} ._:@()+-]{0,119}$/u.test(name))
-						servers.set(
-							name,
-							value.enabled === false ? "disabled" : "configured",
-						);
-				}
-			} finally {
-				await file.close();
+			const entries = await readMcpServers(path, key);
+			if (entries === undefined) continue;
+			for (const [name, value] of Object.entries(entries)) {
+				if (MCP_SERVER_NAME_PATTERN.test(name))
+					servers.set(
+						name,
+						value.enabled === false ? "disabled" : "configured",
+					);
 			}
 		}
 		return {
@@ -114,6 +124,46 @@ function resourceEntry(
 	};
 }
 
+async function availableResourceName(
+	entry: Dirent,
+	root: string,
+	metadata: ResourceMetadata,
+): Promise<string | undefined> {
+	const resource = resourceEntry(entry, root, metadata);
+	if (resource === undefined) return undefined;
+	if (!RESOURCE_NAME_PATTERN.test(resource.name)) return undefined;
+	try {
+		return (await stat(resource.path)).isFile() ? resource.name : undefined;
+	} catch (error) {
+		if (error instanceof Error && isMissingMetadata(error)) return undefined;
+		throw error;
+	}
+}
+
+async function collectResourceDirectoryNames(
+	root: string,
+	metadata: ResourceMetadata,
+	names: Set<string>,
+	inspected: number,
+): Promise<number> {
+	let directory: Dir;
+	try {
+		directory = await opendir(root);
+	} catch (error) {
+		if (error instanceof Error && isMissingMetadata(error)) return inspected;
+		throw error;
+	}
+	let inspectedCount = inspected;
+	for await (const entry of directory) {
+		inspectedCount += 1;
+		if (inspectedCount > MAX_RESOURCE_ENTRIES)
+			throw new Error("Resource inventory exceeds limit");
+		const name = await availableResourceName(entry, root, metadata);
+		if (name !== undefined) names.add(name);
+	}
+	return inspectedCount;
+}
+
 export async function inspectResourceDirectories(
 	roots: readonly string[],
 	metadata: ResourceMetadata,
@@ -121,30 +171,13 @@ export async function inspectResourceDirectories(
 	const names = new Set<string>();
 	let inspected = 0;
 	try {
-		for (const root of roots) {
-			let directory: Dir;
-			try {
-				directory = await opendir(root);
-			} catch (error) {
-				if (error instanceof Error && isMissingMetadata(error)) continue;
-				throw error;
-			}
-			for await (const entry of directory) {
-				inspected += 1;
-				if (inspected > 2_000)
-					throw new Error("Resource inventory exceeds limit");
-				const resource = resourceEntry(entry, root, metadata);
-				if (resource === undefined) continue;
-				if (!/^[\p{L}\p{N}][\p{L}\p{N} ._@()+-]{0,119}$/u.test(resource.name))
-					continue;
-				try {
-					if ((await stat(resource.path)).isFile()) names.add(resource.name);
-				} catch (error) {
-					if (!(error instanceof Error && isMissingMetadata(error)))
-						throw error;
-				}
-			}
-		}
+		for (const root of roots)
+			inspected = await collectResourceDirectoryNames(
+				root,
+				metadata,
+				names,
+				inspected,
+			);
 		return {
 			id: metadata.id,
 			status: "available",
@@ -164,5 +197,5 @@ export async function inspectResourceDirectories(
 }
 
 function isMissingMetadata(error: Error): boolean {
-	return error instanceof Error && "code" in error && error.code === "ENOENT";
+	return "code" in error && error.code === "ENOENT";
 }

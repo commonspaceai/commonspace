@@ -12,6 +12,47 @@ const pendingPrompts = new Map();
 let pendingPermissionPrompt;
 let selectedModel = "default";
 
+const textToolContent = {
+	type: "content",
+	content: { type: "text", text: "Package metadata loaded." },
+};
+const richToolContent = [
+	textToolContent,
+	{
+		type: "content",
+		content: {
+			type: "resource_link",
+			name: "package.json",
+			uri: "file:///private/project/package.json",
+		},
+	},
+	{
+		type: "content",
+		content: { type: "image", data: "aW1hZ2U=", mimeType: "image/png" },
+	},
+	{
+		type: "content",
+		content: { type: "audio", data: "YXVkaW8=", mimeType: "audio/wav" },
+	},
+	{
+		type: "content",
+		content: {
+			type: "resource",
+			resource: {
+				uri: "file:///private/project/ignored.txt",
+				text: "Embedded resource stays out of the trace.",
+			},
+		},
+	},
+	{
+		type: "diff",
+		path: "/private/project/package.json",
+		oldText: "{}",
+		newText: '{"name":"commonspace"}',
+	},
+	{ type: "terminal", terminalId: "terminal-1" },
+];
+
 async function writeFrame(frame) {
 	process.stdout.write(`${JSON.stringify(frame)}\n`);
 }
@@ -563,12 +604,10 @@ for await (const line of lines) {
 						sessionUpdate: "tool_call_update",
 						toolCallId: "call-1",
 						status: "completed",
-						content: [
-							{
-								type: "content",
-								content: { type: "text", text: "Package metadata loaded." },
-							},
-						],
+						content:
+							process.env.FAKE_ACP_TOOL_CONTENT_VARIANTS === "1"
+								? richToolContent
+								: [textToolContent],
 						rawOutput: { ok: true },
 					},
 				},

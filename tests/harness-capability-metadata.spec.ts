@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import {
 	inspectMcpMetadata,
+	inspectResourceDirectories,
 	inspectUserSkills,
 } from "../server/src/adapters/capability-metadata.ts";
 
@@ -15,6 +16,20 @@ afterEach(async () => {
 		roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
 	);
 });
+
+async function writeDirectoryEntries(
+	root: string,
+	count: number,
+): Promise<void> {
+	await mkdir(root, { recursive: true });
+	for (let start = 0; start < count; start += 100) {
+		await Promise.all(
+			Array.from({ length: Math.min(100, count - start) }, (_, offset) =>
+				writeFile(join(root, `entry-${start + offset}`), ""),
+			),
+		);
+	}
+}
 
 it("rejects special files and oversized configuration without waiting for input", async () => {
 	const root = await mkdtemp(join(tmpdir(), "commonspace-mcp-bounds-"));
@@ -72,6 +87,36 @@ it("projects JSONC MCP names and disabled state without connection details", asy
 	).toMatchObject({ status: "error", items: [] });
 });
 
+it("merges MCP metadata in path order so later files override prior state", async () => {
+	const root = await mkdtemp(join(tmpdir(), "commonspace-mcp-merge-"));
+	roots.push(root);
+	const first = join(root, "first.json");
+	const second = join(root, "second.json");
+	await Promise.all([
+		writeFile(
+			first,
+			JSON.stringify({
+				mcpServers: { shared: { enabled: false }, first: {} },
+			}),
+		),
+		writeFile(
+			second,
+			JSON.stringify({
+				mcpServers: { shared: { enabled: true }, second: { enabled: false } },
+			}),
+		),
+	]);
+
+	expect(
+		(await inspectMcpMetadata([first, second], "mcpServers", "Native metadata"))
+			.items,
+	).toEqual([
+		{ name: "shared", status: "configured" },
+		{ name: "first", status: "configured" },
+		{ name: "second", status: "disabled" },
+	]);
+});
+
 it("lists only marked skill folders, supports native links, and never reads skill bodies", async () => {
 	const root = await mkdtemp(join(tmpdir(), "commonspace-skill-metadata-"));
 	roots.push(root);
@@ -108,4 +153,24 @@ it("distinguishes absent skill directories from inspection failures", async () =
 	expect(await inspectUserSkills([root], "Native user metadata")).toMatchObject(
 		{ status: "error", items: [] },
 	);
+});
+
+it("shares the resource inventory limit across every configured root", async () => {
+	const root = await mkdtemp(join(tmpdir(), "commonspace-resource-bounds-"));
+	roots.push(root);
+	const first = join(root, "first");
+	const second = join(root, "second");
+	await Promise.all([
+		writeDirectoryEntries(first, 1_000),
+		writeDirectoryEntries(second, 1_001),
+	]);
+
+	expect(
+		await inspectResourceDirectories([first, second], {
+			id: "agents",
+			extension: ".md",
+			source: "Native metadata",
+			notice: "Native resource names only.",
+		}),
+	).toMatchObject({ status: "error", items: [] });
 });

@@ -139,6 +139,16 @@ interface ActiveTurn {
 	onPermissionRequest?: AcpRunInput["onPermissionRequest"];
 }
 
+type SessionUpdate = SessionNotification["update"];
+type SessionUpdateOf<Kind extends SessionUpdate["sessionUpdate"]> = Extract<
+	SessionUpdate,
+	{ sessionUpdate: Kind }
+>;
+type ActiveTurnSessionUpdate = Exclude<
+	SessionUpdate,
+	SessionUpdateOf<"current_mode_update" | "config_option_update">
+>;
+
 interface SessionSetup {
 	sessionId: string;
 	modes: SessionModeState | null | undefined;
@@ -146,9 +156,101 @@ interface SessionSetup {
 	configOptions: SessionConfigOption[] | null | undefined;
 }
 
+interface SessionRequestContext {
+	readonly additionalDirectories: string[];
+	readonly mcpServers: McpServer[];
+	readonly binding: string;
+}
+
+interface DesiredSessionSettings {
+	readonly configOptions: Record<string, string | boolean>;
+	readonly fingerprint: string;
+}
+
 interface SessionModelStateCompat {
 	currentModelId: string;
 	availableModels: Array<{ modelId: string }>;
+}
+
+function createActiveTurn(
+	input: AcpRunInput,
+	defaultMaxResponseChars: number,
+): ActiveTurn {
+	let resolveSettled = (): void => {};
+	const settled = new Promise<void>((resolve) => {
+		resolveSettled = resolve;
+	});
+	const turn: ActiveTurn = {
+		chunks: [],
+		resources: [],
+		chars: 0,
+		maxResponseChars:
+			input.maxResponseChars === undefined
+				? defaultMaxResponseChars
+				: Math.min(
+						defaultMaxResponseChars,
+						positiveInteger(
+							input.maxResponseChars,
+							defaultMaxResponseChars,
+							"ACP response limit",
+						),
+					),
+		exceededLimit: false,
+		settled,
+		resolveSettled,
+		traceStartedAt: timestamp(),
+		traceEntries: [],
+	};
+	if (input.onTraceUpdate !== undefined)
+		turn.onTraceUpdate = input.onTraceUpdate;
+	if (input.onPermissionRequest !== undefined)
+		turn.onPermissionRequest = input.onPermissionRequest;
+	return turn;
+}
+
+function createPrompt(input: AcpRunInput): ContentBlock[] {
+	const prompt: ContentBlock[] = [];
+	if (input.message !== "") prompt.push({ type: "text", text: input.message });
+	if (input.participationContext !== undefined) {
+		prompt.push({ type: "text", text: input.participationContext });
+	}
+	for (const image of input.images ?? []) {
+		prompt.push({
+			type: "image",
+			mimeType: image.mimeType,
+			data: image.data,
+		});
+	}
+	for (const file of input.files ?? []) {
+		prompt.push({
+			type: "resource_link",
+			name: file.name,
+			uri: file.uri,
+			mimeType: file.mimeType,
+			size: file.size,
+		});
+	}
+	return prompt;
+}
+
+function createRunResult(sessionId: string, turn: ActiveTurn): AcpRunResult {
+	const trace =
+		turn.traceEntries.length === 0
+			? undefined
+			: {
+					startedAt: turn.traceStartedAt,
+					completedAt: timestamp(),
+					entries: structuredClone(turn.traceEntries),
+				};
+	const result: AcpRunResult = {
+		sessionId,
+		text: turn.chunks.join(""),
+	};
+	if (trace !== undefined) result.trace = trace;
+	if (turn.resources.length > 0) {
+		result.resources = structuredClone(turn.resources);
+	}
+	return result;
 }
 
 const sessionModelsSchema = z.object({
@@ -160,6 +262,35 @@ const sessionModelsSchema = z.object({
 		.nullable()
 		.optional(),
 });
+
+function createSessionSetup(
+	sessionId: string,
+	response: LoadSessionResponse,
+): SessionSetup {
+	const parsedModels = sessionModelsSchema.safeParse(response);
+	return {
+		sessionId,
+		modes: response.modes,
+		models: parsedModels.success ? parsedModels.data.models : undefined,
+		configOptions: response.configOptions,
+	};
+}
+
+function desiredSessionSettings(input: AcpRunInput): DesiredSessionSettings {
+	const configOptions = Object.fromEntries(
+		Object.entries(input.configOptions ?? {}).sort(([left], [right]) =>
+			left.localeCompare(right),
+		),
+	);
+	return {
+		configOptions,
+		fingerprint: JSON.stringify({
+			modeId: input.modeId ?? null,
+			modelId: input.modelId ?? null,
+			configOptions,
+		}),
+	};
+}
 
 export class AcpSessionLoadError extends Error {
 	readonly sessionId: string;
@@ -236,36 +367,97 @@ function displayValue(value: JsonValue | undefined): string | undefined {
 	}
 }
 
+const normalizedJsonValueSchema = z.union([
+	z.json(),
+	z.unknown().transform((value) => String(value)),
+]);
+
+function normalizeJsonValue(
+	value: z.input<typeof normalizedJsonValueSchema>,
+): JsonValue | undefined {
+	if (value === undefined) return undefined;
+	return normalizedJsonValueSchema.parse(value);
+}
+
+function unhandledAcpVariant(value: never): never {
+	void value;
+	throw new Error("Unhandled ACP protocol variant");
+}
+
+function validateSessionConfigValue(
+	option: SessionConfigOption,
+	value: string | boolean,
+) {
+	switch (option.type) {
+		case "boolean":
+			if (typeof value !== "boolean") {
+				throw new Error(
+					`Unsupported native setting ${option.id}: expected a boolean.`,
+				);
+			}
+			return;
+		case "select": {
+			if (typeof value !== "string") {
+				throw new Error(
+					`Unsupported native setting ${option.id}: expected a string.`,
+				);
+			}
+			const choices = option.options.flatMap((choice) =>
+				"options" in choice ? choice.options : [choice],
+			);
+			if (
+				option.category !== "model" &&
+				!choices.some((choice) => choice.value === value)
+			) {
+				throw new Error(
+					`Unsupported native setting ${option.id}: ${value}. Choose a supported value or native session settings.`,
+				);
+			}
+			return;
+		}
+		default:
+			return unhandledAcpVariant(option);
+	}
+}
+
+function contentBlockText(content: ContentBlock): string | undefined {
+	switch (content.type) {
+		case "text":
+			return content.text;
+		case "resource_link":
+			return `Resource: ${content.name}`;
+		case "image":
+			return "Image output";
+		case "audio":
+			return "Audio output";
+		case "resource":
+			return undefined;
+		default:
+			return unhandledAcpVariant(content);
+	}
+}
+
+function toolContentPart(item: ToolCallContent): string | undefined {
+	switch (item.type) {
+		case "content":
+			return contentBlockText(item.content);
+		case "diff":
+			return `Changed ${item.path}\n--- before\n${item.oldText ?? ""}\n+++ after\n${item.newText}`;
+		case "terminal":
+			return "Terminal output attached";
+		default:
+			return unhandledAcpVariant(item);
+	}
+}
+
 function toolContentText(
 	value: readonly ToolCallContent[] | null | undefined,
 ): string | undefined {
-	if (!Array.isArray(value)) return undefined;
-	const parts: string[] = [];
-	for (const item of value) {
-		if (item.type === "content") {
-			const content = item.content;
-			if (content.type === "text") parts.push(content.text);
-			else if (
-				content.type === "resource_link" &&
-				typeof content.name === "string"
-			)
-				parts.push(`Resource: ${content.name}`);
-			else if (content?.type === "image") parts.push("Image output");
-			else if (content?.type === "audio") parts.push("Audio output");
-			continue;
-		}
-		if (item.type === "diff") {
-			const path = typeof item.path === "string" ? item.path : "file";
-			const oldText = typeof item.oldText === "string" ? item.oldText : "";
-			const newText = typeof item.newText === "string" ? item.newText : "";
-			parts.push(
-				`Changed ${path}\n--- before\n${oldText}\n+++ after\n${newText}`,
-			);
-			continue;
-		}
-		if (item.type === "terminal") parts.push("Terminal output attached");
-	}
-	const joined = parts.filter(Boolean).join("\n");
+	if (value === null || value === undefined) return undefined;
+	const joined = value
+		.map(toolContentPart)
+		.filter((part): part is string => part !== undefined && part !== "")
+		.join("\n");
 	return joined === "" ? undefined : boundedText(joined, MAX_TOOL_DETAIL_CHARS);
 }
 
@@ -422,104 +614,48 @@ export class AcpAgentProcess {
 		try {
 			input.signal?.throwIfAborted();
 			try {
-				await this.#configureSession(connection, setup, input);
-				input.signal?.throwIfAborted();
-				if (this.#activeTurns.has(sessionId))
-					throw new Error("ACP native session already has an active turn");
-
-				let resolveSettled = (): void => {};
-				const settled = new Promise<void>((resolve) => {
-					resolveSettled = resolve;
-				});
-				const turn: ActiveTurn = {
-					chunks: [],
-					resources: [],
-					chars: 0,
-					maxResponseChars:
-						input.maxResponseChars === undefined
-							? this.#maxResponseChars
-							: Math.min(
-									this.#maxResponseChars,
-									positiveInteger(
-										input.maxResponseChars,
-										this.#maxResponseChars,
-										"ACP response limit",
-									),
-								),
-					exceededLimit: false,
-					settled,
-					resolveSettled,
-					traceStartedAt: timestamp(),
-					traceEntries: [],
-				};
-				if (input.onTraceUpdate !== undefined)
-					turn.onTraceUpdate = input.onTraceUpdate;
-				if (input.onPermissionRequest !== undefined)
-					turn.onPermissionRequest = input.onPermissionRequest;
-				this.#activeTurns.set(sessionId, turn);
-				try {
-					input.onSessionReady?.(sessionId);
-					input.signal?.throwIfAborted();
-					const prompt: ContentBlock[] = [
-						...(input.message === ""
-							? []
-							: [{ type: "text" as const, text: input.message }]),
-						...(input.participationContext === undefined
-							? []
-							: [{ type: "text" as const, text: input.participationContext }]),
-						...(input.images ?? []).map((image) => ({
-							type: "image" as const,
-							mimeType: image.mimeType,
-							data: image.data,
-						})),
-						...(input.files ?? []).map((file) => ({
-							type: "resource_link" as const,
-							name: file.name,
-							uri: file.uri,
-							mimeType: file.mimeType,
-							size: file.size,
-						})),
-					];
-					await this.#request("session/prompt", (signal) =>
-						connection.agent.request(
-							methods.agent.session.prompt,
-							{
-								sessionId,
-								prompt,
-							},
-							{ cancellationSignal: signal },
-						),
-					);
-					if (turn.exceededLimit)
-						throw new Error(
-							"ACP agent response exceeded the Commonspace output limit",
-						);
-					const trace =
-						turn.traceEntries.length === 0
-							? undefined
-							: {
-									startedAt: turn.traceStartedAt,
-									completedAt: timestamp(),
-									entries: structuredClone(turn.traceEntries),
-								};
-					const result: AcpRunResult = {
-						sessionId,
-						text: turn.chunks.join(""),
-					};
-					if (trace !== undefined) result.trace = trace;
-					if (turn.resources.length > 0)
-						result.resources = structuredClone(turn.resources);
-					return result;
-				} finally {
-					this.#activeTurns.delete(sessionId);
-					turn.resolveSettled();
-				}
+				return await this.#runSessionTurn(connection, setup, input);
 			} catch (error) {
 				if (error instanceof AcpSessionRunError) throw error;
 				throw new AcpSessionRunError(sessionId, error);
 			}
 		} finally {
 			if (input.retainSession === false) this.#forgetSession(sessionId);
+		}
+	}
+
+	async #runSessionTurn(
+		connection: ClientConnection,
+		setup: SessionSetup,
+		input: AcpRunInput,
+	): Promise<AcpRunResult> {
+		await this.#configureSession(connection, setup, input);
+		input.signal?.throwIfAborted();
+		const sessionId = setup.sessionId;
+		if (this.#activeTurns.has(sessionId))
+			throw new Error("ACP native session already has an active turn");
+
+		const turn = createActiveTurn(input, this.#maxResponseChars);
+		this.#activeTurns.set(sessionId, turn);
+		try {
+			input.onSessionReady?.(sessionId);
+			input.signal?.throwIfAborted();
+			const prompt = createPrompt(input);
+			await this.#request("session/prompt", (signal) =>
+				connection.agent.request(
+					methods.agent.session.prompt,
+					{ sessionId, prompt },
+					{ cancellationSignal: signal },
+				),
+			);
+			if (turn.exceededLimit)
+				throw new Error(
+					"ACP agent response exceeded the Commonspace output limit",
+				);
+			return createRunResult(sessionId, turn);
+		} finally {
+			this.#activeTurns.delete(sessionId);
+			turn.resolveSettled();
 		}
 	}
 
@@ -610,27 +746,7 @@ export class AcpAgentProcess {
 				windowsHide: true,
 			},
 		);
-		this.#child = child;
-		this.#stderr = "";
-		child.stderr.setEncoding("utf8");
-		child.stderr.on("data", (chunk: string) => {
-			if (this.#stderr.length < MAX_STDERR_CHARS) {
-				this.#stderr = (this.#stderr + chunk).slice(0, MAX_STDERR_CHARS);
-			}
-		});
-		child.stdin.on("error", () => undefined);
-		child.once("exit", (code, signal) => {
-			if (this.#child !== child) return;
-			const detail = this.#stderr.trim();
-			const reason = new Error(
-				detail === ""
-					? `${this.#options.command} exited with ${code === null ? (signal ?? "an unknown signal") : `code ${String(code)}`}`
-					: `${this.#options.command} exited: ${detail.slice(0, 4_000)}`,
-			);
-			this.#connection?.close(reason);
-			this.#clearConnectionState();
-			void this.#terminateChild(child, "SIGKILL");
-		});
+		this.#trackChild(child);
 
 		try {
 			await new Promise<void>((resolve, reject) => {
@@ -731,10 +847,93 @@ export class AcpAgentProcess {
 		}
 	}
 
+	#trackChild(child: ChildProcessWithoutNullStreams) {
+		this.#child = child;
+		this.#stderr = "";
+		child.stderr.setEncoding("utf8");
+		child.stderr.on("data", (chunk: string) => {
+			if (this.#stderr.length < MAX_STDERR_CHARS) {
+				this.#stderr = (this.#stderr + chunk).slice(0, MAX_STDERR_CHARS);
+			}
+		});
+		child.stdin.on("error", () => undefined);
+		child.once("exit", (code, signal) => {
+			if (this.#child !== child) return;
+			const detail = this.#stderr.trim();
+			const reason = new Error(
+				detail === ""
+					? `${this.#options.command} exited with ${code === null ? (signal ?? "an unknown signal") : `code ${String(code)}`}`
+					: `${this.#options.command} exited: ${detail.slice(0, 4_000)}`,
+			);
+			this.#connection?.close(reason);
+			this.#clearConnectionState();
+			void this.#terminateChild(child, "SIGKILL");
+		});
+	}
+
 	async #ensureSession(
 		connection: ClientConnection,
 		input: AcpRunInput,
 	): Promise<SessionSetup> {
+		const context = this.#createSessionRequestContext(input);
+		if (input.sessionId === undefined) {
+			const response = await this.#request("session/new", (signal) =>
+				connection.agent.request(
+					methods.agent.session.new,
+					{
+						cwd: input.cwd,
+						additionalDirectories: context.additionalDirectories,
+						mcpServers: context.mcpServers,
+					},
+					{ cancellationSignal: signal },
+				),
+			);
+			const setup = createSessionSetup(response.sessionId, response);
+			this.#registerSession(response.sessionId, context.binding);
+			return setup;
+		}
+
+		if (
+			this.#loadedSessions.has(input.sessionId) &&
+			this.#sessionBindings.get(input.sessionId) === context.binding
+		) {
+			return {
+				sessionId: input.sessionId,
+				modes: undefined,
+				models: undefined,
+				configOptions: undefined,
+			};
+		}
+		if (this.#initializeResponse?.agentCapabilities?.loadSession !== true) {
+			throw new Error(
+				`${this.#options.command} does not support ACP session/load`,
+			);
+		}
+		try {
+			this.#options.validateSessionLoad?.();
+			const response = await this.#request<LoadSessionResponse>(
+				"session/load",
+				(signal) =>
+					connection.agent.request(
+						methods.agent.session.load,
+						{
+							sessionId: input.sessionId,
+							cwd: input.cwd,
+							additionalDirectories: context.additionalDirectories,
+							mcpServers: context.mcpServers,
+						},
+						{ cancellationSignal: signal },
+					),
+			);
+			const setup = createSessionSetup(input.sessionId, response);
+			this.#registerSession(input.sessionId, context.binding);
+			return setup;
+		} catch (error) {
+			throw new AcpSessionLoadError(input.sessionId, error);
+		}
+	}
+
+	#createSessionRequestContext(input: AcpRunInput): SessionRequestContext {
 		const additionalDirectories = [...(input.additionalCwds ?? [])];
 		const mcpServers = [...(input.mcpServers ?? [])];
 		for (const server of mcpServers) {
@@ -755,81 +954,20 @@ export class AcpAgentProcess {
 			additionalDirectories,
 			mcpServers,
 		});
-		if (input.sessionId !== undefined) {
-			if (
-				!this.#loadedSessions.has(input.sessionId) ||
-				this.#sessionBindings.get(input.sessionId) !== binding
-			) {
-				if (this.#initializeResponse?.agentCapabilities?.loadSession !== true) {
-					throw new Error(
-						`${this.#options.command} does not support ACP session/load`,
-					);
-				}
-				try {
-					this.#options.validateSessionLoad?.();
-					const response = await this.#request<LoadSessionResponse>(
-						"session/load",
-						(signal) =>
-							connection.agent.request(
-								methods.agent.session.load,
-								{
-									sessionId: input.sessionId,
-									cwd: input.cwd,
-									additionalDirectories,
-									mcpServers,
-								},
-								{ cancellationSignal: signal },
-							),
-					);
-					const parsedModels = sessionModelsSchema.safeParse(response);
-					this.#loadedSessions.add(input.sessionId);
-					this.#sessionBindings.set(input.sessionId, binding);
-					this.#appliedSettings.delete(input.sessionId);
-					this.#availableConfigOptions.delete(input.sessionId);
-					this.#availableModeIds.delete(input.sessionId);
-					this.#modelStates.delete(input.sessionId);
-					return {
-						sessionId: input.sessionId,
-						modes: response.modes,
-						models: parsedModels.success ? parsedModels.data.models : undefined,
-						configOptions: response.configOptions,
-					};
-				} catch (error) {
-					throw new AcpSessionLoadError(input.sessionId, error);
-				}
-			}
-			return {
-				sessionId: input.sessionId,
-				modes: undefined,
-				models: undefined,
-				configOptions: undefined,
-			};
-		}
-
-		const response = await this.#request("session/new", (signal) =>
-			connection.agent.request(
-				methods.agent.session.new,
-				{
-					cwd: input.cwd,
-					additionalDirectories,
-					mcpServers,
-				},
-				{ cancellationSignal: signal },
-			),
-		);
-		const parsedModels = sessionModelsSchema.safeParse(response);
-		this.#loadedSessions.add(response.sessionId);
-		this.#sessionBindings.set(response.sessionId, binding);
-		this.#appliedSettings.delete(response.sessionId);
-		this.#availableConfigOptions.delete(response.sessionId);
-		this.#availableModeIds.delete(response.sessionId);
-		this.#modelStates.delete(response.sessionId);
 		return {
-			sessionId: response.sessionId,
-			modes: response.modes,
-			models: parsedModels.success ? parsedModels.data.models : undefined,
-			configOptions: response.configOptions,
+			additionalDirectories,
+			mcpServers,
+			binding,
 		};
+	}
+
+	#registerSession(sessionId: string, binding: string) {
+		this.#loadedSessions.add(sessionId);
+		this.#sessionBindings.set(sessionId, binding);
+		this.#appliedSettings.delete(sessionId);
+		this.#availableConfigOptions.delete(sessionId);
+		this.#availableModeIds.delete(sessionId);
+		this.#modelStates.delete(sessionId);
 	}
 
 	async #configureSession(
@@ -837,6 +975,22 @@ export class AcpAgentProcess {
 		setup: SessionSetup,
 		input: AcpRunInput,
 	): Promise<void> {
+		this.#recordSessionCapabilities(setup);
+		const desired = desiredSessionSettings(input);
+		if (this.#appliedSettings.get(setup.sessionId) === desired.fingerprint)
+			return;
+
+		await this.#applySessionMode(connection, setup, input.modeId);
+		await this.#applySessionModel(connection, setup.sessionId, input.modelId);
+		await this.#applySessionConfigOptions(
+			connection,
+			setup.sessionId,
+			desired.configOptions,
+		);
+		this.#appliedSettings.set(setup.sessionId, desired.fingerprint);
+	}
+
+	#recordSessionCapabilities(setup: SessionSetup) {
 		if (setup.modes !== undefined && setup.modes !== null) {
 			this.#availableModeIds.set(
 				setup.sessionId,
@@ -849,71 +1003,66 @@ export class AcpAgentProcess {
 		if (setup.models !== undefined && setup.models !== null) {
 			this.#modelStates.set(setup.sessionId, setup.models);
 		}
-		const desiredConfig = Object.fromEntries(
-			Object.entries(input.configOptions ?? {}).sort(([left], [right]) =>
-				left.localeCompare(right),
-			),
-		);
-		const fingerprint = JSON.stringify({
-			modeId: input.modeId ?? null,
-			modelId: input.modelId ?? null,
-			configOptions: desiredConfig,
-		});
-		if (this.#appliedSettings.get(setup.sessionId) === fingerprint) return;
+	}
 
-		const modeId = input.modeId;
-		if (
-			modeId !== undefined &&
-			this.#availableModeIds.get(setup.sessionId)?.has(modeId) !== true
-		) {
+	async #applySessionMode(
+		connection: ClientConnection,
+		setup: SessionSetup,
+		modeId: string | undefined,
+	) {
+		if (modeId === undefined) return;
+		if (this.#availableModeIds.get(setup.sessionId)?.has(modeId) !== true) {
 			throw new Error(
 				`Unsupported native permission mode ${modeId}. Update the runtime or change the agent's access setting. No prompt was sent.`,
 			);
 		}
-		if (
-			modeId !== undefined &&
-			this.#availableModeIds.get(setup.sessionId)?.has(modeId) === true &&
-			setup.modes?.currentModeId !== modeId
-		) {
-			await this.#request("session/set_mode", (signal) =>
-				connection.agent.request(
-					methods.agent.session.setMode,
-					{
-						sessionId: setup.sessionId,
-						modeId,
-					},
-					{ cancellationSignal: signal },
-				),
-			);
-		}
+		if (setup.modes?.currentModeId === modeId) return;
+		await this.#request("session/set_mode", (signal) =>
+			connection.agent.request(
+				methods.agent.session.setMode,
+				{
+					sessionId: setup.sessionId,
+					modeId,
+				},
+				{ cancellationSignal: signal },
+			),
+		);
+	}
 
-		const modelId = input.modelId;
-		const modelState = this.#modelStates.get(setup.sessionId);
-		if (modelId !== undefined && modelState === undefined)
+	async #applySessionModel(
+		connection: ClientConnection,
+		sessionId: string,
+		modelId: string | undefined,
+	) {
+		if (modelId === undefined) return;
+		const modelState = this.#modelStates.get(sessionId);
+		if (modelState === undefined) {
 			throw new Error(
 				"Native runtime does not expose a model override. Clear Workspace model to use native session settings.",
 			);
-		if (
-			modelId !== undefined &&
-			modelState !== undefined &&
-			modelState.currentModelId !== modelId
-		) {
-			await this.#request("session/set_model", (signal) =>
-				connection.agent.request(
-					"session/set_model",
-					{
-						sessionId: setup.sessionId,
-						modelId,
-					},
-					{ cancellationSignal: signal },
-				),
-			);
-			modelState.currentModelId = modelId;
 		}
+		if (modelState.currentModelId === modelId) return;
+		await this.#request("session/set_model", (signal) =>
+			connection.agent.request(
+				"session/set_model",
+				{
+					sessionId,
+					modelId,
+				},
+				{ cancellationSignal: signal },
+			),
+		);
+		modelState.currentModelId = modelId;
+	}
 
+	async #applySessionConfigOptions(
+		connection: ClientConnection,
+		sessionId: string,
+		desiredConfig: Readonly<Record<string, string | boolean>>,
+	) {
 		const priority = (id: string) =>
 			this.#availableConfigOptions
-				.get(setup.sessionId)
+				.get(sessionId)
 				?.find((option) => option.id === id)?.category === "model"
 				? 0
 				: 1;
@@ -922,303 +1071,339 @@ export class AcpAgentProcess {
 		);
 		for (const [configId, value] of requestedOptions) {
 			const option = this.#availableConfigOptions
-				.get(setup.sessionId)
+				.get(sessionId)
 				?.find((candidate) => candidate.id === configId);
-			if (option === undefined)
+			if (option === undefined) {
 				throw new Error(
 					`Unsupported native setting ${configId}. Clear the workspace override to use native session settings.`,
 				);
-			if (option.currentValue === value) continue;
-			if (option.type === "boolean") {
-				if (typeof value !== "boolean")
-					throw new Error(
-						`Unsupported native setting ${configId}: expected a boolean.`,
-					);
-			} else {
-				if (typeof value !== "string")
-					throw new Error(
-						`Unsupported native setting ${configId}: expected a string.`,
-					);
-				const choices = option.options.flatMap((choice) =>
-					"options" in choice ? choice.options : [choice],
-				);
-				if (
-					option.category !== "model" &&
-					!choices.some((choice) => choice.value === value)
-				)
-					throw new Error(
-						`Unsupported native setting ${configId}: ${value}. Choose a supported value or native session settings.`,
-					);
 			}
+			if (option.currentValue === value) continue;
+			validateSessionConfigValue(option, value);
 			const response = await this.#request(
 				"session/set_config_option",
 				(signal) =>
 					connection.agent.request(
 						methods.agent.session.setConfigOption,
 						typeof value === "boolean"
-							? { sessionId: setup.sessionId, configId, type: "boolean", value }
-							: { sessionId: setup.sessionId, configId, value },
+							? { sessionId, configId, type: "boolean", value }
+							: { sessionId, configId, value },
 						{ cancellationSignal: signal },
 					),
 			);
-			this.#availableConfigOptions.set(setup.sessionId, response.configOptions);
+			this.#availableConfigOptions.set(sessionId, response.configOptions);
 			if (
 				response.configOptions.find((entry) => entry.id === configId)
 					?.currentValue !== value
-			)
+			) {
 				throw new Error(
 					`Native runtime did not apply setting ${configId}. No prompt was sent.`,
 				);
+			}
 		}
-		this.#appliedSettings.set(setup.sessionId, fingerprint);
 	}
 
 	#recordSessionUpdate(
 		notification: SessionNotification,
 		connection: ClientConnection["agent"],
 	): void {
-		if (notification.update.sessionUpdate === "current_mode_update") {
+		const update = notification.update;
+		if (update.sessionUpdate === "current_mode_update") {
 			this.#appliedSettings.delete(notification.sessionId);
 			return;
 		}
-		if (notification.update.sessionUpdate === "config_option_update") {
+		if (update.sessionUpdate === "config_option_update") {
 			this.#availableConfigOptions.set(
 				notification.sessionId,
-				notification.update.configOptions,
+				update.configOptions,
 			);
 			this.#appliedSettings.delete(notification.sessionId);
 			return;
 		}
 		const turn = this.#activeTurns.get(notification.sessionId);
 		if (turn === undefined) return;
-		const update = notification.update;
-		if (
-			update.sessionUpdate === "agent_message_chunk" &&
-			update.content.type === "text"
-		) {
-			const nextChars = turn.chars + update.content.text.length;
-			if (nextChars > turn.maxResponseChars) {
-				if (!turn.exceededLimit) {
-					turn.exceededLimit = true;
-					void connection
-						.notify(methods.agent.session.cancel, {
-							sessionId: notification.sessionId,
-						})
-						.catch(() => undefined);
+		this.#recordActiveTurnUpdate(
+			turn,
+			notification.sessionId,
+			update,
+			connection,
+		);
+	}
+
+	#recordActiveTurnUpdate(
+		turn: ActiveTurn,
+		sessionId: string,
+		update: ActiveTurnSessionUpdate,
+		connection: ClientConnection["agent"],
+	) {
+		switch (update.sessionUpdate) {
+			case "agent_message_chunk":
+				this.#recordAgentMessageChunk(turn, sessionId, update, connection);
+				return;
+			case "agent_thought_chunk":
+				this.#recordAgentThoughtChunk(turn, update);
+				return;
+			case "plan":
+				this.#recordPlan(turn, update);
+				return;
+			case "plan_update":
+				this.#recordPlanUpdate(turn, update);
+				return;
+			case "plan_removed":
+				this.#recordPlanRemoval(turn, update);
+				return;
+			case "tool_call":
+			case "tool_call_update":
+				this.#recordToolCallUpdate(turn, update);
+				return;
+			case "usage_update":
+				this.#recordUsageUpdate(turn, update);
+				return;
+			case "user_message_chunk":
+			case "available_commands_update":
+			case "session_info_update":
+			case "compaction_update":
+			case "compaction_summary_chunk":
+				return;
+			default:
+				return unhandledAcpVariant(update);
+		}
+	}
+
+	#recordAgentMessageChunk(
+		turn: ActiveTurn,
+		sessionId: string,
+		update: SessionUpdateOf<"agent_message_chunk">,
+		connection: ClientConnection["agent"],
+	) {
+		switch (update.content.type) {
+			case "text": {
+				const nextChars = turn.chars + update.content.text.length;
+				if (nextChars > turn.maxResponseChars) {
+					if (!turn.exceededLimit) {
+						turn.exceededLimit = true;
+						void connection
+							.notify(methods.agent.session.cancel, { sessionId })
+							.catch(() => undefined);
+					}
+					return;
 				}
+				turn.chars = nextChars;
+				turn.chunks.push(update.content.text);
 				return;
 			}
-			turn.chars = nextChars;
-			turn.chunks.push(update.content.text);
-			return;
-		}
-		if (
-			update.sessionUpdate === "agent_message_chunk" &&
-			update.content.type === "resource_link"
-		) {
-			const resource = update.content;
-			if (
-				turn.resources.length >= 8 ||
-				turn.resources.some((candidate) => candidate.uri === resource.uri)
-			)
+			case "resource_link": {
+				const resource = update.content;
+				if (
+					turn.resources.length >= 8 ||
+					turn.resources.some((candidate) => candidate.uri === resource.uri)
+				)
+					return;
+				const link: AcpResourceLink = {
+					name: resource.name,
+					uri: resource.uri,
+				};
+				if (typeof resource.mimeType === "string") {
+					link.mimeType = resource.mimeType;
+				}
+				if (typeof resource.size === "number") link.size = resource.size;
+				turn.resources.push(link);
 				return;
-			const link: AcpResourceLink = {
-				name: resource.name,
-				uri: resource.uri,
-			};
-			if (typeof resource.mimeType === "string")
-				link.mimeType = resource.mimeType;
-			if (typeof resource.size === "number") link.size = resource.size;
-			turn.resources.push(link);
-			return;
+			}
+			case "image":
+			case "audio":
+			case "resource":
+				return;
+			default:
+				return unhandledAcpVariant(update.content);
+		}
+	}
+
+	#recordAgentThoughtChunk(
+		turn: ActiveTurn,
+		update: SessionUpdateOf<"agent_thought_chunk">,
+	) {
+		switch (update.content.type) {
+			case "text":
+				break;
+			case "resource_link":
+			case "image":
+			case "audio":
+			case "resource":
+				return;
+			default:
+				return unhandledAcpVariant(update.content);
 		}
 
 		const changedAt = timestamp();
-		if (
-			update.sessionUpdate === "agent_thought_chunk" &&
-			update.content.type === "text"
-		) {
-			const compactionStatus = hermesCompactionStatus(update);
-			if (compactionStatus !== null) {
-				const id =
-					"messageId" in update && typeof update.messageId === "string"
-						? update.messageId
-						: "compaction";
-				const existing = turn.traceEntries.find(
-					(
-						entry,
-					): entry is Extract<CommonspaceTraceEntry, { type: "compaction" }> =>
-						entry.type === "compaction" && entry.id === id,
-				);
-				this.#setTraceEntry(turn, {
-					type: "compaction",
-					id,
-					status: compactionStatus,
-					text: boundedText(update.content.text, MAX_REASONING_CHARS),
-					createdAt: existing?.createdAt ?? changedAt,
-					updatedAt: changedAt,
-				});
-				return;
-			}
-		}
-		if (
-			update.sessionUpdate === "agent_thought_chunk" &&
-			update.content.type === "text"
-		) {
-			const messageId =
-				"messageId" in update && typeof update.messageId === "string"
-					? update.messageId
-					: "reasoning";
+		const compactionStatus = hermesCompactionStatus(update);
+		if (compactionStatus !== null) {
+			const id =
+				typeof update.messageId === "string" ? update.messageId : "compaction";
 			const existing = turn.traceEntries.find(
 				(
 					entry,
-				): entry is Extract<CommonspaceTraceEntry, { type: "reasoning" }> =>
-					entry.type === "reasoning" && entry.id === messageId,
+				): entry is Extract<CommonspaceTraceEntry, { type: "compaction" }> =>
+					entry.type === "compaction" && entry.id === id,
 			);
-			this.#setTraceEntry(
-				turn,
-				existing === undefined
-					? {
-							type: "reasoning",
-							id: messageId,
-							text: boundedText(update.content.text, MAX_REASONING_CHARS),
-							createdAt: changedAt,
-							updatedAt: changedAt,
-						}
-					: {
-							...existing,
-							text: boundedText(
-								existing.text + update.content.text,
-								MAX_REASONING_CHARS,
-							),
-							updatedAt: changedAt,
-						},
-			);
-			return;
-		}
-
-		if (update.sessionUpdate === "plan") {
-			const existing = turn.traceEntries.find(
-				(entry): entry is Extract<CommonspaceTraceEntry, { type: "plan" }> =>
-					entry.type === "plan" && entry.id === "plan",
-			);
-			const next: Extract<CommonspaceTraceEntry, { type: "plan" }> = {
-				type: "plan",
-				id: "plan",
-				steps: planSteps(update.entries),
-				createdAt: existing?.createdAt ?? changedAt,
-				updatedAt: changedAt,
-			};
-			this.#setTraceEntry(turn, next);
-			return;
-		}
-
-		if (update.sessionUpdate === "plan_update") {
-			const plan = update.plan;
-			const id = plan.planId;
-			const existing = turn.traceEntries.find(
-				(entry): entry is Extract<CommonspaceTraceEntry, { type: "plan" }> =>
-					entry.type === "plan" && entry.id === id,
-			);
-			const next: Extract<CommonspaceTraceEntry, { type: "plan" }> = {
-				type: "plan",
+			this.#setTraceEntry(turn, {
+				type: "compaction",
 				id,
-				steps:
-					plan.type === "items"
-						? planSteps(plan.entries)
-						: (existing?.steps ?? []),
+				status: compactionStatus,
+				text: boundedText(update.content.text, MAX_REASONING_CHARS),
 				createdAt: existing?.createdAt ?? changedAt,
 				updatedAt: changedAt,
-			};
-			if (plan.type === "markdown")
-				next.markdown = boundedText(plan.content, MAX_REASONING_CHARS);
-			else if (existing?.markdown !== undefined)
-				next.markdown = existing.markdown;
-			this.#setTraceEntry(turn, next);
+			});
 			return;
 		}
 
-		if (update.sessionUpdate === "plan_removed") {
-			const index = turn.traceEntries.findIndex(
-				(entry) => entry.type === "plan" && entry.id === update.planId,
-			);
-			if (index >= 0) {
-				turn.traceEntries.splice(index, 1);
-				this.#publishTrace(turn);
-			}
-			return;
-		}
+		const messageId =
+			typeof update.messageId === "string" ? update.messageId : "reasoning";
+		const existing = turn.traceEntries.find(
+			(entry): entry is Extract<CommonspaceTraceEntry, { type: "reasoning" }> =>
+				entry.type === "reasoning" && entry.id === messageId,
+		);
+		this.#setTraceEntry(
+			turn,
+			existing === undefined
+				? {
+						type: "reasoning",
+						id: messageId,
+						text: boundedText(update.content.text, MAX_REASONING_CHARS),
+						createdAt: changedAt,
+						updatedAt: changedAt,
+					}
+				: {
+						...existing,
+						text: boundedText(
+							existing.text + update.content.text,
+							MAX_REASONING_CHARS,
+						),
+						updatedAt: changedAt,
+					},
+		);
+	}
 
-		if (
-			update.sessionUpdate === "tool_call" ||
-			update.sessionUpdate === "tool_call_update"
-		) {
-			const existing = turn.traceEntries.find(
-				(entry): entry is Extract<CommonspaceTraceEntry, { type: "tool" }> =>
-					entry.type === "tool" && entry.id === update.toolCallId,
-			);
-			const parsedRawOutput = z.json().safeParse(update.rawOutput);
-			const rawOutput: JsonValue | undefined =
-				update.rawOutput === undefined
-					? undefined
-					: parsedRawOutput.success
-						? parsedRawOutput.data
-						: String(update.rawOutput);
-			const contentOutput = combinedToolOutput(update.content, rawOutput);
-			const parsedRawInput = z.json().safeParse(update.rawInput);
-			const rawInput: JsonValue | undefined =
-				update.rawInput === undefined
-					? undefined
-					: parsedRawInput.success
-						? parsedRawInput.data
-						: String(update.rawInput);
-			const next: Extract<CommonspaceTraceEntry, { type: "tool" }> = {
-				type: "tool",
-				id: update.toolCallId,
-				title:
-					typeof update.title === "string"
-						? boundedText(update.title, 1_000)
-						: (existing?.title ?? "Tool call"),
-				status: toolStatus(update.status, existing?.status),
-				createdAt: existing?.createdAt ?? changedAt,
-				updatedAt: changedAt,
-			};
-			if (typeof update.name === "string")
-				next.toolName = boundedText(update.name, 200);
-			else if (existing?.toolName !== undefined)
-				next.toolName = existing.toolName;
-			if (typeof update.kind === "string")
-				next.toolKind = boundedText(update.kind, 100);
-			else if (existing?.toolKind !== undefined)
-				next.toolKind = existing.toolKind;
-			if (update.rawInput !== undefined)
-				next.input = displayValue(rawInput) ?? "";
-			else if (existing?.input !== undefined) next.input = existing.input;
-			if (contentOutput !== undefined) next.output = contentOutput;
-			else if (existing?.output !== undefined) next.output = existing.output;
-			this.#setTraceEntry(turn, next);
-			return;
-		}
+	#recordPlan(turn: ActiveTurn, update: SessionUpdateOf<"plan">) {
+		const changedAt = timestamp();
+		const existing = turn.traceEntries.find(
+			(entry): entry is Extract<CommonspaceTraceEntry, { type: "plan" }> =>
+				entry.type === "plan" && entry.id === "plan",
+		);
+		this.#setTraceEntry(turn, {
+			type: "plan",
+			id: "plan",
+			steps: planSteps(update.entries),
+			createdAt: existing?.createdAt ?? changedAt,
+			updatedAt: changedAt,
+		});
+	}
 
-		if (update.sessionUpdate === "usage_update") {
-			const existing = turn.traceEntries.find(
-				(entry): entry is Extract<CommonspaceTraceEntry, { type: "usage" }> =>
-					entry.type === "usage",
-			);
-			const next: Extract<CommonspaceTraceEntry, { type: "usage" }> = {
-				type: "usage",
-				id: "usage",
-				usedTokens: Number(update.used),
-				contextWindow: Number(update.size),
-				createdAt: existing?.createdAt ?? changedAt,
-				updatedAt: changedAt,
-			};
-			if (update.cost !== undefined && update.cost !== null) {
-				next.costAmount = update.cost.amount;
-				next.costCurrency = update.cost.currency;
-			}
-			this.#setTraceEntry(turn, next);
+	#recordPlanUpdate(turn: ActiveTurn, update: SessionUpdateOf<"plan_update">) {
+		const changedAt = timestamp();
+		const plan = update.plan;
+		const existing = turn.traceEntries.find(
+			(entry): entry is Extract<CommonspaceTraceEntry, { type: "plan" }> =>
+				entry.type === "plan" && entry.id === plan.planId,
+		);
+		let steps = existing?.steps ?? [];
+		let markdown = existing?.markdown;
+		switch (plan.type) {
+			case "items":
+				steps = planSteps(plan.entries);
+				break;
+			case "markdown":
+				markdown = boundedText(plan.content, MAX_REASONING_CHARS);
+				break;
+			case "file":
+				break;
+			default:
+				return unhandledAcpVariant(plan);
 		}
+		const next: Extract<CommonspaceTraceEntry, { type: "plan" }> = {
+			type: "plan",
+			id: plan.planId,
+			steps,
+			createdAt: existing?.createdAt ?? changedAt,
+			updatedAt: changedAt,
+		};
+		if (markdown !== undefined) next.markdown = markdown;
+		this.#setTraceEntry(turn, next);
+	}
+
+	#recordPlanRemoval(
+		turn: ActiveTurn,
+		update: SessionUpdateOf<"plan_removed">,
+	) {
+		const index = turn.traceEntries.findIndex(
+			(entry) => entry.type === "plan" && entry.id === update.planId,
+		);
+		if (index < 0) return;
+		turn.traceEntries.splice(index, 1);
+		this.#publishTrace(turn);
+	}
+
+	#recordToolCallUpdate(
+		turn: ActiveTurn,
+		update: SessionUpdateOf<"tool_call" | "tool_call_update">,
+	) {
+		const changedAt = timestamp();
+		const existing = turn.traceEntries.find(
+			(entry): entry is Extract<CommonspaceTraceEntry, { type: "tool" }> =>
+				entry.type === "tool" && entry.id === update.toolCallId,
+		);
+		const rawOutput = normalizeJsonValue(update.rawOutput);
+		const contentOutput = combinedToolOutput(update.content, rawOutput);
+		const rawInput = normalizeJsonValue(update.rawInput);
+		const next: Extract<CommonspaceTraceEntry, { type: "tool" }> = {
+			type: "tool",
+			id: update.toolCallId,
+			title:
+				typeof update.title === "string"
+					? boundedText(update.title, 1_000)
+					: (existing?.title ?? "Tool call"),
+			status: toolStatus(update.status, existing?.status),
+			createdAt: existing?.createdAt ?? changedAt,
+			updatedAt: changedAt,
+		};
+		if (typeof update.name === "string")
+			next.toolName = boundedText(update.name, 200);
+		else if (existing?.toolName !== undefined)
+			next.toolName = existing.toolName;
+		if (typeof update.kind === "string")
+			next.toolKind = boundedText(update.kind, 100);
+		else if (existing?.toolKind !== undefined)
+			next.toolKind = existing.toolKind;
+		if (update.rawInput !== undefined)
+			next.input = displayValue(rawInput) ?? "";
+		else if (existing?.input !== undefined) next.input = existing.input;
+		if (contentOutput !== undefined) next.output = contentOutput;
+		else if (existing?.output !== undefined) next.output = existing.output;
+		this.#setTraceEntry(turn, next);
+	}
+
+	#recordUsageUpdate(
+		turn: ActiveTurn,
+		update: SessionUpdateOf<"usage_update">,
+	) {
+		const changedAt = timestamp();
+		const existing = turn.traceEntries.find(
+			(entry): entry is Extract<CommonspaceTraceEntry, { type: "usage" }> =>
+				entry.type === "usage",
+		);
+		const next: Extract<CommonspaceTraceEntry, { type: "usage" }> = {
+			type: "usage",
+			id: "usage",
+			usedTokens: Number(update.used),
+			contextWindow: Number(update.size),
+			createdAt: existing?.createdAt ?? changedAt,
+			updatedAt: changedAt,
+		};
+		if (update.cost !== undefined && update.cost !== null) {
+			next.costAmount = update.cost.amount;
+			next.costCurrency = update.cost.currency;
+		}
+		this.#setTraceEntry(turn, next);
 	}
 
 	#setTraceEntry(turn: ActiveTurn, entry: CommonspaceTraceEntry): void {
