@@ -87,7 +87,7 @@
 		"test:platform": "vitest run tests/platform-scripts.spec.mjs tests/release-package.spec.mjs tests/dev-supervisor.spec.ts tests/directory-picker.spec.ts tests/standalone-server.spec.ts tests/commonspace-state.spec.ts"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.5.13",
+		"@biomejs/biome": "2.5.14",
 		"@eslint/js": "10.0.1",
 		"@modelcontextprotocol/sdk": "1.30.0",
 		"@playwright/test": "1.63.0",
@@ -101,13 +101,13 @@
 		"eslint-plugin-storybook": "^10.6.0",
 		"jsdom": "27.4.0",
 		"playwright": "1.63.0",
-		"prettier": "3.9.6",
+		"prettier": "3.9.8",
 		"react": "19.3.0",
 		"react-dom": "19.3.0",
 		"typescript": "6.0.3",
 		"typescript-eslint": "8.70.0",
 		"vitest": "4.1.11",
-		"zod": "^4.6.2"
+		"zod": "^4.6.5"
 	},
 	"engines": {
 		"node": "^22.13.0 || >=24"
