@@ -227,7 +227,9 @@ export const NormalizedQuery: Story = {
 export const QueryAndKeyboardSelection: Story = {
 	play: async ({ canvasElement }) => {
 		const body = within(canvasElement.ownerDocument.body);
-		const input = body.getByRole("searchbox", { name: "Search Commonspace" });
+		const input = await body.findByRole("searchbox", {
+			name: "Search Commonspace",
+		});
 		await userEvent.type(input, "verification");
 		await expect(
 			body.getByRole("option", { name: /Open Channel: #verification/iu }),
