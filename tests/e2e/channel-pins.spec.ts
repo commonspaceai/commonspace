@@ -36,30 +36,35 @@ test("pins from the Channel menu, keeps Thread pins separate, and restores reada
 	if (rootId === undefined) throw new Error("Missing root message ID");
 	const channelId = new URL(page.url()).pathname.split("/")[2];
 	await root.hover();
-	await root
-		.getByRole("button", { name: /^More actions for message from/ })
-		.click();
+	const rootActions = root.getByRole("button", {
+		name: /^More actions for message from/,
+	});
+	await rootActions.click();
 	await page
 		.getByRole("menuitem", { name: "Pin message", exact: true })
 		.click();
-	await root
-		.getByRole("button", { name: /^More actions for message from/ })
-		.click();
-	await expect(
-		page.getByRole("menuitem", { name: "Unpin message", exact: true }),
-	).toBeVisible();
-	await page.keyboard.press("Escape");
+	await rootActions.click();
+	const unpinRoot = page.getByRole("menuitem", {
+		name: "Unpin message",
+		exact: true,
+	});
+	await expect(unpinRoot).toBeVisible();
+	await rootActions.click();
+	await expect(unpinRoot).toBeHidden();
 	await root.getByRole("button", { name: /\d+ repl/ }).click();
 	const thread = page.getByRole("log", { name: "Thread messages" });
 	await thread.locator("article").first().hover();
-	await thread
+	const threadActions = thread
 		.getByRole("button", { name: /^More actions for message from/ })
-		.first()
-		.click();
-	await expect(
-		page.getByRole("menuitem", { name: "Pin message", exact: true }),
-	).toBeVisible();
-	await page.keyboard.press("Escape");
+		.first();
+	await threadActions.click();
+	const pinThread = page.getByRole("menuitem", {
+		name: "Pin message",
+		exact: true,
+	});
+	await expect(pinThread).toBeVisible();
+	await threadActions.click();
+	await expect(pinThread).toBeHidden();
 	const response = await page.request.get("/api/bootstrap", {
 		headers: { origin: new URL(page.url()).origin },
 	});

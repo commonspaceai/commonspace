@@ -541,15 +541,16 @@ describe("editable shared Channel context", () => {
 				});
 			}
 		});
-		inferenceRequest = vi.fn(async () =>
-			inferenceResponse("Deploy the reviewed change to Mercury."),
-		);
+		inferenceRequest = vi.fn(async (input: AgentRunInput) => {
+			expect(input.message).toContain("Deploy the reviewed change to Mercury.");
+			return inferenceResponse("Compacted with the late evidence included.");
+		});
 		try {
 			await expect(
 				service.compactThreadContext(threadId),
 			).resolves.toMatchObject({
 				memory: {
-					summary: "Deploy the reviewed change to Mercury.",
+					summary: "Compacted with the late evidence included.",
 					origin: "inference",
 				},
 			});
