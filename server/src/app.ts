@@ -3,10 +3,9 @@ import {
 	type AddPinRequest,
 	AGENT_ADAPTER_KINDS,
 	type ApplyRetentionRequest,
-	COMMONSPACE_REASONING_VALUES,
 	COMMONSPACE_SEARCH_KINDS,
 	type CommonspaceLiveAgentActivity,
-	type CommonspaceMutation,
+	CommonspaceMutationSchema,
 	type CommonspaceSearchKind,
 	type ConversationRef,
 	type DiscoverAgentsRequest,
@@ -57,15 +56,6 @@ const conversationSchema = z.strictObject({
 	kind: z.enum(["channel", "dm"]),
 	id: z.string(),
 });
-const reasoningSchema = z.enum(COMMONSPACE_REASONING_VALUES);
-const notificationSettingsSchema = z.strictObject({
-	enabled: z.boolean(),
-	replies: z.boolean(),
-	mentions: z.boolean(),
-	permissions: z.boolean(),
-	failures: z.boolean(),
-	sound: z.boolean(),
-});
 const contextRequestShape = z.strictObject({
 	summary: z.string(),
 	decisions: z.array(z.string()).optional(),
@@ -111,113 +101,6 @@ const threadContextRequestSchema =
 const discoverAgentsRequestSchema = z.strictObject({
 	adapter: z.enum(AGENT_ADAPTER_KINDS),
 }) satisfies z.ZodType<DiscoverAgentsRequest>;
-const mutationSchema = z.discriminatedUnion(
-	"action",
-	[
-		z.strictObject({ action: z.literal("mark-inbox-read") }),
-		z.strictObject({
-			action: z.literal("mark-inbox-item-read"),
-			messageId: z.string(),
-		}),
-		z.strictObject({
-			action: z.literal("set-inbox-item-unread"),
-			messageId: z.string(),
-			unread: z.boolean(),
-		}),
-		z.strictObject({
-			action: z.literal("set-inbox-item-saved"),
-			messageId: z.string(),
-			saved: z.boolean(),
-		}),
-		z.strictObject({
-			action: z.literal("set-session-followed"),
-			sessionId: z.string(),
-			followed: z.boolean(),
-		}),
-		z.strictObject({
-			action: z.literal("set-session-muted"),
-			sessionId: z.string(),
-			muted: z.boolean(),
-		}),
-		z.strictObject({
-			action: z.literal("set-notifications"),
-			notifications: notificationSettingsSchema,
-		}),
-		z.strictObject({
-			action: z.literal("create-project"),
-			name: z.string(),
-			paths: z.array(z.string()),
-		}),
-		z.strictObject({
-			action: z.literal("add-project-path"),
-			projectId: z.string(),
-			path: z.string(),
-		}),
-		z.strictObject({
-			action: z.literal("remove-project"),
-			projectId: z.string(),
-		}),
-		z.strictObject({
-			action: z.literal("create-channel"),
-			name: z.string(),
-			agentIds: z.array(z.string()),
-		}),
-		z.strictObject({
-			action: z.literal("set-channel-agents"),
-			channelId: z.string(),
-			agentIds: z.array(z.string()),
-		}),
-		z.strictObject({
-			action: z.literal("set-channel-context"),
-			channelId: z.string(),
-			instructions: z.string(),
-		}),
-		z.strictObject({
-			action: z.literal("set-channel-memory"),
-			channelId: z.string(),
-			summary: z.string(),
-			decisions: z.array(z.string()).optional(),
-			openQuestions: z.array(z.string()).optional(),
-		}),
-		z.strictObject({
-			action: z.literal("set-channel-configuration"),
-			channelId: z.string(),
-			agentIds: z.array(z.string()),
-			instructions: z.string(),
-			summary: z.string(),
-			decisions: z.array(z.string()).optional(),
-			openQuestions: z.array(z.string()).optional(),
-		}),
-		z.strictObject({
-			action: z.literal("set-defaults"),
-			model: z.string().nullable().optional(),
-			reasoning: reasoningSchema.optional(),
-			maxAgentsPerTurn: z.number().optional(),
-			memoryThreads: z.number().optional(),
-		}),
-		z.strictObject({
-			action: z.literal("add-discovered-agent"),
-			agentId: z.string(),
-			adapter: z.enum(AGENT_ADAPTER_KINDS).optional(),
-			fullAccess: z.boolean().optional(),
-		}),
-		z.strictObject({
-			action: z.literal("update-agent-profile"),
-			agentId: z.string(),
-			displayName: z.string(),
-			avatarEmoji: z.string().optional(),
-			accentColor: z.string().optional(),
-			fullAccess: z.boolean().optional(),
-		}),
-		z.strictObject({ action: z.literal("remove-agent"), agentId: z.string() }),
-		z.strictObject({ action: z.literal("reset-dm"), agentId: z.string() }),
-		z.strictObject({
-			action: z.literal("remove-channel"),
-			channelId: z.string(),
-		}),
-	],
-	{ error: "unknown mutation" },
-) satisfies z.ZodType<CommonspaceMutation>;
 const sendMessageRequestSchema = z.strictObject({
 	conversation: conversationSchema,
 	text: z.string(),
@@ -964,7 +847,7 @@ function registerDeliveryRoutes(
 ): void {
 	app.post("/api/mutate", requireSameOrigin, async (req, res) => {
 		try {
-			await service.mutate(mutationSchema.parse(req.body));
+			await service.mutate(CommonspaceMutationSchema.parse(req.body));
 			res.json(await service.bootstrap());
 		} catch (error) {
 			res.status(400).json({

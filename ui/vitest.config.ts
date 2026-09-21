@@ -10,6 +10,7 @@ const useSystemChrome = process.env.COMMONSPACE_USE_SYSTEM_CHROME === "1";
 const storyTag = process.env.COMMONSPACE_STORYBOOK_TAG ?? "test";
 
 export default defineConfig({
+	optimizeDeps: { include: ["zod"] },
 	resolve: {
 		alias: {
 			"@": fileURLToPath(new URL("./src", import.meta.url)),

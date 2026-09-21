@@ -6,6 +6,7 @@ import {
 	type CommonspaceBootstrap,
 	type CommonspaceMessage,
 	type CommonspaceMutation,
+	CommonspaceMutationSchema,
 	type CommonspaceRetentionPreview,
 	CommonspaceRoutingProvider,
 	type CommonspaceSearchResult,
@@ -18,6 +19,7 @@ import {
 	type RerouteAssignmentRequest,
 	type RetryRoutingRequest,
 	RoutingConfigurationIssue,
+	referencedProjectIds,
 	type SendMessageRequest,
 	type UpdateRoutingConfigurationRequest,
 	type UpdateThreadContextRequest,
@@ -237,6 +239,34 @@ export function createWorkspaceMockApi(
 			throw new Error("Channel references an unknown Agent.");
 		return unique;
 	}
+	function removeProjectReference(
+		message: CommonspaceMessage,
+		projectId: string,
+	): CommonspaceMessage {
+		const previousProjectIds = referencedProjectIds(message);
+		const projectIds = previousProjectIds.filter(
+			(candidate) => candidate !== projectId,
+		);
+		const updated = { ...message };
+		const primaryProjectId = projectIds[0];
+		if (primaryProjectId === undefined) {
+			delete updated.projectIds;
+			delete updated.projectId;
+		} else {
+			updated.projectIds = projectIds;
+			updated.projectId = primaryProjectId;
+		}
+		if (updated.runAttribution === undefined) return updated;
+		const roots =
+			previousProjectIds.length === 1 && previousProjectIds[0] === projectId
+				? []
+				: updated.runAttribution.roots.filter(
+						(root) => root.projectId !== projectId,
+					);
+		if (roots.length === 0) delete updated.runAttribution;
+		else updated.runAttribution = { ...updated.runAttribution, roots };
+		return updated;
+	}
 	function mutate(mutation: CommonspaceMutation) {
 		const state = data.state;
 		switch (mutation.action) {
@@ -319,6 +349,24 @@ export function createWorkspaceMockApi(
 			case "remove-project":
 				state.projects = state.projects.filter(
 					(project) => project.id !== mutation.projectId,
+				);
+				state.threads = state.threads.map((thread) => {
+					const projectIds = referencedProjectIds(thread).filter(
+						(projectId) => projectId !== mutation.projectId,
+					);
+					return {
+						...thread,
+						projectIds,
+						projectId: projectIds[0] ?? null,
+					};
+				});
+				state.messages = Object.fromEntries(
+					Object.entries(state.messages).map(([key, entries]) => [
+						key,
+						entries.map((message) =>
+							removeProjectReference(message, mutation.projectId),
+						),
+					]),
 				);
 				break;
 			case "create-channel":
@@ -423,6 +471,9 @@ export function createWorkspaceMockApi(
 					thread.agentIds = thread.agentIds.filter(
 						(agentId) => agentId !== mutation.agentId,
 					);
+				delete state.dmSessions[mutation.agentId];
+				delete state.agentSessions[mutation.agentId];
+				delete state.messages[`dm:${mutation.agentId}`];
 				if (
 					data.routing?.provider === CommonspaceRoutingProvider.Harness &&
 					data.routing.harnessAgentId === mutation.agentId
@@ -684,8 +735,19 @@ export function createWorkspaceMockApi(
 				: json(data),
 		),
 		http.post("/api/mutate", async ({ request }) => {
-			mutate(await trustedRequestJson<CommonspaceMutation>(request));
-			return json(data);
+			try {
+				const mutation = CommonspaceMutationSchema.parse(await request.json());
+				mutate(mutation);
+				return json(data);
+			} catch (error) {
+				return HttpResponse.json(
+					{
+						code: "invalid_mutation",
+						error: error instanceof Error ? error.message : String(error),
+					},
+					{ status: 400 },
+				);
+			}
 		}),
 		http.post("/api/send", async ({ request }) => {
 			const input = await trustedRequestJson<SendMessageRequest>(request);

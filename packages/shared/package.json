@@ -17,6 +17,9 @@
 		"typecheck": "tsc -p tsconfig.json --noEmit",
 		"clean": "node ../../scripts/clean.mjs dist"
 	},
+	"dependencies": {
+		"zod": "^4.6.2"
+	},
 	"devDependencies": {
 		"typescript": "6.0.3"
 	}
