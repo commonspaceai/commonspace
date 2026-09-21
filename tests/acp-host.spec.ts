@@ -10,10 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-	CommonspaceReasoning,
-	CommonspaceRoutingProvider,
-} from "@commonspace/shared";
+import { CommonspaceRoutingProvider } from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type CommonspaceHostConfig,
@@ -719,7 +716,7 @@ describe("Commonspace ACP host path", () => {
 		).toBe("codex:thread/opaque-session-01");
 	});
 
-	it("maps ACP-advertised Codex run settings without mutating harness configuration", async () => {
+	it("leaves ACP-advertised Codex model and reasoning settings native", async () => {
 		const root = await mkdtemp(
 			join(tmpdir(), "commonspace-acp-host-settings-"),
 		);
@@ -732,14 +729,9 @@ describe("Commonspace ACP host path", () => {
 		});
 		await service.initialize();
 		await addTestHarness(service, "codex", "Review Bot");
-		await service.mutate({
-			action: "set-defaults",
-			model: "gpt-test",
-			reasoning: CommonspaceReasoning.High,
-		});
 		await service.send({
 			conversation: { kind: "dm", id: "codex" },
-			text: "Use my settings.",
+			text: "Use the native setup.",
 		});
 		await service.whenIdle();
 		await service.close();
@@ -753,21 +745,11 @@ describe("Commonspace ACP host path", () => {
 				.modeId,
 		).toBe("agent");
 		expect(
-			frames
-				.filter((frame) => frame.method === "session/set_config_option")
-				.map((frame) => frame.params),
-		).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ configId: "model", value: "gpt-test" }),
-				expect.objectContaining({
-					configId: "reasoning_effort",
-					value: "high",
-				}),
-			]),
-		);
+			frames.filter((frame) => frame.method === "session/set_config_option"),
+		).toEqual([]);
 	});
 
-	it("maps the workspace model and edit approval onto native ACP controls", async () => {
+	it("leaves the Hermes model native while applying its edit-approval mode", async () => {
 		const root = await mkdtemp(
 			join(tmpdir(), "commonspace-hermes-acp-settings-"),
 		);
@@ -809,11 +791,6 @@ describe("Commonspace ACP host path", () => {
 				})
 			).channels[0],
 		);
-		await service.mutate({
-			action: "set-defaults",
-			model: "openai:hermes-test",
-		});
-
 		await service.send({
 			conversation: { kind: "channel", id: channel.id },
 			text: "Use native settings.",
@@ -830,10 +807,9 @@ describe("Commonspace ACP host path", () => {
 			frames.find((frame) => frame.method === "session/set_mode")?.params
 				.modeId ?? "accept_edits",
 		).toBe("accept_edits");
-		expect(
-			frames.find((frame) => frame.method === "session/set_model")?.params
-				.modelId,
-		).toBe("openai:hermes-test");
+		expect(frames.find((frame) => frame.method === "session/set_model")).toBe(
+			undefined,
+		);
 	});
 
 	it("uses full-access ACP mode for an agent configured with full access", async () => {

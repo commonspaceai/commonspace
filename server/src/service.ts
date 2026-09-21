@@ -179,7 +179,6 @@ import {
 	defaultNotificationSettings,
 	emptyChannelMemory,
 	emptyRoutingMemory,
-	isCommonspaceReasoning,
 } from "./state.js";
 import {
 	buildThreadContextCompactionPrompt,
@@ -311,8 +310,6 @@ export interface AgentRunInput {
 	files?: readonly AgentFileInput[];
 	commonspaceScope?: CommonspaceMcpScope;
 	sessionId?: string;
-	model?: string;
-	reasoning?: CommonspaceState["defaults"]["reasoning"];
 	onTraceUpdate?: (entries: readonly CommonspaceTraceEntry[]) => void;
 	onPermissionRequest?: (
 		request: AgentPermissionRequest,
@@ -580,8 +577,6 @@ interface AgentSessionRunInput {
 	cwd: string;
 	sessionName: string;
 	sessionId: string | undefined;
-	model: string | undefined;
-	reasoning: AgentRunInput["reasoning"] | undefined;
 }
 
 interface AgentSessionRunResult {
@@ -595,8 +590,6 @@ interface ReplyDeliverySession {
 	response: SendMessageResponse;
 	thread: CommonspaceThread | undefined;
 	effectiveLimit: number;
-	effectiveModel: string | undefined;
-	effectiveReasoning: AgentRunInput["reasoning"] | undefined;
 	memberIds: readonly string[];
 	delivered: Set<string>;
 	routingAssignments: readonly CommonspaceRoutingAssignment[];
@@ -1678,13 +1671,6 @@ function loadedBoundedInteger(
 	return typeof value === "number" && Number.isFinite(value)
 		? Math.max(minimum, Math.min(maximum, Math.trunc(value)))
 		: defaultValue;
-}
-
-function loadedModel(value: JsonValue | undefined): string | null {
-	if (value === null) return null;
-	if (typeof value !== "string") return null;
-	const model = value.trim().slice(0, 200);
-	return model === "" ? null : model;
 }
 
 type TraceEntryType = CommonspaceTraceEntry["type"];
@@ -3184,10 +3170,6 @@ function sanitizeLoadedDefaults(
 	const defaults = plainRecord(value) ?? {};
 	const fallback = defaultCommonspaceDefaults();
 	return {
-		model: loadedModel(defaults.model),
-		reasoning: isCommonspaceReasoning(defaults.reasoning)
-			? defaults.reasoning
-			: fallback.reasoning,
 		maxAgentsPerTurn: loadedBoundedInteger(
 			defaults.maxAgentsPerTurn,
 			fallback.maxAgentsPerTurn,
@@ -3408,28 +3390,9 @@ function decodeWorkspaceArchive(
 		plainRecord(projectMappings) === null
 	)
 		throw new Error("workspace archive is invalid");
-	const importedWorkspace = { ...workspace };
-	if (Array.isArray(workspace.channels)) {
-		importedWorkspace.channels = workspace.channels.map((candidate) => {
-			const channel = plainRecord(candidate);
-			if (channel === null || channel.settings === undefined) return candidate;
-			const settings = plainRecord(channel.settings);
-			if (
-				settings === null ||
-				Object.keys(settings).length !== 2 ||
-				settings.model !== loadedModel(settings.model) ||
-				(settings.reasoning !== null &&
-					!isCommonspaceReasoning(settings.reasoning))
-			)
-				throw new Error("workspace archive failed structural validation");
-			const currentChannel = { ...channel };
-			delete currentChannel.settings;
-			return currentChannel;
-		});
-	}
 	return {
 		workspace,
-		importedWorkspace,
+		importedWorkspace: workspace,
 		projects: workspace.projects,
 		attachments: archive.attachments,
 	};
@@ -8164,8 +8127,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		if (input.delivery.files !== undefined)
 			runInput.files = input.delivery.files;
 		if (input.sessionId !== undefined) runInput.sessionId = input.sessionId;
-		if (input.model !== undefined) runInput.model = input.model;
-		if (input.reasoning !== undefined) runInput.reasoning = input.reasoning;
 		return runInput;
 	}
 
@@ -8219,10 +8180,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		const effectiveLimit = explicitlyTargetsAll
 			? prepared.agentIds.length
 			: this.state.defaults.maxAgentsPerTurn;
-		const effectiveReasoning =
-			this.state.defaults.reasoning === "native"
-				? undefined
-				: this.state.defaults.reasoning;
 		const routingAssignments = prepared.routing?.assignments ?? [];
 		const relayMode = prepared.routing?.mode === "relay";
 		return {
@@ -8230,8 +8187,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			response,
 			thread: response.thread,
 			effectiveLimit,
-			effectiveModel: this.state.defaults.model ?? undefined,
-			effectiveReasoning,
 			memberIds:
 				prepared.channel?.agentIds ??
 				response.thread?.agentIds ??
@@ -8808,8 +8763,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 							cwd,
 							sessionName,
 							sessionId,
-							model: session.effectiveModel,
-							reasoning: session.effectiveReasoning,
 						}),
 				);
 			} catch (error) {
@@ -10455,8 +10408,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		const fullAccess = this.agentFullAccess(currentAgent);
 		const settings = adapter.sessionSettings({
 			fullAccess,
-			model: input.model,
-			reasoning: input.reasoning,
 		});
 		const processClient = this.acpProcesses.get(processScopeKey);
 		const launchPlan: AcpProcessLaunchPlan = {

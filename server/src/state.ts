@@ -8,10 +8,8 @@ import {
 	AGENT_ADAPTERS,
 	agentTagName,
 	COMMONSPACE_STATE_VERSION,
-	CommonspaceReasoning,
 	DEFAULT_COMMONSPACE_NOTIFICATION_SETTINGS,
 	isAgentAdapterKind,
-	isCommonspaceReasoning as isReasoningValue,
 	uniqueAgentDisplayName,
 } from "@commonspace/shared";
 import type { JsonValue } from "./json.js";
@@ -29,20 +27,6 @@ const defaults: StateDependencies = {
 	ids: () => crypto.randomUUID(),
 	now: () => new Date().toISOString(),
 };
-
-export function isCommonspaceReasoning(
-	value: JsonValue | undefined,
-): value is CommonspaceReasoning {
-	return typeof value === "string" && isReasoningValue(value);
-}
-
-function requiredReasoning(
-	value: JsonValue | undefined,
-): CommonspaceState["defaults"]["reasoning"] {
-	if (!isCommonspaceReasoning(value))
-		throw new Error("unsupported reasoning value");
-	return value;
-}
 
 function optionalModel(
 	value: JsonValue | undefined,
@@ -132,8 +116,6 @@ function normalizedContextEntries(
 
 export function defaultCommonspaceDefaults() {
 	return {
-		model: null,
-		reasoning: CommonspaceReasoning.Native as const,
 		maxAgentsPerTurn: 4,
 		memoryThreads: 12,
 	};
@@ -671,16 +653,10 @@ function setDefaults(
 	state: CommonspaceState,
 	mutation: MutationOf<"set-defaults">,
 ): CommonspaceState {
-	const reasoning =
-		mutation.reasoning === undefined
-			? state.defaults.reasoning
-			: requiredReasoning(mutation.reasoning);
 	return {
 		...state,
 		revision: nextRevision(state),
 		defaults: {
-			model: optionalModel(mutation.model, state.defaults.model),
-			reasoning,
 			maxAgentsPerTurn: validatedIntegerSetting(mutation.maxAgentsPerTurn, {
 				current: state.defaults.maxAgentsPerTurn,
 				minimum: 1,

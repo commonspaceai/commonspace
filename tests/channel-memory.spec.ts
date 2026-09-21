@@ -1,4 +1,3 @@
-import { CommonspaceReasoning } from "@commonspace/shared";
 import { expect, it } from "vitest";
 import {
 	COMMONSPACE_STATE_VERSION,
@@ -11,8 +10,6 @@ it("tracks source coverage without pretending transcript snippets are a semantic
 		version: COMMONSPACE_STATE_VERSION,
 		revision: 4,
 		defaults: {
-			model: null,
-			reasoning: CommonspaceReasoning.Max,
 			maxAgentsPerTurn: 4,
 			memoryThreads: 12,
 		},
@@ -88,8 +85,6 @@ it("tracks the newest source message across included threads", () => {
 		version: COMMONSPACE_STATE_VERSION,
 		revision: 8,
 		defaults: {
-			model: null,
-			reasoning: CommonspaceReasoning.Max,
 			maxAgentsPerTurn: 4,
 			memoryThreads: 12,
 		},

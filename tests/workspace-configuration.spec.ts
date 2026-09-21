@@ -1,10 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	CommonspaceReasoning,
-	CommonspaceRoutingProvider,
-} from "@commonspace/shared";
+import { CommonspaceRoutingProvider } from "@commonspace/shared";
 import { afterEach, expect, it } from "vitest";
 import { startCommonspaceServer } from "../server/src/index.ts";
 import { CommonspaceHostService } from "../server/src/service.ts";
@@ -204,14 +201,10 @@ it("saves run defaults independently while saved inference is discarded", async 
 	const { service } = await loadConfiguration("broken configuration");
 	await service.mutate({
 		action: "set-defaults",
-		model: null,
-		reasoning: CommonspaceReasoning.Native,
 		maxAgentsPerTurn: 2,
 		memoryThreads: 6,
 	});
 	expect(service.snapshot().defaults).toEqual({
-		model: null,
-		reasoning: CommonspaceReasoning.Native,
 		maxAgentsPerTurn: 2,
 		memoryThreads: 6,
 	});

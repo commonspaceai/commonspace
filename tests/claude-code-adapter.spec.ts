@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { COMMONSPACE_STATE_VERSION } from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommonspaceHostService } from "../server/src/service.ts";
 import { addDiscoveredAgent, createInitialState } from "../server/src/state.ts";
@@ -98,7 +99,7 @@ describe("Claude Code adapter", () => {
 			}),
 		);
 		const { service: restarted } = await createService(root);
-		expect(restarted.snapshot().version).toBe(31);
+		expect(restarted.snapshot().version).toBe(COMMONSPACE_STATE_VERSION);
 		expect(restarted.snapshot().agents).toMatchObject([
 			{ id: "claude-code", adapter: "claude-code", displayName: "Reviewer" },
 		]);

@@ -2204,7 +2204,7 @@ export function CommonspaceConversation({
 				setCommandFeedback({
 					tone: "info",
 					title: "Channel status",
-					body: `${heading.title} · Global Channel · ${String(channel?.agentIds.length ?? 0)} ${(channel?.agentIds.length ?? 0) === 1 ? "agent" : "agents"}${project === undefined ? "" : `\nNext thread project context: ${project.name}`}\nWorkspace model: ${bootstrap.state.defaults.model ?? "agent defaults"} · Workspace reasoning: ${bootstrap.state.defaults.reasoning}`,
+					body: `${heading.title} · Global Channel · ${String(channel?.agentIds.length ?? 0)} ${(channel?.agentIds.length ?? 0) === 1 ? "agent" : "agents"}${project === undefined ? "" : `\nNext thread project context: ${project.name}`}\nModel and reasoning follow each agent's native setup.`,
 				});
 			}
 			return;

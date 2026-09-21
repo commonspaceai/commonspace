@@ -1,7 +1,6 @@
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { CommonspaceReasoning } from "@commonspace/shared";
 import {
 	inspectCommandCapabilities,
 	parseNamedJsonInventory,
@@ -103,19 +102,8 @@ export function createCodexAdapter(
 				},
 			};
 		},
-		sessionSettings({ fullAccess, model, reasoning }) {
-			const configOptions: Record<string, string> = {};
-			if (model !== undefined) configOptions.model = model;
-			if (
-				reasoning !== undefined &&
-				reasoning !== CommonspaceReasoning.Native
-			) {
-				configOptions.reasoning_effort = reasoning;
-			}
-			return {
-				modeId: fullAccess ? "agent-full-access" : "agent",
-				configOptions,
-			};
+		sessionSettings({ fullAccess }) {
+			return { modeId: fullAccess ? "agent-full-access" : "agent" };
 		},
 	};
 }

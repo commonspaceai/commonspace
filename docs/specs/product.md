@@ -37,7 +37,7 @@ Visible `@@project` tags explicitly choose context. When there are no tags, infe
 
 ### Channel
 
-A Channel is a shared room with a chosen set of agents, instructions, shared context, and threads. It can exist without a Project or any agents. Model and reasoning configuration applies across the workspace; a Channel has no separate override.
+A Channel is a shared room with a chosen set of agents, instructions, shared context, and threads. It can exist without a Project or any agents. Each agent runtime keeps authority over its native model and reasoning setup; Commonspace does not add a Channel or workspace override.
 
 Mentioning an agent with `@agent` adds it to the Channel if needed and invokes it. Without an explicit mention, the selected workspace inference Agent chooses the smallest useful set of agents and their Project scopes through its harness. Every selected Agent receives the original user message unchanged. Independent participants run in parallel. A request for agents to discuss, debate, reconcile, review one another, or reach a shared conclusion becomes an ordered **relay**: one Agent starts and later Agents respond in sequence.
 

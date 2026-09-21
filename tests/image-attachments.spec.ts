@@ -1,10 +1,7 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	COMMONSPACE_STATE_VERSION,
-	CommonspaceReasoning,
-} from "@commonspace/shared";
+import { COMMONSPACE_STATE_VERSION } from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -64,8 +61,6 @@ describe("managed chat image attachments", () => {
 				inboxReadAt: null,
 				inboxReadMessageIds: [],
 				defaults: {
-					model: null,
-					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},

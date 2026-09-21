@@ -2,10 +2,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	COMMONSPACE_STATE_VERSION,
-	CommonspaceReasoning,
-} from "@commonspace/shared";
+import { COMMONSPACE_STATE_VERSION } from "@commonspace/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { CommonspaceHostService } from "../server/src/service.ts";
 
@@ -29,8 +26,6 @@ describe("routing state migration", () => {
 				version: 16,
 				revision: 4,
 				defaults: {
-					model: null,
-					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},
@@ -66,7 +61,6 @@ describe("routing state migration", () => {
 							threadIds: ["thread-1"],
 							updatedAt: null,
 						},
-						settings: { model: null, reasoning: null },
 						createdAt: "now",
 					},
 				],
@@ -176,8 +170,6 @@ describe("routing state migration", () => {
 				version: 29,
 				revision: 9,
 				defaults: {
-					model: null,
-					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 8,
 					memoryThreads: 12,
 				},
@@ -198,7 +190,6 @@ describe("routing state migration", () => {
 							threadIds: ["thread-1"],
 							updatedAt: null,
 						},
-						settings: { model: null, reasoning: null },
 						createdAt: "2026-08-30T00:00:00.000Z",
 					},
 				],
@@ -270,7 +261,7 @@ describe("routing state migration", () => {
 		const persisted = JSON.parse(
 			await readFile(join(root, "state.json"), "utf8"),
 		);
-		expect(persisted.version).toBe(31);
+		expect(persisted.version).toBe(COMMONSPACE_STATE_VERSION);
 		expect(
 			persisted.messages["channel:general"][0].routing.assignments[0],
 		).toEqual({
@@ -322,8 +313,6 @@ describe("routing state migration", () => {
 				version: COMMONSPACE_STATE_VERSION,
 				revision: 2,
 				defaults: {
-					model: null,
-					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},
@@ -338,7 +327,6 @@ describe("routing state migration", () => {
 						agentIds: [],
 						instructions: "",
 						memory: { ...memory, threadIds: ["thread-1"] },
-						settings: { model: null, reasoning: null },
 						createdAt: "2026-08-30T00:00:00.000Z",
 					},
 				],

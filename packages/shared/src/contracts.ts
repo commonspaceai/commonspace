@@ -2,40 +2,10 @@ import type { AgentAdapterKind } from "./agent-adapters.js";
 
 export type { AgentAdapterKind } from "./agent-adapters.js";
 
-export const COMMONSPACE_STATE_VERSION = 31 as const;
+export const COMMONSPACE_STATE_VERSION = 32 as const;
 export const COMMONSPACE_EXPORT_VERSION = 1 as const;
 
-export const enum CommonspaceReasoning {
-	Native = "native",
-	None = "none",
-	Minimal = "minimal",
-	Low = "low",
-	Medium = "medium",
-	High = "high",
-	Xhigh = "xhigh",
-	Max = "max",
-}
-
-export const COMMONSPACE_REASONING_VALUES = [
-	CommonspaceReasoning.Native,
-	CommonspaceReasoning.None,
-	CommonspaceReasoning.Minimal,
-	CommonspaceReasoning.Low,
-	CommonspaceReasoning.Medium,
-	CommonspaceReasoning.High,
-	CommonspaceReasoning.Xhigh,
-	CommonspaceReasoning.Max,
-] as const;
-
-export function isCommonspaceReasoning(
-	value: string,
-): value is CommonspaceReasoning {
-	return COMMONSPACE_REASONING_VALUES.some((reasoning) => reasoning === value);
-}
-
 export interface CommonspaceDefaults {
-	model: string | null;
-	reasoning: CommonspaceReasoning;
 	maxAgentsPerTurn: number;
 	memoryThreads: number;
 }
@@ -694,8 +664,6 @@ export type CommonspaceMutation =
 	  }
 	| {
 			action: "set-defaults";
-			model?: string | null | undefined;
-			reasoning?: CommonspaceReasoning | undefined;
 			maxAgentsPerTurn?: number | undefined;
 			memoryThreads?: number | undefined;
 	  }

@@ -16,7 +16,6 @@ import {
 	ndJsonStream,
 	type PlanEntry,
 	PROTOCOL_VERSION,
-	type SessionConfigOption,
 	type SessionModeState,
 	type SessionNotification,
 	type ToolCallContent,
@@ -70,9 +69,6 @@ export interface AcpRunInput {
 	retainSession?: boolean;
 	mcpServers?: readonly McpServer[];
 	modeId?: string;
-	/** Provider-native model selector exposed by ACP's session model extension. */
-	modelId?: string;
-	configOptions?: Readonly<Record<string, string | boolean>>;
 	signal?: AbortSignal;
 	onSessionReady?(sessionId: string): void;
 	onTraceUpdate?(entries: readonly CommonspaceTraceEntry[]): void;
@@ -152,24 +148,12 @@ type ActiveTurnSessionUpdate = Exclude<
 interface SessionSetup {
 	sessionId: string;
 	modes: SessionModeState | null | undefined;
-	models: SessionModelStateCompat | null | undefined;
-	configOptions: SessionConfigOption[] | null | undefined;
 }
 
 interface SessionRequestContext {
 	readonly additionalDirectories: string[];
 	readonly mcpServers: McpServer[];
 	readonly binding: string;
-}
-
-interface DesiredSessionSettings {
-	readonly configOptions: Record<string, string | boolean>;
-	readonly fingerprint: string;
-}
-
-interface SessionModelStateCompat {
-	currentModelId: string;
-	availableModels: Array<{ modelId: string }>;
 }
 
 function createActiveTurn(
@@ -253,42 +237,13 @@ function createRunResult(sessionId: string, turn: ActiveTurn): AcpRunResult {
 	return result;
 }
 
-const sessionModelsSchema = z.object({
-	models: z
-		.object({
-			currentModelId: z.string(),
-			availableModels: z.array(z.object({ modelId: z.string() })),
-		})
-		.nullable()
-		.optional(),
-});
-
 function createSessionSetup(
 	sessionId: string,
 	response: LoadSessionResponse,
 ): SessionSetup {
-	const parsedModels = sessionModelsSchema.safeParse(response);
 	return {
 		sessionId,
 		modes: response.modes,
-		models: parsedModels.success ? parsedModels.data.models : undefined,
-		configOptions: response.configOptions,
-	};
-}
-
-function desiredSessionSettings(input: AcpRunInput): DesiredSessionSettings {
-	const configOptions = Object.fromEntries(
-		Object.entries(input.configOptions ?? {}).sort(([left], [right]) =>
-			left.localeCompare(right),
-		),
-	);
-	return {
-		configOptions,
-		fingerprint: JSON.stringify({
-			modeId: input.modeId ?? null,
-			modelId: input.modelId ?? null,
-			configOptions,
-		}),
 	};
 }
 
@@ -382,42 +337,6 @@ function normalizeJsonValue(
 function unhandledAcpVariant(value: never): never {
 	void value;
 	throw new Error("Unhandled ACP protocol variant");
-}
-
-function validateSessionConfigValue(
-	option: SessionConfigOption,
-	value: string | boolean,
-) {
-	switch (option.type) {
-		case "boolean":
-			if (typeof value !== "boolean") {
-				throw new Error(
-					`Unsupported native setting ${option.id}: expected a boolean.`,
-				);
-			}
-			return;
-		case "select": {
-			if (typeof value !== "string") {
-				throw new Error(
-					`Unsupported native setting ${option.id}: expected a string.`,
-				);
-			}
-			const choices = option.options.flatMap((choice) =>
-				"options" in choice ? choice.options : [choice],
-			);
-			if (
-				option.category !== "model" &&
-				!choices.some((choice) => choice.value === value)
-			) {
-				throw new Error(
-					`Unsupported native setting ${option.id}: ${value}. Choose a supported value or native session settings.`,
-				);
-			}
-			return;
-		}
-		default:
-			return unhandledAcpVariant(option);
-	}
 }
 
 function contentBlockText(content: ContentBlock): string | undefined {
@@ -557,10 +476,8 @@ export class AcpAgentProcess {
 	readonly #loadedSessions = new Set<string>();
 	readonly #sessionBindings = new Map<string, string>();
 	readonly #activeTurns = new Map<string, ActiveTurn>();
-	readonly #appliedSettings = new Map<string, string>();
-	readonly #availableConfigOptions = new Map<string, SessionConfigOption[]>();
+	readonly #appliedModes = new Map<string, string>();
 	readonly #availableModeIds = new Map<string, Set<string>>();
-	readonly #modelStates = new Map<string, SessionModelStateCompat>();
 	readonly #childCleanups = new WeakMap<
 		ChildProcessWithoutNullStreams,
 		Promise<void>
@@ -703,20 +620,16 @@ export class AcpAgentProcess {
 		this.#initializeResponse = undefined;
 		this.#loadedSessions.clear();
 		this.#sessionBindings.clear();
-		this.#appliedSettings.clear();
-		this.#availableConfigOptions.clear();
+		this.#appliedModes.clear();
 		this.#availableModeIds.clear();
-		this.#modelStates.clear();
 	}
 
 	#forgetSession(sessionId: string): void {
 		if (this.#activeTurns.has(sessionId)) return;
 		this.#loadedSessions.delete(sessionId);
 		this.#sessionBindings.delete(sessionId);
-		this.#appliedSettings.delete(sessionId);
-		this.#availableConfigOptions.delete(sessionId);
+		this.#appliedModes.delete(sessionId);
 		this.#availableModeIds.delete(sessionId);
-		this.#modelStates.delete(sessionId);
 	}
 
 	async #ensureStarted(): Promise<void> {
@@ -824,10 +737,7 @@ export class AcpAgentProcess {
 					methods.agent.initialize,
 					{
 						protocolVersion: PROTOCOL_VERSION,
-						clientCapabilities: {
-							session: { configOptions: { boolean: {} } },
-							plan: {},
-						},
+						clientCapabilities: { plan: {} },
 						clientInfo: { name: "Commonspace", version: COMMONSPACE_VERSION },
 					},
 					{ cancellationSignal: signal },
@@ -900,8 +810,6 @@ export class AcpAgentProcess {
 			return {
 				sessionId: input.sessionId,
 				modes: undefined,
-				models: undefined,
-				configOptions: undefined,
 			};
 		}
 		if (this.#initializeResponse?.agentCapabilities?.loadSession !== true) {
@@ -964,10 +872,8 @@ export class AcpAgentProcess {
 	#registerSession(sessionId: string, binding: string) {
 		this.#loadedSessions.add(sessionId);
 		this.#sessionBindings.set(sessionId, binding);
-		this.#appliedSettings.delete(sessionId);
-		this.#availableConfigOptions.delete(sessionId);
+		this.#appliedModes.delete(sessionId);
 		this.#availableModeIds.delete(sessionId);
-		this.#modelStates.delete(sessionId);
 	}
 
 	async #configureSession(
@@ -976,18 +882,11 @@ export class AcpAgentProcess {
 		input: AcpRunInput,
 	): Promise<void> {
 		this.#recordSessionCapabilities(setup);
-		const desired = desiredSessionSettings(input);
-		if (this.#appliedSettings.get(setup.sessionId) === desired.fingerprint)
-			return;
+		const desiredMode = input.modeId ?? "";
+		if (this.#appliedModes.get(setup.sessionId) === desiredMode) return;
 
 		await this.#applySessionMode(connection, setup, input.modeId);
-		await this.#applySessionModel(connection, setup.sessionId, input.modelId);
-		await this.#applySessionConfigOptions(
-			connection,
-			setup.sessionId,
-			desired.configOptions,
-		);
-		this.#appliedSettings.set(setup.sessionId, desired.fingerprint);
+		this.#appliedModes.set(setup.sessionId, desiredMode);
 	}
 
 	#recordSessionCapabilities(setup: SessionSetup) {
@@ -996,12 +895,6 @@ export class AcpAgentProcess {
 				setup.sessionId,
 				new Set(setup.modes.availableModes.map((mode) => mode.id)),
 			);
-		}
-		if (setup.configOptions !== undefined && setup.configOptions !== null) {
-			this.#availableConfigOptions.set(setup.sessionId, setup.configOptions);
-		}
-		if (setup.models !== undefined && setup.models !== null) {
-			this.#modelStates.set(setup.sessionId, setup.models);
 		}
 	}
 
@@ -1029,97 +922,16 @@ export class AcpAgentProcess {
 		);
 	}
 
-	async #applySessionModel(
-		connection: ClientConnection,
-		sessionId: string,
-		modelId: string | undefined,
-	) {
-		if (modelId === undefined) return;
-		const modelState = this.#modelStates.get(sessionId);
-		if (modelState === undefined) {
-			throw new Error(
-				"Native runtime does not expose a model override. Clear Workspace model to use native session settings.",
-			);
-		}
-		if (modelState.currentModelId === modelId) return;
-		await this.#request("session/set_model", (signal) =>
-			connection.agent.request(
-				"session/set_model",
-				{
-					sessionId,
-					modelId,
-				},
-				{ cancellationSignal: signal },
-			),
-		);
-		modelState.currentModelId = modelId;
-	}
-
-	async #applySessionConfigOptions(
-		connection: ClientConnection,
-		sessionId: string,
-		desiredConfig: Readonly<Record<string, string | boolean>>,
-	) {
-		const priority = (id: string) =>
-			this.#availableConfigOptions
-				.get(sessionId)
-				?.find((option) => option.id === id)?.category === "model"
-				? 0
-				: 1;
-		const requestedOptions = Object.entries(desiredConfig).sort(
-			([left], [right]) => priority(left) - priority(right),
-		);
-		for (const [configId, value] of requestedOptions) {
-			const option = this.#availableConfigOptions
-				.get(sessionId)
-				?.find((candidate) => candidate.id === configId);
-			if (option === undefined) {
-				throw new Error(
-					`Unsupported native setting ${configId}. Clear the workspace override to use native session settings.`,
-				);
-			}
-			if (option.currentValue === value) continue;
-			validateSessionConfigValue(option, value);
-			const response = await this.#request(
-				"session/set_config_option",
-				(signal) =>
-					connection.agent.request(
-						methods.agent.session.setConfigOption,
-						typeof value === "boolean"
-							? { sessionId, configId, type: "boolean", value }
-							: { sessionId, configId, value },
-						{ cancellationSignal: signal },
-					),
-			);
-			this.#availableConfigOptions.set(sessionId, response.configOptions);
-			if (
-				response.configOptions.find((entry) => entry.id === configId)
-					?.currentValue !== value
-			) {
-				throw new Error(
-					`Native runtime did not apply setting ${configId}. No prompt was sent.`,
-				);
-			}
-		}
-	}
-
 	#recordSessionUpdate(
 		notification: SessionNotification,
 		connection: ClientConnection["agent"],
 	): void {
 		const update = notification.update;
 		if (update.sessionUpdate === "current_mode_update") {
-			this.#appliedSettings.delete(notification.sessionId);
+			this.#appliedModes.delete(notification.sessionId);
 			return;
 		}
-		if (update.sessionUpdate === "config_option_update") {
-			this.#availableConfigOptions.set(
-				notification.sessionId,
-				update.configOptions,
-			);
-			this.#appliedSettings.delete(notification.sessionId);
-			return;
-		}
+		if (update.sessionUpdate === "config_option_update") return;
 		const turn = this.#activeTurns.get(notification.sessionId);
 		if (turn === undefined) return;
 		this.#recordActiveTurnUpdate(

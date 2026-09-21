@@ -71,8 +71,6 @@ Import restores data into an empty destination and does not merge workspaces:
 
 Unknown archive versions are rejected. A future format change must increment `version` and document its migration behavior here.
 
-Version 1 archives from earlier builds may contain Channel `settings` with `model` and `reasoning` fields. Import validates and discards these obsolete overrides while preserving workspace defaults and conversation data. Malformed settings or unrelated unknown fields still fail structural validation.
-
 ## Retention
 
 Commonspace keeps accepted messages until the owner explicitly cleans up a Channel or Direct Message. There is no automatic expiry.

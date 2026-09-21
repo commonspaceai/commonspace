@@ -148,7 +148,8 @@ export const uiReviewCatalog = [
 		id: "screens-workspace--settings-agent-runs",
 		name: "Agent run settings",
 		ready: '[role="tab"][aria-selected="true"]:has-text("Agent runs")',
-		question: "Are native defaults and overrides clear?",
+		question:
+			"Are native runtime ownership and workspace coordination limits clear?",
 	},
 	{
 		id: "screens-workspace--settings-notifications",

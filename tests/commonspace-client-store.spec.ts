@@ -3,7 +3,6 @@ import type {
 	SendMessageResponse,
 } from "@commonspace/shared";
 import {
-	CommonspaceReasoning,
 	CommonspaceRoutingProvider,
 	RoutingConfigurationIssue,
 } from "@commonspace/shared";
@@ -238,7 +237,7 @@ describe("CommonspaceClientStore message admission", () => {
 		await store.refresh();
 		const mutation = store.mutate({
 			action: "set-defaults",
-			reasoning: CommonspaceReasoning.Native,
+			maxAgentsPerTurn: 3,
 		});
 		await store.refresh();
 		pending.resolve(jsonResponse(oldBootstrap));

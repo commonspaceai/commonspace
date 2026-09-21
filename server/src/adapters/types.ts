@@ -1,7 +1,6 @@
 import type {
 	CommonspaceAgentDefinition,
 	CommonspaceAgentProfile,
-	CommonspaceReasoning,
 	HarnessCapabilityGroup,
 } from "@commonspace/shared";
 import type { AcpAgentProcessOptions, AcpRunInput } from "../acp-runtime.js";
@@ -27,8 +26,6 @@ export interface AgentAdapterConfig {
 
 export interface AgentSessionSettings {
 	fullAccess: boolean;
-	model: string | undefined;
-	reasoning: CommonspaceReasoning | undefined;
 }
 
 export type NativeAgentLaunch = Pick<
@@ -50,7 +47,5 @@ export interface NativeAgentAdapter {
 		fullAccess: boolean,
 		signal: AbortSignal,
 	): NativeAgentLaunch | Promise<NativeAgentLaunch>;
-	sessionSettings(
-		input: AgentSessionSettings,
-	): Pick<AcpRunInput, "modeId" | "modelId" | "configOptions">;
+	sessionSettings(input: AgentSessionSettings): Pick<AcpRunInput, "modeId">;
 }

@@ -1,5 +1,4 @@
 import type { CommonspaceMutation } from "@commonspace/shared";
-import { CommonspaceReasoning } from "@commonspace/shared";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
 	addDiscoveredAgent,
@@ -136,18 +135,14 @@ describe("Commonspace local state", () => {
 		expect(next.messages["channel:c"]).toEqual([]);
 	});
 
-	it("keeps model and reasoning configuration workspace-wide", () => {
+	it("keeps coordination defaults workspace-wide without overriding native runtime settings", () => {
 		let state = createInitialState();
 		state = applyMutation(state, {
 			action: "set-defaults",
-			model: "openai/gpt-5.2",
-			reasoning: CommonspaceReasoning.High,
 			maxAgentsPerTurn: 8,
 			memoryThreads: 1,
 		});
 		expect(state.defaults).toEqual({
-			model: "openai/gpt-5.2",
-			reasoning: CommonspaceReasoning.High,
 			maxAgentsPerTurn: 8,
 			memoryThreads: 1,
 		});
@@ -209,11 +204,14 @@ describe("Commonspace local state", () => {
 		}>().not.toMatchTypeOf<CommonspaceMutation>();
 	});
 
-	it("excludes unsupported reasoning values from mutation contracts", () => {
-		expectTypeOf<{
-			action: "set-defaults";
-			reasoning: 'high"; malicious=true';
-		}>().not.toMatchTypeOf<CommonspaceMutation>();
+	it("excludes model and reasoning overrides from mutation contracts", () => {
+		type DefaultsMutation = Extract<
+			CommonspaceMutation,
+			{ action: "set-defaults" }
+		>;
+		expectTypeOf<keyof DefaultsMutation>().toEqualTypeOf<
+			"action" | "maxAgentsPerTurn" | "memoryThreads"
+		>();
 	});
 
 	it("adds and removes a discovered Codex harness with its channel and session state", () => {

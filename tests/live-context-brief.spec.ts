@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	type CommonspaceMessage,
-	CommonspaceReasoning,
 	CommonspaceRoutingProvider,
 } from "@commonspace/shared";
 import { describe, expect, it } from "vitest";
@@ -46,7 +45,6 @@ describe.skipIf(process.env.COMMONSPACE_LIVE_CONTEXT !== "1")(
 				const root = await mkdtemp(join(tmpdir(), "commonspace-live-brief-"));
 				const state = createInitialState();
 				const createdAt = "2026-09-01T00:00:00.000Z";
-				state.defaults.reasoning = CommonspaceReasoning.Low;
 				state.agents = [
 					{
 						id: "codex",

@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { AGENT_ADAPTER_KINDS } from "./agent-adapters.js";
 import type { CommonspaceMutation } from "./contracts.js";
-import { COMMONSPACE_REASONING_VALUES } from "./contracts.js";
 
 const notificationSettingsSchema = z.strictObject({
 	enabled: z.boolean(),
@@ -91,8 +90,6 @@ export const CommonspaceMutationSchema = z.discriminatedUnion(
 		}),
 		z.strictObject({
 			action: z.literal("set-defaults"),
-			model: z.string().nullable().optional(),
-			reasoning: z.enum(COMMONSPACE_REASONING_VALUES).optional(),
 			maxAgentsPerTurn: z.number().optional(),
 			memoryThreads: z.number().optional(),
 		}),

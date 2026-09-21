@@ -1,4 +1,3 @@
-import { CommonspaceReasoning } from "@commonspace/shared";
 // @vitest-environment node
 
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -30,8 +29,6 @@ function bootstrap(): CommonspaceBootstrap {
 		followedSessionIds: [],
 		mutedSessionIds: [],
 		defaults: {
-			model: null,
-			reasoning: CommonspaceReasoning.Max,
 			maxAgentsPerTurn: 4,
 			memoryThreads: 12,
 		},

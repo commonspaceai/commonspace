@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CommonspaceReasoning } from "@commonspace/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { createCommonspaceApp } from "../server/src/app.ts";
 import {
@@ -196,9 +195,7 @@ describe("workspace portability HTTP workflow", () => {
 	});
 });
 
-const archiveShapes = ["current", "legacy defaults", "legacy overrides"];
-
-describe.each(archiveShapes)("workspace portability (%s)", (shape) => {
+describe("workspace portability", () => {
 	it("exports sanitized metadata and imports into a clean workspace with explicit Project remapping", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-export-source-"));
 		roots.push(root);
@@ -220,8 +217,8 @@ describe.each(archiveShapes)("workspace portability (%s)", (shape) => {
 		await addTestHarness(source, "codex", "Review Bot");
 		await source.mutate({
 			action: "set-defaults",
-			model: "workspace-model",
-			reasoning: CommonspaceReasoning.High,
+			maxAgentsPerTurn: 6,
+			memoryThreads: 8,
 		});
 		await source.mutate({
 			action: "create-channel",
@@ -264,20 +261,6 @@ describe.each(archiveShapes)("workspace portability (%s)", (shape) => {
 		const exportWorkspace = source.exportWorkspace;
 
 		const archive = await exportWorkspace.call(source);
-		if (shape !== "current") {
-			archive.workspace.channels = archive.workspace.channels.map(
-				(channel) => ({
-					...channel,
-					settings:
-						shape === "legacy defaults"
-							? { model: null, reasoning: null }
-							: {
-									model: "legacy-channel-model",
-									reasoning: CommonspaceReasoning.Low,
-								},
-				}),
-			);
-		}
 		const serialized = JSON.stringify(archive);
 		expect(archive).toMatchObject({
 			format: "commonspace-workspace",
@@ -322,28 +305,12 @@ describe.each(archiveShapes)("workspace portability (%s)", (shape) => {
 		await expect(
 			importWorkspace.call(target, malformed, mappings),
 		).rejects.toThrow("workspace archive failed structural validation");
-		for (const settings of [
-			{ model: 42, reasoning: CommonspaceReasoning.Low },
-			{ model: null, reasoning: "invalid" },
-			{ model: null, reasoning: null, extra: "unexpected" },
-		]) {
-			const invalidSettings = structuredClone(archive);
-			invalidSettings.workspace.channels =
-				invalidSettings.workspace.channels.map((channel) => ({
-					...channel,
-					settings,
-				}));
-			await expect(
-				importWorkspace.call(target, invalidSettings, mappings),
-			).rejects.toThrow("workspace archive failed structural validation");
-		}
-
 		await importWorkspace.call(target, archive, mappings);
 
 		expect(importedNotificationCount).toBe(0);
 		expect(target.snapshot().defaults).toMatchObject({
-			model: "workspace-model",
-			reasoning: CommonspaceReasoning.High,
+			maxAgentsPerTurn: 6,
+			memoryThreads: 8,
 		});
 		expect(target.snapshot().channels[0]).toMatchObject({
 			name: "portable-room",

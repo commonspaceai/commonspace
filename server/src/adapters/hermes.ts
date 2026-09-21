@@ -1,4 +1,3 @@
-import { CommonspaceReasoning } from "@commonspace/shared";
 import {
 	parseHermesProfileDescription,
 	parseHermesProfileList,
@@ -109,16 +108,8 @@ export function createHermesAdapter(
 				env: { ...process.env, NO_BROWSER: "1" },
 			};
 		},
-		sessionSettings({ fullAccess, model, reasoning }) {
-			if (reasoning !== undefined && reasoning !== CommonspaceReasoning.Native)
-				throw new Error(
-					"hermes does not expose a Commonspace reasoning override. Select Use native session settings in Workspace reasoning.",
-				);
-			const settings: ReturnType<NativeAgentAdapter["sessionSettings"]> = {
-				modeId: fullAccess ? "dont_ask" : "accept_edits",
-			};
-			if (model !== undefined) settings.modelId = model;
-			return settings;
+		sessionSettings({ fullAccess }) {
+			return { modeId: fullAccess ? "dont_ask" : "accept_edits" };
 		},
 	};
 }

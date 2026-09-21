@@ -107,7 +107,7 @@ flowchart TD
 | Workspace | One local Commonspace installation and its durable state. | One human is the authority in the current product. |
 | Agent | A supported local ACP runtime explicitly added to the workspace. | The same Agent is reused across Projects and conversations; Commonspace does not clone it per Project. |
 | Project | A named context container with one or more resources. | Projects are references, not task owners. Local folders are the only current resource type. |
-| Channel | A shared conversation with a chosen set of agents, instructions, and shared context. | A Channel may be projectless and does not permanently belong to one Project. Model and reasoning configuration is workspace-wide. |
+| Channel | A shared conversation with a chosen set of agents, instructions, and shared context. | A Channel may be projectless and does not permanently belong to one Project. Model and reasoning remain owned by each native runtime and session. |
 | DM | A persistent conversation between the human and exactly one chosen Agent. | Smart routing never substitutes another Agent. |
 | Message | Human, Agent, or system conversation content with references and attachments. | Accepted messages are persisted before inference or agent execution. |
 | Thread | The focused continuation created by a Channel root message. | Each participating Agent has its own native session inside the Thread. |
@@ -261,7 +261,7 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | AGT-02 | Current | Support known ACP harnesses through first-party adapters. | Unsupported arbitrary CLIs are rejected rather than represented as partially functional Agents. |
 | AGT-03 | Current | Reuse one Agent identity across Projects, Channels, DMs, and Threads. | No per-Project Agent clone or hidden Project-specific memory identity is created. |
 | AGT-04 | Current | Allow workspace-local display name, avatar/emoji, and accent changes. | Native harness identity and configuration remain unchanged; Commonspace does not create synthetic personas or behavior profiles. |
-| AGT-05 | Capability-dependent | Expose models, reasoning, steering, stopping, tools, and permissions only when advertised through ACP. | Configuration controls use ACP and do not synthesize unsupported choices. Discovery may read identity metadata through the supported harness CLI; Commonspace does not mutate native profile configuration. |
+| AGT-05 | Capability-dependent | Expose models, reasoning, steering, stopping, tools, and permissions only when reported by the runtime. | Native metadata and supported controls use ACP without synthesizing choices. Commonspace does not send model/reasoning changes. Discovery may read identity metadata through the supported harness CLI; Commonspace does not mutate native profile configuration. |
 | AGT-06 | Current | Avoid standalone Agent profile/dashboard requirements. | Agent discovery and context remain available through addition, DMs, Channel membership, mentions, and session indicators. |
 
 ### 6.3 Projects and references
@@ -291,7 +291,7 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | CON-08 | Current | Run different native sessions concurrently and serialize only the same session. | A slow Agent does not block unrelated Agents or Threads. |
 | CON-09 | Current | Bound pathological Agent-to-Agent cycles. | One handoff is accepted per active turn; self/non-member targets are rejected; the visible workspace Agent limit and repeated directed-edge checks stop cycles with a visible outcome. |
 | CON-10 | Current | Preserve queued follow-ups while a native session is busy. | The user can inspect, reorder, remove, steer where supported, or stop-and-send queued input. A bounded tray shows delivery status and expandable message previews; compact icon actions have accessible names and tooltips in both DMs and Threads. Queue changes preserve keyboard focus, returning to the composer after the final removal. Unsupported delivery controls are absent. |
-| CON-11 | Current | Apply one workspace model and reasoning configuration to every conversation. | Channels do not expose, persist, or apply per-Channel model or reasoning overrides. Native-session settings are the default; explicit unsupported overrides fail before the prompt is sent. Discovery metadata does not force a model override. |
+| CON-11 | Current | Preserve each runtime's native model and reasoning configuration. | Commonspace does not persist or send workspace or Channel model/reasoning overrides. Reported model and reasoning metadata is reflective and read-only. |
 
 ### 6.5 Commonspace inference, routing, and correction
 

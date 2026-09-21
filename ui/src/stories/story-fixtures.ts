@@ -12,7 +12,6 @@ import {
 	type CommonspacePermissionRequest,
 	type CommonspaceProject,
 	type CommonspaceQueuedFollowup,
-	CommonspaceReasoning,
 	CommonspaceRoutingProvider,
 	type CommonspaceRunAttribution,
 	type CommonspaceSearchResponse,
@@ -348,8 +347,6 @@ function createStoryState(
 		mutedSessionIds: [],
 		notifications: { ...DEFAULT_COMMONSPACE_NOTIFICATION_SETTINGS },
 		defaults: {
-			model: "gpt-5.6-sol",
-			reasoning: CommonspaceReasoning.High,
 			maxAgentsPerTurn: 2,
 			memoryThreads: 3,
 		},

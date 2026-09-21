@@ -13,7 +13,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	COMMONSPACE_STATE_VERSION,
-	CommonspaceReasoning,
 	CommonspaceRoutingProvider,
 	deriveCommonspaceInboxItems,
 	type UpdateRoutingConfigurationRequest,
@@ -41,7 +40,12 @@ const candidateSchema = z.array(
 const projectSchema = z.array(z.object({ id: z.string() }));
 const persistedStateSchema = z.object({
 	version: z.number().optional(),
-	defaults: z.object({ reasoning: z.string().optional() }).optional(),
+	defaults: z
+		.strictObject({
+			maxAgentsPerTurn: z.number(),
+			memoryThreads: z.number(),
+		})
+		.optional(),
 });
 const acpFrameSchema = z
 	.object({ method: z.string().optional(), params: z.unknown().optional() })
@@ -137,8 +141,6 @@ describe("Commonspace host authority", () => {
 			inboxReadAt: null,
 			inboxReadMessageIds: [],
 			defaults: {
-				model: null,
-				reasoning: CommonspaceReasoning.Max,
 				maxAgentsPerTurn: 4,
 				memoryThreads: 12,
 			},
@@ -173,8 +175,6 @@ describe("Commonspace host authority", () => {
 			inboxReadAt: null,
 			inboxReadMessageIds: [],
 			defaults: {
-				model: null,
-				reasoning: CommonspaceReasoning.Max,
 				maxAgentsPerTurn: 4,
 				memoryThreads: 12,
 			},
@@ -941,8 +941,6 @@ esac
 				version: 5,
 				revision: 1,
 				defaults: {
-					model: null,
-					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},
@@ -993,8 +991,6 @@ esac
 				version: 4,
 				revision: -10,
 				defaults: {
-					model: 42,
-					reasoning: 'high"; malicious=true',
 					maxAgentsPerTurn: 99,
 					memoryThreads: 0,
 				},
@@ -1015,7 +1011,6 @@ esac
 						agentIds: ["frontend", 42],
 						instructions: 42,
 						memory: { summary: 42 },
-						settings: { model: 42, reasoning: "invalid" },
 						createdAt: "now",
 					},
 				],
@@ -1036,8 +1031,6 @@ esac
 			version: COMMONSPACE_STATE_VERSION,
 			revision: 0,
 			defaults: {
-				model: null,
-				reasoning: CommonspaceReasoning.Native,
 				maxAgentsPerTurn: 8,
 				memoryThreads: 1,
 			},
@@ -1057,7 +1050,7 @@ esac
 		);
 		expect(persisted).toMatchObject({
 			version: COMMONSPACE_STATE_VERSION,
-			defaults: { reasoning: CommonspaceReasoning.Native },
+			defaults: { maxAgentsPerTurn: 8, memoryThreads: 1 },
 		});
 	});
 
@@ -1072,8 +1065,6 @@ esac
 				inboxReadAt: null,
 				inboxReadMessageIds: [],
 				defaults: {
-					model: null,
-					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},
@@ -1131,8 +1122,6 @@ esac
 				version: 7,
 				revision: 5,
 				defaults: {
-					model: null,
-					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},
@@ -1217,8 +1206,6 @@ esac
 				version: 9,
 				revision: 2,
 				defaults: {
-					model: null,
-					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},
@@ -1301,8 +1288,6 @@ esac
 				version: 8,
 				revision: 4,
 				defaults: {
-					model: null,
-					reasoning: CommonspaceReasoning.Max,
 					maxAgentsPerTurn: 4,
 					memoryThreads: 12,
 				},
@@ -2984,7 +2969,7 @@ esac
 		expect(runAgent.mock.calls[0]?.[0].sessionName).toMatch(
 			new RegExp(`^Commonspace Routing: ${channel.id}: `, "u"),
 		);
-		expect(runAgent.mock.calls[0]?.[0].model).toBeUndefined();
+		expect(runAgent.mock.calls[0]?.[0]).not.toHaveProperty("model");
 		expect(runAgent.mock.calls[1]?.[0].sessionName).toMatch(
 			new RegExp(`^Commonspace Routing: ${channel.id}: `, "u"),
 		);

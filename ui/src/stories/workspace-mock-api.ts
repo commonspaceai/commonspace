@@ -324,9 +324,6 @@ export function createWorkspaceMockApi(
 				state.notifications = mutation.notifications;
 				break;
 			case "set-defaults": {
-				if (mutation.model !== undefined) state.defaults.model = mutation.model;
-				if (mutation.reasoning !== undefined)
-					state.defaults.reasoning = mutation.reasoning;
 				if (mutation.maxAgentsPerTurn !== undefined)
 					state.defaults.maxAgentsPerTurn = mutation.maxAgentsPerTurn;
 				if (mutation.memoryThreads !== undefined)

@@ -786,14 +786,24 @@ export const IndependentSettingsSaves: Story = {
 			"Saved inference configuration is invalid",
 		);
 		await userEvent.click(page.getByRole("tab", { name: "Agent runs" }));
-		await userEvent.selectOptions(
-			page.getByLabelText("Workspace reasoning"),
-			"native",
-		);
+		await expect(
+			page.getByText(/Each runtime owns its model and reasoning settings/u),
+		).toBeVisible();
+		await expect(
+			page.queryByLabelText("Workspace reasoning"),
+		).not.toBeInTheDocument();
+		await expect(
+			page.queryByLabelText("Workspace model"),
+		).not.toBeInTheDocument();
 		await userEvent.click(
 			page.getByRole("button", { name: "Save agent run settings" }),
 		);
 		await waitFor(() => expect(saveRunDefaults).toHaveBeenCalledOnce());
+		await expect(saveRunDefaults).toHaveBeenCalledWith({
+			action: "set-defaults",
+			maxAgentsPerTurn: 2,
+			memoryThreads: 3,
+		});
 		await expect(saveInference).not.toHaveBeenCalled();
 		await expect(page.getByText("Agent run settings saved.")).toBeVisible();
 		await userEvent.clear(page.getByLabelText("Default max agents"));

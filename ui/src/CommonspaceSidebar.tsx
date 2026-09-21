@@ -2,7 +2,6 @@ import {
 	AGENT_ADAPTER_KINDS,
 	AGENT_ADAPTERS,
 	type AgentAdapterKind,
-	COMMONSPACE_REASONING_VALUES,
 	type CommonspaceAgentProfile,
 	type CommonspaceDiagnostics,
 	type CommonspaceMessage,
@@ -10,13 +9,11 @@ import {
 	type CommonspaceNotificationSettings,
 	type CommonspaceNotificationVerification,
 	type CommonspacePin,
-	CommonspaceReasoning,
 	CommonspaceRoutingProvider,
 	type CommonspaceSearchResult,
 	type ConversationRef,
 	DEFAULT_COMMONSPACE_NOTIFICATION_SETTINGS,
 	deriveCommonspaceInboxItems,
-	isCommonspaceReasoning,
 	type UpdateRoutingConfigurationRequest,
 } from "@commonspace/shared";
 import {
@@ -48,7 +45,6 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { NativeSelect } from "@/components/ui/native-select";
 import { AppearanceSettings } from "@/design-system/AppearanceSettings";
 import {
 	CollectionActionButton,
@@ -399,9 +395,6 @@ export function CommonspaceSidebar({
 	const settingsPanelRef = useRef<HTMLElement>(null);
 	const settingsTriggerRef = useRef<HTMLButtonElement>(null);
 	const settingsCloseRef = useRef<HTMLButtonElement>(null);
-	const [defaultModel, setDefaultModel] = useState("");
-	const [defaultReasoning, setDefaultReasoning] =
-		useState<CommonspaceReasoning>(CommonspaceReasoning.Native);
 	const [defaultMaxAgents, setDefaultMaxAgents] = useState(4);
 	const [defaultMemoryThreads, setDefaultMemoryThreads] = useState(12);
 	const [routingHarnessAgentId, setRoutingHarnessAgentId] = useState("");
@@ -584,16 +577,6 @@ export function CommonspaceSidebar({
 		}
 		return pinsByChannel;
 	}, [state?.pins]);
-	const models = useMemo(
-		() => [
-			...new Set(
-				agents
-					.map((agent) => agent.model)
-					.filter((model): model is string => model !== null && model !== ""),
-			),
-		],
-		[agents],
-	);
 	const projects = state?.projects ?? [];
 	const channels = state?.channels ?? [];
 	const defaultPinnedKeys = useMemo(
@@ -1042,8 +1025,6 @@ export function CommonspaceSidebar({
 		try {
 			await store.mutate({
 				action: "set-defaults",
-				model: defaultModel.trim() || null,
-				reasoning: defaultReasoning,
 				maxAgentsPerTurn: defaultMaxAgents,
 				memoryThreads: defaultMemoryThreads,
 			});
@@ -1465,57 +1446,10 @@ export function CommonspaceSidebar({
 												Workspace agent run settings
 											</legend>
 											<SettingsSectionHeading
-												title="Workspace agent run settings"
-												description="Overrides apply to Channel and DM replies. Unsupported overrides fail before the prompt is sent; choose native session settings to leave each runtime in control. Existing sessions retain their native settings."
+												title="Workspace coordination defaults"
+												description="Each runtime owns its model and reasoning settings. Commonspace reflects native setup and only controls workspace routing fan-out and shared-context memory here."
 											/>
 											<div className="grid grid-cols-2 gap-4 max-[640px]:grid-cols-1">
-												<label>
-													<span className="text-xs font-semibold text-muted-foreground">
-														Workspace model
-													</span>
-													<input
-														aria-label="Workspace model"
-														list="commonspace-models"
-														placeholder="Use native session settings"
-														value={defaultModel}
-														onChange={(event) => {
-															setDefaultModel(event.target.value);
-															setRunSettingsSave({
-																status: SettingsOperationStatus.Idle,
-															});
-														}}
-													/>
-												</label>
-												<datalist id="commonspace-models">
-													{models.map((model) => (
-														<option key={model} value={model} />
-													))}
-												</datalist>
-												<label htmlFor="workspace-reasoning">
-													<span className="text-xs font-semibold text-muted-foreground">
-														Reasoning
-													</span>
-													<NativeSelect
-														id="workspace-reasoning"
-														aria-label="Workspace reasoning"
-														value={defaultReasoning}
-														onChange={(event) => {
-															if (isCommonspaceReasoning(event.target.value))
-																setDefaultReasoning(event.target.value);
-															setRunSettingsSave({
-																status: SettingsOperationStatus.Idle,
-															});
-														}}
-													>
-														{COMMONSPACE_REASONING_VALUES.map((value) => (
-															<option key={value} value={value}>
-																{value === CommonspaceReasoning.Native
-																	? "Use native session settings"
-																	: value}
-															</option>
-														))}
-													</NativeSelect>
-												</label>
 												<label>
 													<span className="text-xs font-semibold text-muted-foreground">
 														Max agents per turn
@@ -3132,8 +3066,6 @@ export function CommonspaceSidebar({
 							runSettingsSave.status !== SettingsOperationStatus.Running
 						) {
 							setRunSettingsSave({ status: SettingsOperationStatus.Idle });
-							setDefaultModel(defaults.model ?? "");
-							setDefaultReasoning(defaults.reasoning);
 							setDefaultMaxAgents(defaults.maxAgentsPerTurn);
 							setDefaultMemoryThreads(defaults.memoryThreads);
 						}

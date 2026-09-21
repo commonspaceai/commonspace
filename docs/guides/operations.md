@@ -52,9 +52,9 @@ A new workspace requires two choices: add at least one Agent from an installed A
 
 The **Saved inference agent** label identifies the persisted choice. Saving validates that the Agent belongs to the workspace; it does not test native authentication or model access. A malformed or unsupported `routing.json` is deleted at startup and setup remains incomplete until the user makes a current selection.
 
-Agent run settings have their own save operation and can be changed even when inference is unconfigured. A blank workspace model and **Use native session settings** reasoning leave model and reasoning under native control; resumed sessions retain their current native settings. Discovery labels are metadata, not implicit model overrides. An explicitly selected model, reasoning, or permission mode must be supported by the runtime; unsupported settings fail before sending the prompt. Clearing an override does not reset a native session or restore its earlier values. Existing saved reasoning choices are preserved when upgrading; newly created workspaces default to native reasoning.
+Workspace coordination defaults have their own save operation and can be changed even when inference is unconfigured. They control routing fan-out and shared-context memory only. Models and reasoning remain under each runtime and native session's control; Commonspace reflects reported metadata without converting it into a run setting.
 
-Routing configuration version 3 stores only the selected harness Agent ID. No older routing configuration is migrated. Routing saves are serialized and use an atomic private file write through `PUT /api/routing`; Agent run defaults save independently through the `set-defaults` mutation.
+Routing configuration version 3 stores only the selected harness Agent ID. No older routing configuration is migrated. Routing saves are serialized and use an atomic private file write through `PUT /api/routing`; workspace coordination defaults save independently through the `set-defaults` mutation.
 
 ## Installed macOS service
 
@@ -210,6 +210,6 @@ cp -R ~/.commonspace ~/commonspace-backup-YYYYMMDD
 
 Replace `YYYYMMDD` with your backup date, and adjust the source if using `COMMONSPACE_HOME`. The copy includes routing configuration and attachments; keep it private. Native harness stores remain separate and are not included.
 
-The current internal state version is 30 and migrates versions 1–29 on startup. Each write retains the previous valid primary as `state.backup.json`. If the primary is invalid and the backup is valid, startup preserves the primary as `state.corrupt.json` and recovers the backup. If both are invalid, startup stops without replacing them.
+The current internal state version is 32 and migrates versions 1–31 on startup. Each write retains the previous valid primary as `state.backup.json`. If the primary is invalid and the backup is valid, startup preserves the primary as `state.corrupt.json` and recovers the backup. If both are invalid, startup stops without replacing them.
 
 The automatic state backup protects against an invalid write; it is not a complete archive of earlier releases. Application rollback does not reverse migrations. Before starting an older build, restore a data backup compatible with that build, and keep a separate copy of the current data so the recovery attempt remains reversible.

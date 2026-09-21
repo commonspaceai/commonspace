@@ -252,7 +252,7 @@ describe("ACP agent process", () => {
 		expect(await readFile(flushPath, "utf8")).toBe("native session saved");
 	});
 
-	it("selects the model before model-dependent settings and rejects unsupported overrides", async () => {
+	it("leaves ACP model and config options under native runtime ownership", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-acp-config-"));
 		roots.push(root);
 		const logPath = join(root, "frames.ndjson");
@@ -270,39 +270,24 @@ describe("ACP agent process", () => {
 		try {
 			const first = await processClient.run({
 				cwd: root,
-				message: "Use the selected model.",
-				configOptions: { effort: "max", model: "gpt-test" },
+				message: "Use the native setup.",
 			});
-			await expect(
-				processClient.run({
-					cwd: root,
-					sessionId: first.sessionId,
-					message: "Keep supported settings.",
-					configOptions: { effort: "unsupported" },
-				}),
-			).rejects.toThrow("Unsupported native setting");
 			await processClient.run({
 				cwd: root,
 				sessionId: first.sessionId,
-				message: "Respect the native model change.",
-				configOptions: { effort: "high" },
+				message: "Keep the native setup.",
 			});
-			expect(await readFile(logPath, "utf8")).not.toContain(
-				"Keep supported settings.",
-			);
 			const frames = (await readFile(logPath, "utf8"))
 				.trim()
 				.split("\n")
 				.map((line) => JSON.parse(line));
 			expect(
-				frames
-					.filter((frame) => frame.method === "session/set_config_option")
-					.map((frame) => [frame.params.configId, frame.params.value]),
-			).toEqual([
-				["model", "gpt-test"],
-				["effort", "max"],
-				["effort", "high"],
-			]);
+				frames.filter(
+					(frame) =>
+						frame.method === "session/set_model" ||
+						frame.method === "session/set_config_option",
+				),
+			).toEqual([]);
 		} finally {
 			await processClient.close();
 		}
