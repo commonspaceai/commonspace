@@ -29,14 +29,15 @@ Read [Architecture](architecture.md) for package ownership before a change that 
 
 Choose checks by the evidence you need:
 
-| Command | What it verifies |
-| --- | --- |
-| `pnpm check:fast` | Formatting, lint, types, unit/integration tests, and representative Storybook browser tests during iteration |
-| `pnpm check` | The full local gate, including all Storybook browser tests and production application and Storybook builds |
-| `pnpm verify:live` | A fresh production build and the integrated desktop browser flow through both separate development-style servers and the installed single-origin path |
-| `pnpm check:ui` | UI types, the complete Storybook browser suite, and the production UI build |
-| `pnpm test:e2e` | A production build followed by integrated Playwright application flows; use `test:e2e:built` after an already-current build |
-| `pnpm test:visual` | Selected reviewed Storybook pixel baselines; changed images require inspection and explicit approval |
+| Command               | What it verifies                                                                                                                                                                                           |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm check:fast`     | Formatting, lint, types, unit/integration tests, and representative Storybook browser tests during iteration                                                                                               |
+| `pnpm check`          | The full local gate, including all Storybook browser tests and production application and Storybook builds                                                                                                 |
+| `pnpm verify:live`    | A fresh production build and the integrated desktop browser flow through both separate development-style servers and the installed single-origin path                                                      |
+| `pnpm check:ui`       | UI types, the complete Storybook browser suite, and the production UI build                                                                                                                                |
+| `pnpm test:e2e`       | A production build followed by integrated Playwright application flows; use `test:e2e:built` after an already-current build                                                                                |
+| `pnpm test:visual`    | Selected reviewed Storybook pixel baselines; changed images require inspection and explicit approval                                                                                                       |
+| `pnpm verify:release` | The complete macOS release-candidate gate: locked install, managed browser, repository checks, visual and messaging suites, assembled browser flows, live verification, and clean npm-package installation |
 
 The live verifier uses temporary workspace data and test runtimes. It proves production wiring without proving that an authenticated external agent works. Provider-backed harness checks are a separate opt-in step described below.
 
@@ -46,14 +47,14 @@ Use [Desktop usage](desktop-usage.md) for assembled flows and [Visual verificati
 
 Run a relevant file while iterating, then use the change-specific requirements in [Contributing](../../CONTRIBUTING.md#verify) before handing off. Examples:
 
-| Change | Focused check | Evidence limit |
-| --- | --- | --- |
-| Server state or shared context | `pnpm test tests/channel-context.spec.ts` | Synthetic state transitions; use the test file that owns the changed behavior |
-| Routing contracts or dispatch | `pnpm test tests/ai-router.spec.ts tests/commonspace-host.spec.ts` | Parsing and service mechanics, not live semantic routing quality |
-| UI component | `pnpm test:storybook:watch -- Conversation` | Isolated interactions and accessibility; assembled behavior needs browser flows |
-| ACP lifecycle | `pnpm test tests/acp-runtime.spec.ts` | Protocol fixtures, not authenticated harness compatibility |
-| Portable scripts or installation | `pnpm test:platform` | Account-free platform behavior; packaging also needs clean tarball verification |
-| Documentation or templates | Check relative links, referenced commands, Markdown syntax, and `git diff --check` | No application test run is required for prose-only changes |
+| Change                           | Focused check                                                                      | Evidence limit                                                                  |
+| -------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Server state or shared context   | `pnpm test tests/channel-context.spec.ts`                                          | Synthetic state transitions; use the test file that owns the changed behavior   |
+| Routing contracts or dispatch    | `pnpm test tests/ai-router.spec.ts tests/commonspace-host.spec.ts`                 | Parsing and service mechanics, not live semantic routing quality                |
+| UI component                     | `pnpm test:storybook:watch -- Conversation`                                        | Isolated interactions and accessibility; assembled behavior needs browser flows |
+| ACP lifecycle                    | `pnpm test tests/acp-runtime.spec.ts`                                              | Protocol fixtures, not authenticated harness compatibility                      |
+| Portable scripts or installation | `pnpm test:platform`                                                               | Account-free platform behavior; packaging also needs clean tarball verification |
+| Documentation or templates       | Check relative links, referenced commands, Markdown syntax, and `git diff --check` | No application test run is required for prose-only changes                      |
 
 `check:fast` is a broader iteration gate, not a replacement for `check`. `verify:live` and `test:e2e` exercise assembled behavior; use `verify:live:built` and `test:e2e:built` after a current build to avoid rebuilding the same candidate. Pixel baselines, authenticated runtime checks, routing-quality evaluation, and benchmarks answer separate questions and are not implied by green unit tests.
 
@@ -102,7 +103,7 @@ The server continues accepting work while waiting, so continuous activity can de
 
 ## CI and service verification
 
-CI runs static/build checks, unit/integration tests, Storybook browser checks, integrated Playwright E2E, reviewed macOS visual baselines, and a Windows platform job. The aggregate `check` job succeeds only when all five jobs pass. The Windows job runs the focused `pnpm test:platform` suite, Storybook smoke, production browser flows, and npm build/install smoke; the complete unit/runtime suite remains on Linux. See [Windows validation](windows-validation.md) for PowerShell commands and evidence limits. The default branch requires the aggregate `check`; [Maintaining](maintaining.md#configure-github) owns the configuration and verification procedure.
+CI starts quality/package, unit, Linux browser, macOS visual/messaging, and Windows runtime jobs independently. Only the small Linux-package-on-Windows job waits for the Linux tarball. The **Required CI gate** succeeds after all six component jobs pass and is the sole branch-protection context. The Windows runtime job runs `pnpm test:platform`, Storybook smoke, production browser flows, and live verification; the downstream package job installs the exact Linux-built tarball that a release would publish. The complete unit/runtime suite remains on Linux. See [Windows validation](windows-validation.md) for PowerShell commands and evidence limits. [Maintaining](maintaining.md#configure-github) owns the protected-branch configuration and verification procedure.
 
 CI and local browser checks install/use Playwright's managed Chromium unless `COMMONSPACE_USE_SYSTEM_CHROME=1` is set.
 

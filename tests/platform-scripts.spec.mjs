@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	nodeToolCommand,
 	npmCommand,
+	pnpmCommand,
 	runTool,
 } from "../scripts/tool-command.mjs";
 import {
@@ -95,6 +96,28 @@ describe("portable validation commands", () => {
 });
 
 describe("npm command and runtime isolation", () => {
+	it("runs pnpm through its JavaScript entry on Windows", () => {
+		const command = pnpmCommand(["check", "two words", "a&b"], {
+			platform: "win32",
+			execPath: "C:\\Program Files\\nodejs\\node.exe",
+			env: { npm_execpath: "C:\\tools\\pnpm.cjs" },
+		});
+		expect(command).toEqual({
+			command: "C:\\Program Files\\nodejs\\node.exe",
+			args: ["C:\\tools\\pnpm.cjs", "check", "two words", "a&b"],
+		});
+	});
+
+	it("fails clearly when a Windows pnpm JavaScript entry is unavailable", () => {
+		expect(() =>
+			pnpmCommand(["check"], {
+				platform: "win32",
+				execPath: "C:\\node\\node.exe",
+				env: {},
+			}),
+		).toThrow("pnpm JavaScript entry");
+	});
+
 	it("resolves npm's JavaScript entry on Windows without executing a cmd shim", () => {
 		const cli = "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js";
 		const command = npmCommand(["pack", "C:\\package & spaces"], {

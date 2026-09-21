@@ -40,6 +40,8 @@
 		"test:storybook:smoke": "pnpm --filter @commonspace/ui test-storybook:smoke",
 		"test:storybook:watch": "pnpm --filter @commonspace/ui test-storybook:watch",
 		"test:visual": "node scripts/run-visual-tests.mjs",
+		"test:visual:built": "playwright test --config playwright.visual.config.ts",
+		"test:messaging:built": "playwright test --config playwright.messaging.config.ts",
 		"review:ui": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/capture-ui-review.mjs",
 		"e2e:server": "node server/node_modules/tsx/dist/cli.mjs scripts/e2e-server.mjs",
 		"test:e2e": "pnpm build && pnpm test:e2e:built",
@@ -61,6 +63,7 @@
 		"build:npm": "pnpm build && pnpm package:npm",
 		"package:npm": "node scripts/package-npm.mjs",
 		"verify:npm-package": "node scripts/verify-npm-package.mjs",
+		"verify:release": "node scripts/verify-release.mjs",
 		"benchmark:workspace": "node --expose-gc --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-workspace.ts",
 		"benchmark:browser-refresh": "pnpm build && node --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-browser-refresh.ts",
 		"benchmark:session-isolation": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-session-isolation.ts",
@@ -84,7 +87,7 @@
 		"verify:adapter:gemini": "vitest run tests/native-agent-integration.spec.ts -t \"Gemini CLI\"",
 		"verify:adapter:opencode": "vitest run tests/native-agent-integration.spec.ts -t \"OpenCode\"",
 		"verify:adapters": "vitest run tests/native-agent-integration.spec.ts",
-		"test:platform": "vitest run tests/platform-scripts.spec.mjs tests/release-package.spec.mjs tests/dev-supervisor.spec.ts tests/directory-picker.spec.ts tests/standalone-server.spec.ts tests/commonspace-state.spec.ts"
+		"test:platform": "vitest run tests/platform-scripts.spec.mjs tests/release-package.spec.mjs tests/ci-policy.spec.mjs tests/release-verification.spec.mjs tests/dev-supervisor.spec.ts tests/directory-picker.spec.ts tests/standalone-server.spec.ts tests/commonspace-state.spec.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.13",
@@ -107,6 +110,7 @@
 		"typescript": "6.0.3",
 		"typescript-eslint": "8.70.0",
 		"vitest": "4.1.11",
+		"yaml": "2.9.0",
 		"zod": "^4.6.2"
 	},
 	"engines": {

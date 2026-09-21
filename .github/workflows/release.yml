@@ -28,6 +28,7 @@ defaults:
 
 jobs:
   resolve:
+    name: Authorize release commit
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -98,6 +99,7 @@ jobs:
           fi
 
   verify:
+    name: Build and verify release package
     needs: resolve
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -128,6 +130,7 @@ jobs:
           retention-days: 1
 
   windows-package:
+    name: Verify release package on Windows
     needs: [resolve, verify]
     runs-on: windows-2025
     timeout-minutes: 15
@@ -150,6 +153,7 @@ jobs:
         run: node scripts/verify-npm-package.mjs
 
   publish:
+    name: Publish verified npm package
     if: ${{ github.repository == 'commonspaceai/commonspace' && (github.event_name == 'release' || ! inputs.dry_run) }}
     needs: [resolve, verify, windows-package]
     runs-on: ubuntu-24.04

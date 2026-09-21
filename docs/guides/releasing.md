@@ -7,18 +7,16 @@ Compatibility covers documented HTTP/MCP interfaces, CLI behavior, and the works
 ## Prepare
 
 1. Keep the same version in the root, `cli`, `packages/shared`, `server`, and `ui` manifests. Use a patch for compatible fixes, a minor for features or pre-1.0 breaking changes, and a major for breaking changes from 1.0 onward. Describe any migration. Saved-state and archive schema versions remain separate.
-2. Verify the unchanged candidate with the [development prerequisites](development.md#setup):
+2. On macOS, verify the unchanged candidate with the complete release gate:
 
    ```bash
-   pnpm install --frozen-lockfile
-   pnpm check
-   pnpm verify:live:built
-   pnpm package:npm
-   pnpm verify:npm-package
+   pnpm verify:release
    ```
 
+   This installs the locked dependency graph and managed Chromium, then runs repository checks, reviewed visual baselines, messaging flows, assembled browser flows, live verification, and clean package installation. Windows compatibility remains an independent required CI job.
+
 3. Record the commit, version, CI links, and relevant [agent](../adapters/agent-adapters.md#verification-commands), [service](operations.md#installed-macos-service), and [Windows](windows-validation.md) results in the release task or PR. State why any relevant check was not run. Package smoke does not prove authenticated agent or interactive desktop behavior.
-4. Push the reviewed commit to `main` and wait for its CI to pass. Check the intended tag with `node scripts/package-npm.mjs --check-tag v<version>`, then create and push that tag on the verified commit. Never move a published tag.
+4. Push the candidate branch and merge it through protected `main` after **Required CI gate** passes. Wait for the exact merged commit's `main` CI run to pass as well. Check the intended tag with `node scripts/package-npm.mjs --check-tag v<version>`, then create and push that tag on the verified commit. Never move a published tag.
 
 ## Publish
 

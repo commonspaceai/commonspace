@@ -55,6 +55,21 @@ export function npmCommand(args, options = {}) {
 	return { command: execPath, args: [cli, ...args] };
 }
 
+export function pnpmCommand(args, options = {}) {
+	const {
+		platform = process.platform,
+		execPath = process.execPath,
+		env = process.env,
+	} = options;
+	if (typeof env.npm_execpath === "string" && env.npm_execpath !== "") {
+		return { command: execPath, args: [env.npm_execpath, ...args] };
+	}
+	if (platform !== "win32") return { command: "pnpm", args };
+	throw new Error(
+		"Cannot locate pnpm JavaScript entry. Run this command through pnpm.",
+	);
+}
+
 export function runTool(command, options = {}) {
 	return new Promise((resolve, reject) => {
 		const child = spawn(command.command, command.args, {

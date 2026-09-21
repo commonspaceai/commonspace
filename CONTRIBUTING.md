@@ -34,12 +34,12 @@ pnpm check
 git diff --check
 ```
 
-| Change                                            | Required evidence                                                               |
-| ------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Shared types, server, saved data, or security     | Focused regression test, `pnpm check`, and `pnpm verify:live`                   |
-| UI component or screen                            | Storybook states, behavior checks, `pnpm check`, and desktop inspection         |
-| Packaging, installation, dependencies, or release | Focused checks, `pnpm check`, `pnpm package:npm`, and `pnpm verify:npm-package` |
-| Documentation or templates only                   | Links, commands, Markdown syntax, and `git diff --check`                        |
+| Change                                            | Required evidence                                                          |
+| ------------------------------------------------- | -------------------------------------------------------------------------- |
+| Shared types, server, saved data, or security     | Focused regression test, `pnpm check`, and `pnpm verify:live`              |
+| UI component or screen                            | Storybook states, behavior checks, `pnpm check`, and desktop inspection    |
+| Packaging, installation, dependencies, or release | Focused checks and the complete macOS `pnpm verify:release` candidate gate |
+| Documentation or templates only                   | Links, commands, Markdown syntax, and `git diff --check`                   |
 
 Use [Visual verification](docs/design/visual-verification.md) for rendered UI review and [Releasing](docs/guides/releasing.md) for candidate checks. Real-agent and real-service checks are additional; record what ran and what did not.
 

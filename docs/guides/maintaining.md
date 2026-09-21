@@ -30,7 +30,7 @@ Keep these repository controls enabled:
 
 ## Configure GitHub
 
-The default branch requires the aggregate CI `check` from GitHub Actions, an up-to-date branch, resolved review conversations, and one code-owner approval for contributors without an administrator bypass. New commits dismiss stale approvals. Force pushes and branch deletion are disabled in the configuration. Administrator enforcement is disabled so repository administrators can bypass the protection requirements and push directly to `main`. Review and validate changes before any direct push.
+The default branch requires the aggregate **Required CI gate** from GitHub Actions, an up-to-date branch, resolved review conversations, and one code-owner approval for contributors without the owner review allowance. New commits dismiss stale approvals. Force pushes and branch deletion are disabled. Administrator enforcement is enabled, so administrators cannot land an unverified commit on `main`.
 
 [`main-branch-protection.json`](../../.github/main-branch-protection.json) is the versioned configuration. An administrator can apply it from the repository root with an authenticated GitHub CLI:
 
@@ -40,9 +40,52 @@ gh api --method PUT repos/commonspaceai/commonspace/branches/main/protection \
 gh api repos/commonspaceai/commonspace/branches/main/protection
 ```
 
-The required check is bound to the GitHub Actions app, ID `15368`; another status publisher cannot satisfy it. Verify the returned settings after applying the file, including the required check, disabled administrator enforcement, review and conversation requirements, and force-push/deletion restrictions. The file alone does not enable protection.
+The required check is bound to the GitHub Actions app, ID `15368`; another status publisher cannot satisfy it. Verify the returned settings after applying the file, including the required check, administrator enforcement, review and conversation requirements, and force-push/deletion restrictions. The file alone does not enable protection.
 
-The separately configured PR-review allowance names `ralphbibera`, the repository owner and current code owner. Reserve it for owner-authored maintenance and recovery without self-approval. GitHub scopes this allowance to the acting user, not the PR author, so review outside contributions through the normal PR path. This review-only allowance is separate from the administrator bypass above. Revisit these allowances and [CODEOWNERS](../../.github/CODEOWNERS) when the maintainer group changes.
+The PR-review allowance names `ralphbibera`, the repository owner and current code owner. It permits owner-authored maintenance without an impossible self-approval, but it does not bypass required CI. GitHub scopes this allowance to the acting user, not the PR author, so review outside contributions through the normal PR path. Revisit the allowance and [CODEOWNERS](../../.github/CODEOWNERS) when the maintainer group changes.
+
+When renaming a required check, migrate the live protection without an unverified gap. Push the exact candidate commit to a temporary branch, dispatch CI for that branch, and wait for the new check to pass:
+
+```bash
+git push origin HEAD:refs/heads/codex/ci-gate-migration
+gh workflow run ci.yml --ref codex/ci-gate-migration
+gh run list --workflow CI --branch codex/ci-gate-migration
+```
+
+Confirm that **Required CI gate** succeeded for the candidate SHA, apply `main-branch-protection.json`, then fast-forward `main` to that same SHA and verify its push-triggered CI run. Do not apply a renamed required context before it exists successfully on the candidate commit; the old context would no longer be satisfiable by the changed workflow.
+
+Release tags and the npm environment have separate versioned policies. Install the tag ruleset once, then update it by the returned ruleset ID:
+
+```bash
+gh api --method POST repos/commonspaceai/commonspace/rulesets \
+  --input .github/release-tag-ruleset.json
+gh api repos/commonspaceai/commonspace/rulesets
+gh api --method PUT repos/commonspaceai/commonspace/rulesets/<ruleset-id> \
+  --input .github/release-tag-ruleset.json
+```
+
+The active ruleset prevents `v*` release tags from being changed or deleted. Apply and verify the npm release environment separately:
+
+```bash
+gh api --method PUT repos/commonspaceai/commonspace/environments/npm-release \
+  --input .github/npm-release-environment.json
+gh api repos/commonspaceai/commonspace/environments/npm-release
+gh api repos/commonspaceai/commonspace/environments/npm-release/deployment-branch-policies
+```
+
+The environment requires owner approval. Self-review remains enabled while there is only one maintainer; add an independent reviewer and set `prevent_self_review` when the maintainer group grows. Its deployment-policy response must contain exactly the `main` branch and `v*` tag policies. If either is absent, create only the missing policy and fetch the list again:
+
+```bash
+gh api --method POST repos/commonspaceai/commonspace/environments/npm-release/deployment-branch-policies \
+  --input .github/npm-release-main-policy.json
+gh api --method POST repos/commonspaceai/commonspace/environments/npm-release/deployment-branch-policies \
+  --input .github/npm-release-tag-policy.json
+gh api repos/commonspaceai/commonspace/environments/npm-release/deployment-branch-policies
+```
+
+Remove any unexpected policy by its returned ID with `gh api --method DELETE repos/commonspaceai/commonspace/environments/npm-release/deployment-branch-policies/<policy-id>`, then verify the list again. The environment permits releases only from those two configured refs.
+
+GitHub does not expose the environment's administrator-bypass switch through its REST or GraphQL update APIs. In **Settings → Environments → npm-release**, turn off **Allow administrators to bypass configured protection rules**, then verify that the environment API response contains `"can_admins_bypass": false`. Treat that manual control as part of release setup; the checked-in JSON intentionally contains only fields GitHub's API accepts.
 
 Check the issue and pull request templates and reporting routes. The repository description, topics, and links should describe Commonspace accurately. Do not require checks that the repository does not run.
 
