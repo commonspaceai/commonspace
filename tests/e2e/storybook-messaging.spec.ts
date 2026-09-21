@@ -84,7 +84,7 @@ test("compact settings preserve drafts across category and viewport changes", as
 	await expect(inferenceAgent).toBeChecked();
 });
 
-test("shows completed routing receipts and one routing popover", async ({
+test("keeps completed routing outcomes inside the popover", async ({
 	page,
 }) => {
 	await openStory(page, {
@@ -96,9 +96,11 @@ test("shows completed routing receipts and one routing popover", async ({
 		"Routing details: Routed to Review Bot · AI selected · Completed",
 	);
 	await expect(receipt).toBeVisible();
+	await expect(receipt).toHaveText("AI to Review Bot");
 	await expect(receipt).toBeFocused();
 	await receipt.click();
 	const details = page.getByRole("dialog", { name: "Routing details" });
+	await expect(details).toContainText("AI selected · Completed");
 	await expect(
 		details.getByText("Design review matches Hermes."),
 	).toBeVisible();

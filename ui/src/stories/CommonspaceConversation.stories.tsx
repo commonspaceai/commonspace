@@ -168,6 +168,7 @@ export const ChannelConversation: Story = {
 			"Routing details: Routed to Review Bot · AI selected · Completed",
 		);
 		await expect(routingTrigger).toBeVisible();
+		await expect(routingTrigger).toHaveTextContent("AI to Review Bot");
 		await userEvent.click(routingTrigger);
 		const details = within(
 			await within(document.body).findByRole("dialog", {
@@ -178,6 +179,8 @@ export const ChannelConversation: Story = {
 			details.getByText(/Design review matches Hermes\./u),
 		).toBeVisible();
 		await expect(details.getByText(/Original message/u)).toBeVisible();
+		await expect(details.getByText("AI selected")).toBeVisible();
+		await expect(details.getByText(/· Completed/u)).toBeVisible();
 		await userEvent.keyboard("{Escape}");
 		await waitFor(async () => {
 			await expect(routingTrigger).toHaveFocus();

@@ -206,7 +206,6 @@ export const FlowVerification: Story = {
 		await userEvent.type(reply, "@build-smith @@platform");
 		await expect(reply).toHaveValue("@build-smith @@platform");
 		await userEvent.clear(reply);
-		await expect(thread.getByText("Completed")).toBeVisible();
 		await userEvent.click(
 			thread.getByRole("button", {
 				name: /Routing details: Routed to Review Bot/u,

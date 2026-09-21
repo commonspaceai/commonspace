@@ -254,7 +254,9 @@ function deriveRoutingReceipt(
 		summary:
 			routing.status === "pending" || agents.length === 0
 				? receipt
-				: `${compactRoutingSource(source)} to ${destination}`,
+				: outcome === RoutingOutcome.Completed
+					? `${compactRoutingSource(source)} to ${destination}`
+					: `${outcome} · ${destination}`,
 	};
 }
 
@@ -270,7 +272,7 @@ interface RoutingReceiptProps {
 
 function RoutingSummary({ view }: { view: RoutingReceiptView }) {
 	return (
-		<div className="ml-auto flex min-w-0 max-w-xs items-center gap-2 text-[11px] text-muted-foreground">
+		<div className="ml-auto flex min-w-0 max-w-xs items-center text-[11px] text-muted-foreground">
 			<PopoverTrigger
 				aria-label={`Routing details: ${view.receipt}`}
 				className={cn(
@@ -287,11 +289,8 @@ function RoutingSummary({ view }: { view: RoutingReceiptView }) {
 			</PopoverTrigger>
 			{view.agents.length > 0 && view.routingStatus !== "pending" ? (
 				<span
+					className="sr-only"
 					role={view.outcome === RoutingOutcome.Failed ? "alert" : "status"}
-					className={cn(
-						"shrink-0",
-						view.outcome === RoutingOutcome.Failed && "text-destructive",
-					)}
 				>
 					{view.outcome}
 				</span>
