@@ -98,8 +98,7 @@ const stories: Array<{
 		name: "commonspace-search-query-and-keyboard-selection",
 		ready: async (page) => {
 			const input = page.getByRole("searchbox", { name: "Search Commonspace" });
-			await input.fill("verification");
-			await input.press("ArrowDown");
+			await expect(input).toHaveValue("verification");
 			await expect(
 				page.getByRole("option", {
 					name: /Open Message: Review the visual baseline/iu,

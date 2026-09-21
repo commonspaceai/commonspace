@@ -7,14 +7,14 @@ const meta = {
 	component: CollectionActionMenu,
 	parameters: { layout: "centered" },
 	decorators: [
-		(Story) => (
+		(Story, { args }) => (
 			<div className="group flex w-[420px] items-center justify-between rounded-sm border bg-sidebar p-2 text-sidebar-foreground">
 				<div className="grid min-w-0 gap-0.5">
 					<strong className="truncate text-[13px] font-medium">
-						verification
+						{args.label}
 					</strong>
 					<span className="font-mono text-xs text-muted-foreground">
-						2 agents
+						{args.meta}
 					</span>
 				</div>
 				<Story />

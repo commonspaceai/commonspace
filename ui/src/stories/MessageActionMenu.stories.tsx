@@ -7,12 +7,14 @@ const meta = {
 	component: MessageActionMenu,
 	parameters: { layout: "centered" },
 	decorators: [
-		(Story) => (
+		(Story, { args }) => (
 			<div className="group/message flex w-[560px] items-center justify-between gap-4 rounded-md border bg-background p-3 text-foreground">
 				<div className="min-w-0">
-					<strong className="block text-[13px] font-medium">You</strong>
+					<strong className="block text-[13px] font-medium">
+						{args.authorName}
+					</strong>
 					<p className="truncate text-xs text-muted-foreground">
-						Please review the current visual baseline.
+						{args.summary || "Attachment"}
 					</p>
 				</div>
 				<Story />
