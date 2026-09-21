@@ -324,6 +324,31 @@ function collectionIds(
 	);
 }
 
+type CollectionDropPosition = "before" | "after";
+
+interface CollectionDragState {
+	kind: SidebarCollectionKind;
+	sourceId: string;
+	target: {
+		id: string;
+		position: CollectionDropPosition;
+	} | null;
+}
+
+function collectionDropPositionFor(
+	order: readonly string[],
+	dragState: CollectionDragState | null,
+	kind: SidebarCollectionKind,
+	targetId: string,
+): CollectionDropPosition | null {
+	if (dragState === null || dragState.kind !== kind) return null;
+	const sourceIndex = order.indexOf(dragState.sourceId);
+	const targetIndex = order.indexOf(targetId);
+	if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex)
+		return null;
+	return sourceIndex < targetIndex ? "after" : "before";
+}
+
 export function CommonspaceSidebar({
 	wide,
 	expandSidebar,
@@ -365,10 +390,8 @@ export function CommonspaceSidebar({
 	const [pathDraft, setPathDraft] = useState("");
 	const [agentIds, setAgentIds] = useState<string[]>([]);
 	const [channelAgentQuery, setChannelAgentQuery] = useState("");
-	const [draggedCollectionItem, setDraggedCollectionItem] = useState<{
-		kind: SidebarCollectionKind;
-		id: string;
-	} | null>(null);
+	const [collectionDragState, setCollectionDragState] =
+		useState<CollectionDragState | null>(null);
 	const [channelAgentFilter, setChannelAgentFilter] = useState<
 		"all" | "selected"
 	>("all");
@@ -796,38 +819,95 @@ export function CommonspaceSidebar({
 			},
 			onDragStart: (event: ReactDragEvent<HTMLButtonElement>) => {
 				if (!custom) return;
-				setDraggedCollectionItem({ kind, id: itemId });
+				setCollectionDragState({
+					kind,
+					sourceId: itemId,
+					target: null,
+				});
 				event.dataTransfer.effectAllowed = "move";
 				event.dataTransfer.setData("text/plain", itemId);
 			},
-			onDragOver: (event: ReactDragEvent<HTMLButtonElement>) => {
-				if (
-					draggedCollectionItem?.kind === kind &&
-					section.includes(draggedCollectionItem.id)
-				)
-					event.preventDefault();
-			},
-			onDrop: (event: ReactDragEvent<HTMLButtonElement>) => {
-				event.preventDefault();
-				if (
-					draggedCollectionItem?.kind !== kind ||
-					!section.includes(draggedCollectionItem.id)
-				)
-					return;
-				const bounds = event.currentTarget.getBoundingClientRect();
-				moveCollectionItem(
-					kind,
-					draggedCollectionItem.id,
-					itemId,
-					event.clientY >= bounds.top + bounds.height / 2,
-				);
-				setDraggedCollectionItem(null);
-			},
 			onDragEnd: () => {
-				setDraggedCollectionItem(null);
+				setCollectionDragState(null);
 			},
 		};
 	};
+	const sortableCollectionDropTargetProps = (
+		kind: SidebarCollectionKind,
+		itemId: string,
+	) => {
+		const collection = reorderableCollection(kind);
+		const order = [...collection.pinned, ...collection.unpinned];
+		return {
+			onDragOver: (event: ReactDragEvent<HTMLDivElement>) => {
+				const dragState = collectionDragState;
+				const position = collectionDropPositionFor(
+					order,
+					dragState,
+					kind,
+					itemId,
+				);
+				if (dragState === null || position === null) {
+					event.dataTransfer.dropEffect = "none";
+					if (dragState !== null && dragState.target !== null)
+						setCollectionDragState({ ...dragState, target: null });
+					return;
+				}
+				event.preventDefault();
+				event.dataTransfer.dropEffect = "move";
+				if (
+					dragState.target?.id !== itemId ||
+					dragState.target.position !== position
+				)
+					setCollectionDragState({
+						...dragState,
+						target: { id: itemId, position },
+					});
+			},
+			onDrop: (event: ReactDragEvent<HTMLDivElement>) => {
+				const dragState = collectionDragState;
+				const position = collectionDropPositionFor(
+					order,
+					dragState,
+					kind,
+					itemId,
+				);
+				setCollectionDragState(null);
+				if (dragState === null || position === null) return;
+				event.preventDefault();
+				if (
+					collection.pinned.includes(dragState.sourceId) !==
+					collection.pinned.includes(itemId)
+				)
+					toggleCollectionPinned(kind, dragState.sourceId);
+				moveCollectionItem(
+					kind,
+					dragState.sourceId,
+					itemId,
+					position === "after",
+				);
+			},
+		};
+	};
+	const collectionDropPosition = (
+		kind: SidebarCollectionKind,
+		itemId: string,
+	): CollectionDropPosition | null =>
+		collectionDragState !== null &&
+		collectionDragState.kind === kind &&
+		collectionDragState.target?.id === itemId
+			? collectionDragState.target.position
+			: null;
+	const collectionDropIndicatorClassName = (
+		position: CollectionDropPosition | null,
+	) =>
+		cn(
+			"relative",
+			position !== null &&
+				"after:pointer-events-none after:absolute after:right-1 after:left-1 after:z-20 after:h-0.5 after:rounded-full after:bg-sidebar-primary after:content-['']",
+			position === "before" && "after:top-0 after:-translate-y-1/2",
+			position === "after" && "after:bottom-0 after:translate-y-1/2",
+		);
 
 	if (!wide) {
 		return (
@@ -2040,14 +2120,23 @@ export function CommonspaceSidebar({
 							channel.id,
 						);
 						const channelPins = channelPinsById.get(channel.id) ?? [];
+						const dropPosition = collectionDropPosition("channel", channel.id);
 						return (
 							<div
 								key={channel.id}
+								{...sortableCollectionDropTargetProps("channel", channel.id)}
+								data-sidebar-collection-item={collectionKey(
+									"channel",
+									channel.id,
+								)}
+								data-drop-position={dropPosition ?? undefined}
 								className={cn(
 									"grid gap-0.5",
-									draggedCollectionItem?.kind === "channel" &&
-										draggedCollectionItem.id === channel.id &&
-										"opacity-50",
+									collectionDropIndicatorClassName(dropPosition),
+									collectionDragState !== null &&
+										collectionDragState.kind === "channel" &&
+										collectionDragState.sourceId === channel.id &&
+										"rounded-md bg-sidebar-accent/70",
 								)}
 							>
 								<NavigationItemGroup>
@@ -2645,14 +2734,20 @@ export function CommonspaceSidebar({
 						const effectiveStatus = activeAgentIds.has(agent.id)
 							? "running"
 							: agent.status;
+						const dropPosition = collectionDropPosition("agent", agent.id);
 						return (
 							<div
 								key={agent.id}
+								{...sortableCollectionDropTargetProps("agent", agent.id)}
+								data-sidebar-collection-item={collectionKey("agent", agent.id)}
+								data-drop-position={dropPosition ?? undefined}
 								className={cn(
 									"grid gap-0.5",
-									draggedCollectionItem?.kind === "agent" &&
-										draggedCollectionItem.id === agent.id &&
-										"opacity-50",
+									collectionDropIndicatorClassName(dropPosition),
+									collectionDragState !== null &&
+										collectionDragState.kind === "agent" &&
+										collectionDragState.sourceId === agent.id &&
+										"rounded-md bg-sidebar-accent/70",
 								)}
 							>
 								<NavigationItemGroup>
@@ -2897,14 +2992,23 @@ export function CommonspaceSidebar({
 							project.paths.length === 1
 								? "1 folder · working directory"
 								: `${String(project.paths.length)} folders · working + references`;
+						const dropPosition = collectionDropPosition("project", project.id);
 						return (
 							<div
 								key={project.id}
+								{...sortableCollectionDropTargetProps("project", project.id)}
+								data-sidebar-collection-item={collectionKey(
+									"project",
+									project.id,
+								)}
+								data-drop-position={dropPosition ?? undefined}
 								className={cn(
 									"grid gap-0.5",
-									draggedCollectionItem?.kind === "project" &&
-										draggedCollectionItem.id === project.id &&
-										"opacity-50",
+									collectionDropIndicatorClassName(dropPosition),
+									collectionDragState !== null &&
+										collectionDragState.kind === "project" &&
+										collectionDragState.sourceId === project.id &&
+										"rounded-md bg-sidebar-accent/70",
 								)}
 							>
 								<NavigationItemGroup>

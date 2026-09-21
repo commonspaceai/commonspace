@@ -81,15 +81,15 @@ export function SidebarSortControl({
 						</DropdownMenuRadioGroup>
 					</DropdownMenuGroup>
 					<p className="px-2 pt-2 pb-1 text-[11px] leading-relaxed text-muted-foreground">
-						Custom: drag or <span className="whitespace-nowrap">Alt+↑/↓</span>{" "}
-						within a group.
+						Custom: drag to reorder.{" "}
+						<span className="whitespace-nowrap">Alt+↑/↓</span> moves within a
+						group.
 					</p>
 				</DropdownMenuContent>
 			</DropdownMenu>
 			{mode === "custom" && (
 				<p id={`${kind}-custom-order-help`} className="sr-only">
-					Move within each group by dragging or using Alt with the up and down
-					arrow keys.
+					Drag to reorder, or use Alt with the up and down arrow keys.
 				</p>
 			)}
 		</>

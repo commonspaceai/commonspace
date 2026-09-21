@@ -3,7 +3,14 @@ import {
 	RoutingConfigurationIssue,
 } from "@commonspace/shared";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import {
+	expect,
+	fireEvent,
+	fn,
+	userEvent,
+	waitFor,
+	within,
+} from "storybook/test";
 import { CommonspaceSidebar } from "../CommonspaceSidebar";
 import { collectionKey, sidebarPreferencesStore } from "../sidebar-preferences";
 import {
@@ -478,6 +485,71 @@ export const ProjectsAndAgentsInCustomOrder: Story = {
 			"Message agent Alpha Agent",
 			"Message agent Build Smith",
 		]);
+	},
+};
+
+export const PinnedAgentDragsDown: Story = {
+	args: {
+		...meta.args,
+		store: createStoryStore(allCollectionSortingBootstrap),
+	},
+	play: async ({ canvas, canvasElement }) => {
+		resetStoryPins();
+		const reviewBotKey = collectionKey("agent", hermesAgent.id);
+		await expect(sidebarPreferencesStore.getSnapshot().pinnedKeys).toContain(
+			reviewBotKey,
+		);
+		sidebarPreferencesStore.setCustomOrder("agent", [
+			hermesAgent.id,
+			codexAgent.id,
+			alphabeticalAgent.id,
+		]);
+		sidebarPreferencesStore.setSortMode("agent", "custom");
+
+		const reviewBot = canvas.getByRole("button", {
+			name: "Message agent Review Bot",
+		});
+		const alphaAgent = canvas.getByRole("button", {
+			name: "Message agent Alpha Agent",
+		});
+		const reviewBotRow = reviewBot.closest<HTMLElement>(
+			`[data-sidebar-collection-item="${reviewBotKey}"]`,
+		);
+		const alphaAgentRow = alphaAgent.closest<HTMLElement>(
+			`[data-sidebar-collection-item="${collectionKey("agent", alphabeticalAgent.id)}"]`,
+		);
+		if (reviewBotRow === null || alphaAgentRow === null)
+			throw new Error("Expected agent collection rows.");
+		await waitFor(() => expect(reviewBot).toHaveAttribute("draggable", "true"));
+		const dataTransfer = new DataTransfer();
+		await fireEvent.dragStart(reviewBot, { dataTransfer });
+		await waitFor(() =>
+			expect(reviewBotRow).toHaveClass("bg-sidebar-accent/70"),
+		);
+		await fireEvent.dragOver(alphaAgent, { dataTransfer });
+		await waitFor(() =>
+			expect(alphaAgentRow).toHaveAttribute("data-drop-position", "after"),
+		);
+		await expect(getComputedStyle(alphaAgentRow, "::after").height).toBe("2px");
+
+		await fireEvent.drop(alphaAgentRow, { dataTransfer });
+		await waitFor(() =>
+			expect(
+				canvas
+					.getAllByRole("button", { name: /^Message agent /u })
+					.map((button) => button.getAttribute("aria-label")),
+			).toEqual([
+				"Message agent Build Smith",
+				"Message agent Alpha Agent",
+				"Message agent Review Bot",
+			]),
+		);
+		await expect(
+			sidebarPreferencesStore.getSnapshot().pinnedKeys,
+		).not.toContain(reviewBotKey);
+		await expect(
+			canvasElement.querySelector("[data-drop-position]"),
+		).toBeNull();
 	},
 };
 
