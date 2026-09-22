@@ -36,9 +36,32 @@ import type {
 import { conversationKey, isAgentAdapterKind } from "@commonspace/shared";
 import type { WorkspaceArchiveSource } from "./workspace-import.ts";
 
+export const enum AgentDiscoveryStatus {
+	Pending = "pending",
+	Success = "success",
+	Failed = "failed",
+}
+
+type AgentDiscoveryState =
+	| {
+			status: AgentDiscoveryStatus.Pending;
+			adapter: AgentAdapterKind;
+	  }
+	| {
+			status: AgentDiscoveryStatus.Success;
+			adapter: AgentAdapterKind;
+			agents: CommonspaceBootstrap["discoveredAgents"];
+	  }
+	| {
+			status: AgentDiscoveryStatus.Failed;
+			adapter: AgentAdapterKind;
+			error: string;
+	  };
+
 export interface CommonspaceClientSnapshot {
 	bootstrap: CommonspaceBootstrap | null;
 	loading: boolean;
+	discovery: AgentDiscoveryState | null;
 	pendingSubmissions: CommonspacePendingSubmission[];
 	sending: boolean;
 	error: string | null;
@@ -415,6 +438,7 @@ export class CommonspaceClientStore {
 	private snapshot: CommonspaceClientSnapshot = {
 		bootstrap: null,
 		loading: false,
+		discovery: null,
 		pendingSubmissions: [],
 		sending: false,
 		error: null,
@@ -626,7 +650,10 @@ export class CommonspaceClientStore {
 
 	async discoverAgents(adapter: AgentAdapterKind): Promise<void> {
 		const request = ++this.discoveryRequest;
-		this.set({ ...this.snapshot, loading: true, error: null });
+		this.set({
+			...this.snapshot,
+			discovery: { status: AgentDiscoveryStatus.Pending, adapter },
+		});
 		try {
 			const result = await requestJson<CommonspaceBootstrap>(
 				"/api/discover-agents",
@@ -640,15 +667,21 @@ export class CommonspaceClientStore {
 			this.set({
 				...this.snapshot,
 				bootstrap: merged,
-				loading: false,
-				error: null,
+				discovery: {
+					status: AgentDiscoveryStatus.Success,
+					adapter,
+					agents: result.discoveredAgents,
+				},
 			});
 		} catch (error) {
 			if (request !== this.discoveryRequest) return;
 			this.set({
 				...this.snapshot,
-				loading: false,
-				error: error instanceof Error ? error.message : String(error),
+				discovery: {
+					status: AgentDiscoveryStatus.Failed,
+					adapter,
+					error: error instanceof Error ? error.message : String(error),
+				},
 			});
 		}
 	}

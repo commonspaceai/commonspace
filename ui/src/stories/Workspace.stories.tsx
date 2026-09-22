@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { HttpResponse, http } from "msw";
 import { expect, userEvent, waitFor, within } from "storybook/test";
+import { storyBootstrap } from "./story-fixtures";
 import { WorkspaceStory } from "./WorkspaceStory";
 import { createWorkspaceMockApi } from "./workspace-mock-api";
 
@@ -38,6 +40,155 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Conversation: Story = {};
+
+export const AgentDiscoveryFailure = {
+	beforeEach: ({ msw }) => {
+		msw.use(
+			http.get("/api/bootstrap", () =>
+				HttpResponse.json({ ...storyBootstrap, discoveredAgents: [] }),
+			),
+			http.post(
+				"/api/discover-agents",
+				() =>
+					HttpResponse.json(
+						{ error: "Agent discovery temporarily unavailable" },
+						{ status: 503 },
+					),
+				{ once: true },
+			),
+		);
+	},
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		await userEvent.click(
+			await page.findByRole("button", { name: "Add agent" }),
+		);
+		const dialog = within(
+			await page.findByRole("dialog", { name: "Add an agent" }),
+		);
+		await userEvent.click(
+			dialog.getByRole("button", { name: "Choose Hermes harness" }),
+		);
+		await expect(await dialog.findByRole("alert")).toHaveTextContent(
+			"Agent discovery temporarily unavailable",
+		);
+		await expect(
+			dialog.queryByText("Hermes is not available or is already added."),
+		).not.toBeInTheDocument();
+		await expect(
+			dialog.getByRole("button", { name: "Retry Hermes discovery" }),
+		).toBeEnabled();
+	},
+} satisfies Story;
+
+export const AgentDiscoveryRetry: Story = {
+	beforeEach: AgentDiscoveryFailure.beforeEach,
+	play: async (context) => {
+		await AgentDiscoveryFailure.play(context);
+		const page = within(context.canvasElement.ownerDocument.body);
+		const dialog = within(page.getByRole("dialog", { name: "Add an agent" }));
+		await userEvent.click(
+			dialog.getByRole("button", { name: "Retry Hermes discovery" }),
+		);
+		await expect(
+			await dialog.findByRole("button", {
+				name: "Add discovered agent Hermes Reviewer",
+			}),
+		).toBeVisible();
+		await expect(dialog.queryByRole("alert")).not.toBeInTheDocument();
+	},
+};
+
+export const AgentDiscoveryEmpty: Story = {
+	beforeEach: ({ msw }) => {
+		msw.use(
+			http.post("/api/discover-agents", () =>
+				HttpResponse.json({ ...storyBootstrap, discoveredAgents: [] }),
+			),
+		);
+	},
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		await userEvent.click(
+			await page.findByRole("button", { name: "Add agent" }),
+		);
+		const dialog = within(
+			await page.findByRole("dialog", { name: "Add an agent" }),
+		);
+		await userEvent.click(
+			dialog.getByRole("button", { name: "Choose Hermes harness" }),
+		);
+		await expect(
+			await dialog.findByText("Hermes is not available or is already added."),
+		).toBeVisible();
+		await expect(dialog.queryByRole("alert")).not.toBeInTheDocument();
+		await expect(
+			dialog.queryByRole("button", { name: "Retry Hermes discovery" }),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const AgentProfileDiscoveryFailure = {
+	beforeEach: ({ msw }) => {
+		msw.use(
+			http.post(
+				"/api/discover-agents",
+				() =>
+					HttpResponse.json(
+						{ error: "Native profile refresh temporarily unavailable" },
+						{ status: 503 },
+					),
+				{ once: true },
+			),
+			http.post("/api/discover-agents", () =>
+				HttpResponse.json({
+					...storyBootstrap,
+					agents: storyBootstrap.agents.map((agent) =>
+						agent.id === "agent-hermes"
+							? { ...agent, model: "refreshed-native-model" }
+							: agent,
+					),
+				}),
+			),
+		);
+	},
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		await userEvent.click(
+			await page.findByRole("button", { name: "Message agent Agentops" }),
+		);
+		await userEvent.click(
+			await page.findByRole("button", { name: "Open agent profile" }),
+		);
+		await expect(await page.findByRole("alert")).toHaveTextContent(
+			"Native profile refresh temporarily unavailable",
+		);
+		const name = page.getByLabelText("Workspace name");
+		await userEvent.clear(name);
+		await userEvent.type(name, "My profile draft");
+	},
+} satisfies Story;
+
+export const AgentProfileDiscoveryRetry: Story = {
+	beforeEach: AgentProfileDiscoveryFailure.beforeEach,
+	play: async (context) => {
+		await AgentProfileDiscoveryFailure.play(context);
+		const page = within(context.canvasElement.ownerDocument.body);
+		await userEvent.click(
+			page.getByRole("button", { name: "Retry Hermes discovery" }),
+		);
+		await waitFor(() =>
+			expect(page.getByLabelText("Native model")).toHaveValue(
+				"refreshed-native-model",
+			),
+		);
+		await expect(page.queryByRole("alert")).not.toBeInTheDocument();
+		await expect(page.getByLabelText("Workspace name")).toHaveValue(
+			"My profile draft",
+		);
+	},
+};
+
 export const SearchWithProvenance: Story = {
 	play: async ({ canvasElement }) => {
 		const page = within(canvasElement.ownerDocument.body);

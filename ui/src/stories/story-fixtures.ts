@@ -29,6 +29,7 @@ import {
 import workflowPreviewUrl from "../assets/agent-workflow-preview.mp4";
 import commonspaceLogoUrl from "../assets/commonspace-logo.png";
 import {
+	AgentDiscoveryStatus,
 	type CommonspaceClientSnapshot,
 	CommonspaceClientStore,
 	type CommonspaceStore,
@@ -725,6 +726,16 @@ function createStoryStoreHandlers({
 }): StoryStoreHandlers {
 	const handlers: Partial<CommonspaceStore> = {
 		getSnapshot,
+		discoverAgents: async (adapter) => {
+			updateSnapshot({
+				...getSnapshot(),
+				discovery: {
+					status: AgentDiscoveryStatus.Success,
+					adapter,
+					agents: getSnapshot().bootstrap?.discoveredAgents ?? [],
+				},
+			});
+		},
 		dismissError: () => {
 			updateSnapshot({ ...getSnapshot(), error: null });
 		},
@@ -803,6 +814,7 @@ export function createStoryStore(
 	let snapshot: CommonspaceClientSnapshot = {
 		bootstrap,
 		loading: options.loading ?? false,
+		discovery: null,
 		pendingSubmissions: options.pendingSubmissions ?? [],
 		sending: false,
 		error: options.error ?? null,

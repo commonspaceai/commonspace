@@ -73,7 +73,10 @@ import {
 	sortChannelSections,
 	sortSidebarSections,
 } from "./channel-sorting.ts";
-import type { CommonspaceStore } from "./commonspace-store.ts";
+import {
+	AgentDiscoveryStatus,
+	type CommonspaceStore,
+} from "./commonspace-store.ts";
 import { AgentAvatar } from "./design-system/AgentAvatar.tsx";
 import { WorkspaceErrorNotice } from "./design-system/WorkspaceErrorNotice";
 import { folderName } from "./project-files-api.ts";
@@ -721,7 +724,10 @@ export function CommonspaceSidebar({
 	const activeAgentIds = new Set(
 		(bootstrap?.liveActivities ?? []).map((activity) => activity.agentId),
 	);
-	const discoveredAgents = bootstrap?.discoveredAgents ?? [];
+	const discovery =
+		snapshot.discovery?.adapter === agentAdapter ? snapshot.discovery : null;
+	const discoveredAgents =
+		discovery?.status === AgentDiscoveryStatus.Success ? discovery.agents : [];
 	const configuredAgentIds = new Set(agents.map((agent) => agent.id));
 	const availableDiscoveredAgents = discoveredAgents.filter(
 		(agent) =>
@@ -2635,12 +2641,25 @@ export function CommonspaceSidebar({
 							{agentAdapter !== null && (
 								<div className="grid gap-2">
 									<strong>{runtimeLabel(agentAdapter)} harness</strong>
-									{snapshot.loading && (
-										<span>
+									{discovery?.status === AgentDiscoveryStatus.Pending ? (
+										<span role="status">
 											Checking for installed {runtimeLabel(agentAdapter)}…
 										</span>
-									)}
-									{!snapshot.loading &&
+									) : null}
+									{discovery?.status === AgentDiscoveryStatus.Failed ? (
+										<div className="grid justify-items-start gap-2">
+											<p role="alert">{discovery.error}</p>
+											<button
+												type="button"
+												className="min-h-11 rounded-sm border px-4"
+												aria-label={`Retry ${runtimeLabel(agentAdapter)} discovery`}
+												onClick={() => void store.discoverAgents(agentAdapter)}
+											>
+												Retry discovery
+											</button>
+										</div>
+									) : null}
+									{discovery?.status === AgentDiscoveryStatus.Success &&
 										availableDiscoveredAgents.length === 0 && (
 											<span>
 												{runtimeLabel(agentAdapter)} is not available or is

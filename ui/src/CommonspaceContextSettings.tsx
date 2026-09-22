@@ -23,13 +23,17 @@ import {
 	useMemo,
 	useRef,
 	useState,
+	useSyncExternalStore,
 } from "react";
 import { Button } from "@/components/ui/button";
 import { AgentAvatar } from "@/design-system/AgentAvatar";
 import { ConfirmActionDialog } from "@/design-system/ConfirmActionDialog";
 import { cn } from "@/lib/utils";
 import { ChannelContextBrief } from "./ChannelContextBrief.tsx";
-import type { CommonspaceStore } from "./commonspace-store.ts";
+import {
+	AgentDiscoveryStatus,
+	type CommonspaceStore,
+} from "./commonspace-store.ts";
 
 interface SettingsPaneProps {
 	bootstrap: CommonspaceBootstrap;
@@ -891,6 +895,10 @@ function AgentSettingsEditor({
 	onClose,
 	agent,
 }: AgentSettingsEditorProps) {
+	const { discovery } = useSyncExternalStore(
+		store.subscribe,
+		store.getSnapshot,
+	);
 	const [displayName, setDisplayName, acceptDisplayName] =
 		useSettingsDraftValue(agent.displayName);
 	const [avatarEmoji, setAvatarEmoji, acceptAvatarEmoji] =
@@ -1115,6 +1123,21 @@ function AgentSettingsEditor({
 						Native model information comes from discovery; it does not verify
 						this session or model access.
 					</p>
+					{discovery?.adapter === agentAdapter &&
+					discovery.status === AgentDiscoveryStatus.Failed ? (
+						<div className="mt-3 grid justify-items-start gap-2">
+							<p role="alert" className="text-sm">
+								{discovery.error}
+							</p>
+							<Button
+								variant="outline"
+								aria-label={`Retry ${runtimeLabel(agent)} discovery`}
+								onClick={() => void store.discoverAgents(agentAdapter)}
+							>
+								Retry discovery
+							</Button>
+						</div>
+					) : null}
 				</section>
 
 				<section className="border-b p-5">

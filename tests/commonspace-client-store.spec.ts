@@ -8,7 +8,10 @@ import {
 } from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommonspaceClientStore } from "../ui/src/commonspace-store.ts";
-import { storyBootstrap } from "../ui/src/stories/story-fixtures.ts";
+import {
+	discoveryStoryBootstrap,
+	storyBootstrap,
+} from "../ui/src/stories/story-fixtures.ts";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -57,6 +60,143 @@ function threadAdmission(): SendMessageResponse {
 
 afterEach(() => {
 	vi.unstubAllGlobals();
+});
+
+describe("CommonspaceClientStore agent discovery", () => {
+	it("preserves failed discovery through workspace refresh and recovers on retry", async () => {
+		const fetch = vi
+			.fn()
+			.mockResolvedValueOnce(jsonResponse(discoveryStoryBootstrap))
+			.mockResolvedValueOnce(
+				Response.json(
+					{ error: "Agent discovery temporarily unavailable" },
+					{ status: 503 },
+				),
+			)
+			.mockResolvedValueOnce(jsonResponse(discoveryStoryBootstrap))
+			.mockResolvedValueOnce(
+				Response.json(
+					{ error: "Workspace refresh unavailable" },
+					{ status: 503 },
+				),
+			)
+			.mockResolvedValueOnce(
+				jsonResponse({ ...discoveryStoryBootstrap, discoveredAgents: [] }),
+			);
+		vi.stubGlobal("fetch", fetch);
+		const store = new CommonspaceClientStore();
+		await store.refresh();
+		const baseline = store.getSnapshot().bootstrap;
+
+		await store.discoverAgents("hermes");
+
+		expect(store.getSnapshot().bootstrap).toEqual(baseline);
+		expect(store.getSnapshot().discovery).toEqual({
+			status: "failed",
+			adapter: "hermes",
+			error: "Agent discovery temporarily unavailable",
+		});
+		await store.refresh();
+		expect(store.getSnapshot().discovery).toEqual({
+			status: "failed",
+			adapter: "hermes",
+			error: "Agent discovery temporarily unavailable",
+		});
+		await store.refresh();
+		await store.discoverAgents("hermes");
+		expect(store.getSnapshot().discovery).toMatchObject({
+			status: "success",
+			adapter: "hermes",
+		});
+		expect(store.getSnapshot().bootstrap?.discoveredAgents).toEqual([]);
+		expect(store.getSnapshot().error).toBe("Workspace refresh unavailable");
+	});
+
+	it("keeps discovery pending when a bootstrap refresh finishes first", async () => {
+		const pending = deferred<Response>();
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValueOnce(jsonResponse(storyBootstrap))
+				.mockReturnValueOnce(pending.promise)
+				.mockResolvedValueOnce(jsonResponse(storyBootstrap)),
+		);
+		const store = new CommonspaceClientStore();
+		await store.refresh();
+		const discovery = store.discoverAgents("hermes");
+		await store.refresh();
+		expect(store.getSnapshot().discovery).toEqual({
+			status: "pending",
+			adapter: "hermes",
+		});
+		pending.resolve(jsonResponse(discoveryStoryBootstrap));
+		await discovery;
+		expect(store.getSnapshot().discovery).toMatchObject({
+			status: "success",
+			adapter: "hermes",
+		});
+		expect(store.getSnapshot().bootstrap?.discoveredAgents).toEqual(
+			discoveryStoryBootstrap.discoveredAgents,
+		);
+	});
+
+	it.each(["success", "failure"])(
+		"ignores an older discovery %s after another harness scan succeeds",
+		async (outcome) => {
+			const older = deferred<Response>();
+			const latest = { ...storyBootstrap, discoveredAgents: [] };
+			vi.stubGlobal(
+				"fetch",
+				vi
+					.fn()
+					.mockResolvedValueOnce(jsonResponse(storyBootstrap))
+					.mockReturnValueOnce(older.promise)
+					.mockResolvedValueOnce(jsonResponse(latest)),
+			);
+			const store = new CommonspaceClientStore();
+			await store.refresh();
+			const first = store.discoverAgents("hermes");
+			await store.discoverAgents("codex");
+			older.resolve(
+				outcome === "success"
+					? jsonResponse(discoveryStoryBootstrap)
+					: Response.json({ error: "Old scan failed" }, { status: 503 }),
+			);
+			await first;
+			expect(store.getSnapshot().discovery).toMatchObject({
+				status: "success",
+				adapter: "codex",
+			});
+			expect(store.getSnapshot().bootstrap?.discoveredAgents).toEqual([]);
+		},
+	);
+
+	it("retains successful discovery results when an older bootstrap arrives afterward", async () => {
+		const pendingRefresh = deferred<Response>();
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValueOnce(jsonResponse(storyBootstrap))
+				.mockReturnValueOnce(pendingRefresh.promise)
+				.mockResolvedValueOnce(jsonResponse(discoveryStoryBootstrap)),
+		);
+		const store = new CommonspaceClientStore();
+		await store.refresh();
+		const refreshing = store.refresh();
+		await store.discoverAgents("hermes");
+		expect(store.getSnapshot().loading).toBe(true);
+		pendingRefresh.resolve(
+			jsonResponse({ ...storyBootstrap, discoveredAgents: [] }),
+		);
+		await refreshing;
+		expect(store.getSnapshot().discovery).toEqual({
+			status: "success",
+			adapter: "hermes",
+			agents: discoveryStoryBootstrap.discoveredAgents,
+		});
+	});
 });
 
 it("refreshes changed routing without a workspace revision, including changes during refresh and reconnect", async () => {
