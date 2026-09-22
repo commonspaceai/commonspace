@@ -65,27 +65,33 @@ describe("Commonspace TanStack routes", () => {
 		await expect(resolveRoute(path)).resolves.toEqual(route);
 	});
 
-	it("navigates with typed params and search state", async () => {
+	it("navigates canonical message links and clears focus at the next destination", async () => {
 		const router = createCommonspaceRouter({
 			history: createMemoryHistory({ initialEntries: ["/"] }),
 		});
 		await router.load();
 
-		await router.navigate({
-			to: "/channels/$channelId/threads/$threadId",
-			params: { channelId: "channel one", threadId: "thread one" },
-			search: { message: "message one" },
-		});
-
-		expect(router.state.location.href).toBe(
-			"/channels/channel%20one/threads/thread%20one?message=message+one",
-		);
-		expect(commonspaceRouteFromMatches(router.state.matches)).toEqual({
+		const route = {
 			kind: "conversation",
 			conversation: { kind: "channel", id: "channel one" },
 			threadId: "thread one",
 			messageId: "message one",
+		} as const;
+		await router.navigate({ href: commonspaceRouteHref(router, route) });
+
+		expect(router.state.location.href).toBe(
+			"/channels/channel%20one/threads/thread%20one?message=message+one",
+		);
+		expect(commonspaceRouteFromMatches(router.state.matches)).toEqual(route);
+
+		const destination = { kind: "inbox", view: "attention" } as const;
+		await router.navigate({
+			href: commonspaceRouteHref(router, destination),
 		});
+		expect(router.state.location.href).toBe("/");
+		expect(commonspaceRouteFromMatches(router.state.matches)).toEqual(
+			destination,
+		);
 	});
 
 	it("builds a canonical destination for a trailing-slash directory", async () => {

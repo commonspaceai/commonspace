@@ -26,11 +26,9 @@ import {
 	type Dispatch,
 	type FormEvent,
 	Fragment,
-	lazy,
 	type KeyboardEvent as ReactKeyboardEvent,
 	type ReactNode,
 	type SetStateAction,
-	Suspense,
 	useCallback,
 	useEffect,
 	useId,
@@ -75,6 +73,7 @@ import {
 } from "./design-system/useResizablePanel.ts";
 import { useThreadOverlay } from "./design-system/useThreadOverlay";
 import { LiveAgentActivity } from "./LiveAgentActivity.tsx";
+import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { RunAttribution } from "./RunAttribution.tsx";
 import {
 	resolveSlashCommand,
@@ -88,21 +87,6 @@ import {
 } from "./tagging.ts";
 
 type ChannelThreadView = "running" | "followed" | "all";
-
-const LazyMessageMarkdown = lazy(async () => {
-	const module = await import("./MessageMarkdown.tsx");
-	return { default: module.MessageMarkdown };
-});
-
-const messageMarkdownFallback = (
-	<p
-		className="text-xs text-muted-foreground"
-		role="status"
-		aria-label="Formatting agent message"
-	>
-		Formatting message…
-	</p>
-);
 
 function restoreText(current: string, restored: string): string {
 	if (restored === "" || current === restored) return current;
@@ -819,9 +803,7 @@ function MessageRow({
 				) : (
 					message.text !== "" &&
 					(message.authorType === "agent" ? (
-						<Suspense fallback={messageMarkdownFallback}>
-							<LazyMessageMarkdown text={message.text} />
-						</Suspense>
+						<MessageMarkdown text={message.text} />
 					) : (
 						<p
 							className={cn(

@@ -3,7 +3,7 @@ import type {
 	CommonspaceState,
 	ConversationRef,
 } from "@commonspace/shared";
-import { useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
+import { useRouter, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CommonspaceDirectoryKind } from "../CommonspaceDirectory.tsx";
 import type {
@@ -121,7 +121,6 @@ export function useCommonspaceNavigation(
 	snapshot: CommonspaceClientSnapshot,
 ) {
 	const router = useRouter();
-	const tanstackNavigate = useNavigate();
 	const routeMatches = useRouterState({ select: (state) => state.matches });
 	const leafMatch = routeMatches.at(-1);
 	const routeMatchKey = JSON.stringify([
@@ -243,82 +242,10 @@ export function useCommonspaceNavigation(
 				}
 				pendingNavigationIntent.current = { href, intent };
 			}
-			if (route.kind === "inbox") {
-				void tanstackNavigate({
-					to: route.view === "sessions" ? "/inbox/sessions" : "/",
-					search: {},
-					replace,
-				});
-				return true;
-			}
-			if (route.kind === "threads") {
-				void tanstackNavigate({ to: "/threads", search: {}, replace });
-				return true;
-			}
-			if (route.kind === "directory") {
-				const to =
-					route.directory === "projects"
-						? "/projects"
-						: route.directory === "channels"
-							? "/channels"
-							: "/agents";
-				void tanstackNavigate({ to, search: {}, replace });
-				return true;
-			}
-			if (route.kind === "project") {
-				if (route.file === undefined) {
-					void tanstackNavigate({
-						to: "/projects/$projectId",
-						params: { projectId: route.projectId },
-						search: {},
-						replace,
-					});
-				} else {
-					void tanstackNavigate({
-						to: "/projects/$projectId/files/$rootIndex/$filePath",
-						params: {
-							projectId: route.projectId,
-							rootIndex: String(route.file.rootIndex),
-							filePath: route.file.path,
-						},
-						search: {},
-						replace,
-					});
-				}
-				return true;
-			}
-			const search =
-				route.messageId === undefined ? {} : { message: route.messageId };
-			if (route.conversation.kind === "channel") {
-				if (route.threadId === undefined) {
-					void tanstackNavigate({
-						to: "/channels/$channelId",
-						params: { channelId: route.conversation.id },
-						search,
-						replace,
-					});
-				} else {
-					void tanstackNavigate({
-						to: "/channels/$channelId/threads/$threadId",
-						params: {
-							channelId: route.conversation.id,
-							threadId: route.threadId,
-						},
-						search,
-						replace,
-					});
-				}
-			} else {
-				void tanstackNavigate({
-					to: "/agents/$agentId",
-					params: { agentId: route.conversation.id },
-					search,
-					replace,
-				});
-			}
+			void router.navigate({ href, replace });
 			return true;
 		},
-		[applyNavigationIntent, matchedRouteHref, router, tanstackNavigate],
+		[applyNavigationIntent, matchedRouteHref, router],
 	);
 
 	useEffect(() => {

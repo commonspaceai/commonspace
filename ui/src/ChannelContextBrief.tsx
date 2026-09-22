@@ -1,11 +1,8 @@
 import type { CommonspaceChannel } from "@commonspace/shared";
-import { lazy, type ReactNode, Suspense, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { CommonspaceStore } from "./commonspace-store.ts";
-
-const MessageMarkdown = lazy(async () => ({
-	default: (await import("./MessageMarkdown.tsx")).MessageMarkdown,
-}));
+import { MessageMarkdown } from "./MessageMarkdown.tsx";
 
 interface BriefProps {
 	channel: CommonspaceChannel;
@@ -116,15 +113,7 @@ function ContextBriefViewer({
 						Current work
 					</h4>
 					{hasBrief && memory.summary !== "" ? (
-						<Suspense
-							fallback={
-								<p className="mt-2 whitespace-pre-wrap text-sm">
-									{memory.summary}
-								</p>
-							}
-						>
-							<MessageMarkdown text={memory.summary} />
-						</Suspense>
+						<MessageMarkdown text={memory.summary} />
 					) : (
 						<p className="mt-2 text-sm text-muted-foreground">
 							No work context recorded yet.
