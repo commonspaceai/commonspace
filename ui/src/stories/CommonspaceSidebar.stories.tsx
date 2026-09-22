@@ -805,6 +805,57 @@ export const CreateChannelRequest: Story = {
 	args: {
 		createRequest: { kind: "channel", token: 1 },
 	},
+	play: async ({ canvas }) => {
+		const page = within(document.body);
+		await expect(
+			page.getByRole("textbox", { name: "Channel name" }),
+		).toHaveValue("");
+		await userEvent.click(page.getByRole("button", { name: "Cancel" }));
+		await userEvent.click(canvas.getByRole("button", { name: "Add project" }));
+		await userEvent.type(
+			page.getByRole("textbox", { name: "Project name" }),
+			"Cancelled project",
+		);
+		await userEvent.type(
+			page.getByRole("textbox", { name: "Project path" }),
+			"/workspace/cancelled",
+		);
+		await userEvent.click(page.getByRole("button", { name: "Cancel" }));
+		await userEvent.click(canvas.getByRole("button", { name: "Add channel" }));
+		await expect(
+			page.getByRole("textbox", { name: "Channel name" }),
+		).toHaveValue("");
+		await userEvent.click(page.getByRole("button", { name: "Cancel" }));
+		await userEvent.click(canvas.getByRole("button", { name: "Add project" }));
+		await expect(
+			page.getByRole("textbox", { name: "Project name" }),
+		).toHaveValue("");
+		await expect(
+			page.getByRole("textbox", { name: "Project path" }),
+		).toHaveValue("");
+	},
+};
+
+export const CancelledAgentCreation: Story = {
+	play: async ({ canvas }) => {
+		const page = within(document.body);
+		await userEvent.click(canvas.getByRole("button", { name: "Add agent" }));
+		await userEvent.click(
+			page.getByRole("button", { name: "Choose Codex harness" }),
+		);
+		await userEvent.click(page.getByRole("checkbox", { name: /Full access/u }));
+		await expect(
+			page.getByRole("checkbox", { name: /Full access/u }),
+		).toBeChecked();
+		await userEvent.click(page.getByRole("button", { name: "Cancel" }));
+		await userEvent.click(canvas.getByRole("button", { name: "Add agent" }));
+		await userEvent.click(
+			page.getByRole("button", { name: "Choose Codex harness" }),
+		);
+		await expect(
+			page.getByRole("checkbox", { name: /Full access/u }),
+		).not.toBeChecked();
+	},
 };
 
 export const CompactCollections: Story = {

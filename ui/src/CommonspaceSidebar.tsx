@@ -30,6 +30,7 @@ import {
 	type FormEvent,
 	type DragEvent as ReactDragEvent,
 	type KeyboardEvent as ReactKeyboardEvent,
+	useCallback,
 	useEffect,
 	useMemo,
 	useRef,
@@ -627,25 +628,21 @@ export function CommonspaceSidebar({
 		threadsActive,
 		navigationToken,
 	]);
-	useEffect(() => {
-		if (form !== null) setSettingsOpen(false);
-	}, [form]);
-	useEffect(() => {
-		if (createRequest === null) return;
-		setForm(createRequest.kind);
+	const openCreation = useCallback((kind: CommonspaceCollectionKind) => {
+		setSettingsOpen(false);
+		setForm(kind);
 		setFormError(null);
 		setName("");
-		if (createRequest.kind === "project") setPath("");
-		if (createRequest.kind === "channel") {
-			setAgentIds([]);
-			setChannelAgentQuery("");
-			setChannelAgentFilter("all");
-		}
-		if (createRequest.kind === "agent") {
-			setAgentAdapter(null);
-			setAgentFullAccess(false);
-		}
-	}, [createRequest]);
+		setPath("");
+		setAgentIds([]);
+		setChannelAgentQuery("");
+		setChannelAgentFilter("all");
+		setAgentAdapter(null);
+		setAgentFullAccess(false);
+	}, []);
+	useEffect(() => {
+		if (createRequest !== null) openCreation(createRequest.kind);
+	}, [createRequest, openCreation]);
 	useEffect(() => {
 		const openSearch = (event: KeyboardEvent) => {
 			if (
@@ -2109,11 +2106,7 @@ export function CommonspaceSidebar({
 						sidebarPreferencesStore.setSectionCollapsed("channel", !open);
 					}}
 					onAdd={() => {
-						setForm("channel");
-						setFormError(null);
-						setAgentIds([]);
-						setChannelAgentQuery("");
-						setChannelAgentFilter("all");
+						openCreation("channel");
 					}}
 				>
 					{form === "channel" && (
@@ -2598,9 +2591,7 @@ export function CommonspaceSidebar({
 						sidebarPreferencesStore.setSectionCollapsed("agent", !open);
 					}}
 					onAdd={() => {
-						setForm("agent");
-						setName("");
-						setAgentAdapter(null);
+						openCreation("agent");
 					}}
 				>
 					{form === "agent" && (
@@ -2898,8 +2889,7 @@ export function CommonspaceSidebar({
 						sidebarPreferencesStore.setSectionCollapsed("project", !open);
 					}}
 					onAdd={() => {
-						setForm("project");
-						setFormError(null);
+						openCreation("project");
 					}}
 				>
 					{form === "project" && (
