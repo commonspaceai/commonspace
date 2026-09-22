@@ -129,14 +129,18 @@ it("prunes a removed Agent from Storybook Channels and Threads", async () => {
 	const updated = bootstrapProjectionSchema.parse(await response.json());
 
 	expect(response.ok).toBe(true);
-	expect(
-		updated.state.channels.every(
-			(channel) => !channel.agentIds.includes(agentId),
-		),
-	).toBe(true);
-	expect(
-		updated.state.threads.every((thread) => !thread.agentIds.includes(agentId)),
-	).toBe(true);
+	expect(updated.state.channels).toEqual(
+		initial.state.channels.map((channel) => ({
+			...channel,
+			agentIds: channel.agentIds.filter((candidate) => candidate !== agentId),
+		})),
+	);
+	expect(updated.state.threads).toEqual(
+		initial.state.threads.map((thread) => ({
+			...thread,
+			agentIds: thread.agentIds.filter((candidate) => candidate !== agentId),
+		})),
+	);
 });
 
 it("removes an Agent's Storybook DM and native session references", async () => {

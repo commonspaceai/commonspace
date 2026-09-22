@@ -2,6 +2,7 @@ import {
 	type AddPinRequest,
 	COMMONSPACE_EXPORT_VERSION,
 	COMMONSPACE_SEARCH_KINDS,
+	type CommonspaceAgentProfile,
 	type CommonspaceArchiveAttachment,
 	type CommonspaceBootstrap,
 	type CommonspaceMessage,
@@ -11,6 +12,7 @@ import {
 	CommonspaceRoutingProvider,
 	type CommonspaceSearchResult,
 	type CommonspaceSearchTarget,
+	type CommonspaceThread,
 	type CommonspaceThreadMemory,
 	type CommonspaceWorkspaceArchive,
 	type ConversationRef,
@@ -32,148 +34,250 @@ import {
 	storyBootstrap,
 } from "./story-fixtures";
 
+type WorkspaceScenario =
+	| "ready"
+	| "empty"
+	| "routing-failed"
+	| "offline"
+	| "queued";
+
+const now = () => new Date().toISOString();
+const id = () => crypto.randomUUID();
+
+const emptyMemory = (): CommonspaceThreadMemory => ({
+	summary: "",
+	decisions: [],
+	openQuestions: [],
+	updatedAt: null,
+	origin: "user",
+	status: "empty",
+	sourceMessageCount: 0,
+	estimatedTokens: 0,
+	compactedThroughMessageId: null,
+});
+const emptyContext = () => ({
+	memory: emptyMemory(),
+	channelSnapshot: { ...emptyMemory(), capturedAt: now() },
+});
+
+const json = <Body>(value: Body) =>
+	new HttpResponse(JSON.stringify(value), {
+		headers: { "content-type": "application/json" },
+	});
+async function trustedRequestJson<Body>(request: Request): Promise<Body> {
+	const value = await request.json();
+	// biome-ignore lint/nursery/noUnsafeTypeAssertion: This local Storybook boundary only receives requests from the typed Commonspace client.
+	return value as Body;
+}
+
+function setMembership(items: string[], value: string, included: boolean) {
+	return included
+		? [...new Set([...items, value])]
+		: items.filter((item) => item !== value);
+}
+
+function removeProjectReference(
+	message: CommonspaceMessage,
+	projectId: string,
+): CommonspaceMessage {
+	const previousProjectIds = referencedProjectIds(message);
+	const projectIds = previousProjectIds.filter(
+		(candidate) => candidate !== projectId,
+	);
+	const updated = { ...message };
+	const primaryProjectId = projectIds[0];
+	if (primaryProjectId === undefined) {
+		delete updated.projectIds;
+		delete updated.projectId;
+	} else {
+		updated.projectIds = projectIds;
+		updated.projectId = primaryProjectId;
+	}
+	if (updated.runAttribution === undefined) return updated;
+	const roots =
+		previousProjectIds.length === 1 && previousProjectIds[0] === projectId
+			? []
+			: updated.runAttribution.roots.filter(
+					(root) => root.projectId !== projectId,
+				);
+	if (roots.length === 0) delete updated.runAttribution;
+	else updated.runAttribution = { ...updated.runAttribution, roots };
+	return updated;
+}
+
+function projectEntries(files: Record<string, string>, path: string) {
+	const prefix = path ? `${path}/` : "";
+	const entries = new Map<string, ProjectFileEntry>();
+	for (const [filePath, content] of Object.entries(files)) {
+		if (!filePath.startsWith(prefix)) continue;
+		const remainder = filePath.slice(prefix.length);
+		const name = remainder.split("/")[0];
+		if (name === undefined) continue;
+		entries.set(
+			name,
+			remainder.includes("/")
+				? { name, path: `${prefix}${name}`, kind: "directory" }
+				: {
+						name,
+						path: filePath,
+						kind: "file",
+						preview: "text",
+						contentType: "text/plain",
+						size: new TextEncoder().encode(content).length,
+					},
+		);
+	}
+	return [...entries.values()];
+}
+
 /** One disposable workspace per story. Only the HTTP boundary is simulated. */
-export function createWorkspaceMockApi(
-	scenario:
-		| "ready"
-		| "empty"
-		| "routing-failed"
-		| "offline"
-		| "queued" = "ready",
-) {
-	const data: CommonspaceBootstrap = structuredClone(storyBootstrap);
-	const now = () => new Date().toISOString();
-	const id = () => crypto.randomUUID();
-	const uploads = new Map<string, CommonspaceArchiveAttachment>();
-	function saveAttachment<Mime extends string>(
-		file: { name: string; mimeType: Mime; data: string },
-		kind: "image" | "file",
-	) {
-		const attachment = {
-			id: id(),
-			name: file.name,
-			mimeType: file.mimeType,
-			size: atob(file.data).length,
-		};
-		uploads.set(attachment.id, { ...attachment, kind, data: file.data });
-		return attachment;
+export function createWorkspaceMockApi(scenario: WorkspaceScenario = "ready") {
+	return new WorkspaceMockApi(scenario).handlers;
+}
+
+class WorkspaceMockApi {
+	private readonly data: CommonspaceBootstrap = structuredClone(storyBootstrap);
+	private readonly uploads = new Map<string, CommonspaceArchiveAttachment>();
+
+	constructor(private readonly scenario: WorkspaceScenario) {
+		this.data.discoveredAgents = structuredClone(
+			discoveryStoryBootstrap.discoveredAgents,
+		);
+		this.initializeAgents();
+		this.initializeConversation(scenario);
+		if (scenario === "queued") this.initializeQueue();
+		if (scenario === "empty") {
+			this.data.state.channels = [];
+			this.data.state.projects = [];
+			this.data.state.messages = {};
+			this.data.state.threads = [];
+			this.data.state.agents = [];
+			this.data.agents = [];
+			this.data.state.inboxUnreadMessageIds = [];
+			this.data.state.inboxSavedItemIds = [];
+			this.data.state.followedSessionIds = [];
+		}
 	}
-	const emptyMemory = (): CommonspaceThreadMemory => ({
-		summary: "",
-		decisions: [],
-		openQuestions: [],
-		updatedAt: null,
-		origin: "user",
-		status: "empty",
-		sourceMessageCount: 0,
-		estimatedTokens: 0,
-		compactedThroughMessageId: null,
-	});
-	const emptyContext = () => ({
-		memory: emptyMemory(),
-		channelSnapshot: { ...emptyMemory(), capturedAt: now() },
-	});
-	data.discoveredAgents = structuredClone(
-		discoveryStoryBootstrap.discoveredAgents,
-	);
-	const primaryChannel = data.state.channels[0];
-	const primaryAgent = data.agents[0];
-	const secondaryAgent = data.agents[1];
-	const channelMessages = data.state.messages["channel:channel-design"];
-	const root = channelMessages?.[0];
-	const reply = channelMessages?.[1];
-	if (
-		primaryChannel === undefined ||
-		primaryAgent === undefined ||
-		secondaryAgent === undefined ||
-		channelMessages === undefined ||
-		root === undefined ||
-		root.routing === undefined ||
-		reply === undefined ||
-		reply.trace === undefined
-	)
-		throw new Error("Workspace story fixture is incomplete.");
-	primaryChannel.name = "general";
-	primaryAgent.displayName = "Agentops";
-	secondaryAgent.displayName = "Codex";
-	for (const agent of data.agents) {
-		delete agent.avatarEmoji;
-		agent.accentColor = "#9bc4ff";
-		agent.status = "stopped";
-	}
-	data.state.agents = data.agents.map((agent) => ({
-		...agent,
-		createdAt: now(),
-	}));
-	root.text = "Are you available to review the agent workflow?";
-	root.replyStatus = "complete";
-	root.routing.reason =
-		"Agentops handles Hermes and local agent infrastructure in this channel.";
-	const plainRoot = structuredClone(root);
-	delete plainRoot.routing;
-	reply.authorName = "Agentops";
-	reply.text =
-		"I’m here and ready to help with agent workflows, local tooling, and session infrastructure.";
-	delete reply.runAttribution;
-	reply.trace.entries = reply.trace.entries.filter(
-		(entry) => entry.type === "reasoning" || entry.type === "usage",
-	);
-	for (const entry of reply.trace.entries)
-		if (entry.type === "reasoning")
-			entry.text =
-				"Confirming the response approach. No tools were needed for this reply.";
-	channelMessages.unshift(
-		{
-			...plainRoot,
-			id: "greeting",
-			text: "Morning, everyone.",
-			createdAt: "2026-09-03T09:55:00Z",
-		},
-		{
-			...plainRoot,
-			id: "workflow",
-			text: "Can you check the agent workflow?",
-			createdAt: "2026-09-03T09:56:00Z",
-		},
-	);
-	channelMessages.push({
-		...plainRoot,
-		id: "followup",
-		text: "Let’s keep the conversation here while we work through it.",
-		createdAt: "2026-09-03T09:59:55Z",
-	});
-	for (const message of channelMessages) {
+
+	private initializeAgents() {
+		const primaryChannel = this.data.state.channels[0];
+		const primaryAgent = this.data.agents[0];
+		const secondaryAgent = this.data.agents[1];
 		if (
-			message.authorType === "user" &&
-			!data.state.threads.some((thread) => thread.rootMessageId === message.id)
+			primaryChannel === undefined ||
+			primaryAgent === undefined ||
+			secondaryAgent === undefined
 		)
-			data.state.threads.push({
-				id: `thread-${message.id}`,
-				channelId: "channel-design",
-				rootMessageId: message.id,
-				agentIds: [],
-				projectId: null,
-				projectIds: [],
-				context: emptyContext(),
-				createdAt: message.createdAt,
-			});
+			throw new Error("Workspace story fixture is incomplete.");
+		primaryChannel.name = "general";
+		primaryAgent.displayName = "Agentops";
+		secondaryAgent.displayName = "Codex";
+		for (const agent of this.data.agents) {
+			delete agent.avatarEmoji;
+			agent.accentColor = "#9bc4ff";
+			agent.status = "stopped";
+		}
+		this.data.state.agents = this.data.agents.map((agent) => ({
+			...agent,
+			createdAt: now(),
+		}));
 	}
-	if (scenario === "queued") {
-		data.liveActivities = structuredClone(
+
+	private initializeConversation(scenario: WorkspaceScenario) {
+		const channelMessages = this.data.state.messages["channel:channel-design"];
+		const root = channelMessages?.[0];
+		const reply = channelMessages?.[1];
+		if (
+			channelMessages === undefined ||
+			root === undefined ||
+			root.routing === undefined ||
+			reply === undefined ||
+			reply.trace === undefined
+		)
+			throw new Error("Workspace story fixture is incomplete.");
+		root.text = "Are you available to review the agent workflow?";
+		root.replyStatus = "complete";
+		root.routing.reason =
+			"Agentops handles Hermes and local agent infrastructure in this channel.";
+		const plainRoot = structuredClone(root);
+		delete plainRoot.routing;
+		reply.authorName = "Agentops";
+		reply.text =
+			"I’m here and ready to help with agent workflows, local tooling, and session infrastructure.";
+		delete reply.runAttribution;
+		reply.trace.entries = reply.trace.entries.filter(
+			(entry) => entry.type === "reasoning" || entry.type === "usage",
+		);
+		for (const entry of reply.trace.entries)
+			if (entry.type === "reasoning")
+				entry.text =
+					"Confirming the response approach. No tools were needed for this reply.";
+		channelMessages.unshift(
+			{
+				...plainRoot,
+				id: "greeting",
+				text: "Morning, everyone.",
+				createdAt: "2026-09-03T09:55:00Z",
+			},
+			{
+				...plainRoot,
+				id: "workflow",
+				text: "Can you check the agent workflow?",
+				createdAt: "2026-09-03T09:56:00Z",
+			},
+		);
+		channelMessages.push({
+			...plainRoot,
+			id: "followup",
+			text: "Let’s keep the conversation here while we work through it.",
+			createdAt: "2026-09-03T09:59:55Z",
+		});
+		for (const message of channelMessages) {
+			if (
+				message.authorType === "user" &&
+				!this.data.state.threads.some(
+					(thread) => thread.rootMessageId === message.id,
+				)
+			)
+				this.data.state.threads.push({
+					id: `thread-${message.id}`,
+					channelId: "channel-design",
+					rootMessageId: message.id,
+					agentIds: [],
+					projectId: null,
+					projectIds: [],
+					context: emptyContext(),
+					createdAt: message.createdAt,
+				});
+		}
+		if (scenario === "routing-failed") {
+			root.replyStatus = "failed";
+			root.replyError =
+				"The routing service did not respond. Retry or choose an agent.";
+			root.routing.status = "failed";
+			root.routing.agentIds = [];
+			root.routing.assignments = [];
+			this.data.state.messages["channel:channel-design"] =
+				channelMessages.filter((message) => message.id !== reply.id);
+		}
+	}
+
+	private initializeQueue() {
+		this.data.liveActivities = structuredClone(
 			runtimeStoryBootstrap.liveActivities ?? [],
 		);
-		data.queuedFollowups = structuredClone(
+		this.data.queuedFollowups = structuredClone(
 			runtimeStoryBootstrap.queuedFollowups ?? [],
 		);
-		for (const [index, item] of (data.queuedFollowups ?? []).entries()) {
+		for (const [index, item] of (this.data.queuedFollowups ?? []).entries()) {
 			item.text =
 				index === 0
 					? "Summarize the changes when you finish."
 					: "Then draft the release notes.";
 			item.position = index;
 			const key = `dm:${item.conversation.id}`;
-			const queuedMessages = data.state.messages[key] ?? [];
-			data.state.messages[key] = queuedMessages;
+			const queuedMessages = this.data.state.messages[key] ?? [];
+			this.data.state.messages[key] = queuedMessages;
 			queuedMessages.push({
 				id: item.messageId,
 				conversation: item.conversation,
@@ -187,118 +291,67 @@ export function createWorkspaceMockApi(
 			});
 		}
 	}
-	if (scenario === "empty") {
-		data.state.channels = [];
-		data.state.projects = [];
-		data.state.messages = {};
-		data.state.threads = [];
-		data.state.agents = [];
-		data.agents = [];
-		data.state.inboxUnreadMessageIds = [];
-		data.state.inboxSavedItemIds = [];
-		data.state.followedSessionIds = [];
+
+	private touch() {
+		this.data.state.revision += 1;
 	}
-	if (scenario === "routing-failed") {
-		root.replyStatus = "failed";
-		root.replyError =
-			"The routing service did not respond. Retry or choose an agent.";
-		root.routing.status = "failed";
-		root.routing.agentIds = [];
-		root.routing.assignments = [];
-		data.state.messages["channel:channel-design"] = channelMessages.filter(
-			(message) => message.id !== reply.id,
-		);
+
+	private messages() {
+		return Object.values(this.data.state.messages).flat();
 	}
-	const touch = () => {
-		data.state.revision += 1;
-	};
-	const json = <Body>(value: Body) =>
-		new HttpResponse(JSON.stringify(value), {
-			headers: { "content-type": "application/json" },
-		});
-	async function trustedRequestJson<Body>(request: Request): Promise<Body> {
-		const value = await request.json();
-		// biome-ignore lint/nursery/noUnsafeTypeAssertion: This local Storybook boundary only receives requests from the typed Commonspace client.
-		return value as Body;
-	}
-	const messages = () => Object.values(data.state.messages).flat();
-	const findMessage = (messageId: string) => {
-		const message = messages().find((item) => item.id === messageId);
+
+	private findMessage(messageId: string) {
+		const message = this.messages().find((item) => item.id === messageId);
 		if (!message) throw new Error("Mock message no longer exists.");
 		return message;
-	};
-	function setMembership(items: string[], value: string, included: boolean) {
-		return included
-			? [...new Set([...items, value])]
-			: items.filter((item) => item !== value);
 	}
-	function channelAgentIds(agentIds: readonly string[]): string[] {
+
+	private saveAttachment<Mime extends string>(
+		file: { name: string; mimeType: Mime; data: string },
+		kind: "image" | "file",
+	) {
+		const attachment = {
+			id: id(),
+			name: file.name,
+			mimeType: file.mimeType,
+			size: atob(file.data).length,
+		};
+		this.uploads.set(attachment.id, { ...attachment, kind, data: file.data });
+		return attachment;
+	}
+
+	private channelAgentIds(agentIds: readonly string[]): string[] {
 		const unique = [...new Set(agentIds)];
-		const known = new Set(data.state.agents.map((agent) => agent.id));
+		const known = new Set(this.data.state.agents.map((agent) => agent.id));
 		if (unique.some((agentId) => !known.has(agentId)))
 			throw new Error("Channel references an unknown Agent.");
 		return unique;
 	}
-	function removeProjectReference(
-		message: CommonspaceMessage,
-		projectId: string,
-	): CommonspaceMessage {
-		const previousProjectIds = referencedProjectIds(message);
-		const projectIds = previousProjectIds.filter(
-			(candidate) => candidate !== projectId,
-		);
-		const updated = { ...message };
-		const primaryProjectId = projectIds[0];
-		if (primaryProjectId === undefined) {
-			delete updated.projectIds;
-			delete updated.projectId;
-		} else {
-			updated.projectIds = projectIds;
-			updated.projectId = primaryProjectId;
-		}
-		if (updated.runAttribution === undefined) return updated;
-		const roots =
-			previousProjectIds.length === 1 && previousProjectIds[0] === projectId
-				? []
-				: updated.runAttribution.roots.filter(
-						(root) => root.projectId !== projectId,
-					);
-		if (roots.length === 0) delete updated.runAttribution;
-		else updated.runAttribution = { ...updated.runAttribution, roots };
-		return updated;
-	}
-	function mutate(mutation: CommonspaceMutation) {
-		const state = data.state;
+
+	private mutate(mutation: CommonspaceMutation) {
+		const state = this.data.state;
 		switch (mutation.action) {
 			case "mark-inbox-read":
 				state.inboxReadAt = now();
 				state.inboxUnreadMessageIds = [];
-				state.inboxReadMessageIds = messages().map((item) => item.id);
+				state.inboxReadMessageIds = this.messages().map((item) => item.id);
 				break;
 			case "mark-inbox-item-read":
-				state.inboxReadMessageIds = setMembership(
-					state.inboxReadMessageIds,
-					mutation.messageId,
-					true,
-				);
+			case "set-inbox-item-unread": {
+				const unread =
+					mutation.action === "set-inbox-item-unread" && mutation.unread;
 				state.inboxUnreadMessageIds = setMembership(
 					state.inboxUnreadMessageIds ?? [],
 					mutation.messageId,
-					false,
-				);
-				break;
-			case "set-inbox-item-unread":
-				state.inboxUnreadMessageIds = setMembership(
-					state.inboxUnreadMessageIds ?? [],
-					mutation.messageId,
-					mutation.unread,
+					unread,
 				);
 				state.inboxReadMessageIds = setMembership(
 					state.inboxReadMessageIds,
 					mutation.messageId,
-					!mutation.unread,
+					!unread,
 				);
 				break;
+			}
 			case "set-inbox-item-saved":
 				state.inboxSavedItemIds = setMembership(
 					state.inboxSavedItemIds ?? [],
@@ -344,44 +397,10 @@ export function createWorkspaceMockApi(
 					?.paths.push(mutation.path);
 				break;
 			case "remove-project":
-				state.projects = state.projects.filter(
-					(project) => project.id !== mutation.projectId,
-				);
-				state.threads = state.threads.map((thread) => {
-					const projectIds = referencedProjectIds(thread).filter(
-						(projectId) => projectId !== mutation.projectId,
-					);
-					return {
-						...thread,
-						projectIds,
-						projectId: projectIds[0] ?? null,
-					};
-				});
-				state.messages = Object.fromEntries(
-					Object.entries(state.messages).map(([key, entries]) => [
-						key,
-						entries.map((message) =>
-							removeProjectReference(message, mutation.projectId),
-						),
-					]),
-				);
+				this.removeProject(mutation.projectId);
 				break;
 			case "create-channel":
-				state.channels.push({
-					id: id(),
-					name: mutation.name,
-					agentIds: channelAgentIds(mutation.agentIds),
-					instructions: "",
-					memory: { ...emptyMemory(), threadIds: [] },
-					routingMemory: {
-						summary: "",
-						status: "empty",
-						correctionCount: 0,
-						compactedThroughCorrectionId: null,
-						updatedAt: null,
-					},
-					createdAt: now(),
-				});
+				this.createChannel(mutation.name, mutation.agentIds);
 				break;
 			case "remove-channel":
 				state.channels = state.channels.filter(
@@ -396,7 +415,7 @@ export function createWorkspaceMockApi(
 				const channel = state.channels.find(
 					(item) => item.id === mutation.channelId,
 				);
-				if (channel) channel.agentIds = channelAgentIds(mutation.agentIds);
+				if (channel) channel.agentIds = this.channelAgentIds(mutation.agentIds);
 				break;
 			}
 			case "set-channel-context": {
@@ -407,92 +426,181 @@ export function createWorkspaceMockApi(
 				break;
 			}
 			case "set-channel-memory":
-			case "set-channel-configuration": {
-				const channel = state.channels.find(
-					(item) => item.id === mutation.channelId,
-				);
-				if (!channel) throw new Error("Channel not found.");
-				channel.memory = {
-					summary: mutation.summary,
-					decisions: mutation.decisions ?? [],
-					openQuestions: mutation.openQuestions ?? [],
-					threadIds: [],
-					updatedAt: now(),
-					origin: "user",
-					status: "current",
-					sourceMessageCount: 0,
-					estimatedTokens: 0,
-				};
-				if (mutation.action === "set-channel-configuration") {
-					channel.agentIds = channelAgentIds(mutation.agentIds);
-					channel.instructions = mutation.instructions;
-				}
+			case "set-channel-configuration":
+				this.configureChannel(mutation);
 				break;
-			}
-			case "update-agent-profile": {
-				for (const agent of [...data.agents, ...state.agents])
-					if (agent.id === mutation.agentId) {
-						agent.displayName = mutation.displayName;
-						if (mutation.avatarEmoji !== undefined)
-							agent.avatarEmoji = mutation.avatarEmoji;
-						if (mutation.accentColor !== undefined)
-							agent.accentColor = mutation.accentColor;
-						if (mutation.fullAccess !== undefined)
-							agent.fullAccess = mutation.fullAccess;
-					}
+			case "update-agent-profile":
+				this.updateAgentProfile(mutation);
 				break;
-			}
-			case "add-discovered-agent": {
-				const agent = data.discoveredAgents.find(
-					(item) => item.id === mutation.agentId,
-				);
-				if (!agent) throw new Error("Choose a discovered agent.");
-				if (!data.agents.some((item) => item.id === agent.id)) {
-					data.agents.push({ ...agent });
-					state.agents.push({ ...agent, createdAt: now() });
-				}
+			case "add-discovered-agent":
+				this.addAgent(mutation.agentId);
 				break;
-			}
 			case "remove-agent":
-				data.agents = data.agents.filter(
-					(agent) => agent.id !== mutation.agentId,
-				);
-				state.agents = state.agents.filter(
-					(agent) => agent.id !== mutation.agentId,
-				);
-				for (const channel of state.channels)
-					channel.agentIds = channel.agentIds.filter(
-						(agentId) => agentId !== mutation.agentId,
-					);
-				for (const thread of state.threads)
-					thread.agentIds = thread.agentIds.filter(
-						(agentId) => agentId !== mutation.agentId,
-					);
-				delete state.dmSessions[mutation.agentId];
-				delete state.agentSessions[mutation.agentId];
-				delete state.messages[`dm:${mutation.agentId}`];
-				if (
-					data.routing?.provider === CommonspaceRoutingProvider.Harness &&
-					data.routing.harnessAgentId === mutation.agentId
-				) {
-					data.routing = {
-						provider: CommonspaceRoutingProvider.Unconfigured,
-						reason: RoutingConfigurationIssue.Missing,
-						message: "Choose a workspace inference agent.",
-					};
-				}
+				this.removeAgent(mutation.agentId);
 				break;
 			case "reset-dm":
 				state.messages[`dm:${mutation.agentId}`] = [];
 				delete state.dmSessions[mutation.agentId];
 				break;
 		}
-		touch();
+		this.touch();
 	}
-	function send(request: SendMessageRequest) {
+
+	private removeProject(projectId: string) {
+		const state = this.data.state;
+		state.projects = state.projects.filter(
+			(project) => project.id !== projectId,
+		);
+		state.threads = state.threads.map((thread) => {
+			const projectIds = referencedProjectIds(thread).filter(
+				(candidate) => candidate !== projectId,
+			);
+			return {
+				...thread,
+				projectIds,
+				projectId: projectIds[0] ?? null,
+			};
+		});
+		state.messages = Object.fromEntries(
+			Object.entries(state.messages).map(([key, entries]) => [
+				key,
+				entries.map((message) => removeProjectReference(message, projectId)),
+			]),
+		);
+	}
+
+	private createChannel(name: string, agentIds: string[]) {
+		const state = this.data.state;
+		state.channels.push({
+			id: id(),
+			name,
+			agentIds: this.channelAgentIds(agentIds),
+			instructions: "",
+			memory: { ...emptyMemory(), threadIds: [] },
+			routingMemory: {
+				summary: "",
+				status: "empty",
+				correctionCount: 0,
+				compactedThroughCorrectionId: null,
+				updatedAt: null,
+			},
+			createdAt: now(),
+		});
+	}
+
+	private configureChannel(
+		mutation: Extract<
+			CommonspaceMutation,
+			{ action: "set-channel-memory" | "set-channel-configuration" }
+		>,
+	) {
+		const state = this.data.state;
+		const channel = state.channels.find(
+			(item) => item.id === mutation.channelId,
+		);
+		if (!channel) throw new Error("Channel not found.");
+		channel.memory = {
+			summary: mutation.summary,
+			decisions: mutation.decisions ?? [],
+			openQuestions: mutation.openQuestions ?? [],
+			threadIds: [],
+			updatedAt: now(),
+			origin: "user",
+			status: "current",
+			sourceMessageCount: 0,
+			estimatedTokens: 0,
+		};
+		if (mutation.action === "set-channel-configuration") {
+			channel.agentIds = this.channelAgentIds(mutation.agentIds);
+			channel.instructions = mutation.instructions;
+		}
+	}
+
+	private addAgent(agentId: string) {
+		const agent = this.data.discoveredAgents.find(
+			(item) => item.id === agentId,
+		);
+		if (!agent) throw new Error("Choose a discovered agent.");
+		if (!this.data.agents.some((item) => item.id === agent.id)) {
+			this.data.agents.push({ ...agent });
+			this.data.state.agents.push({ ...agent, createdAt: now() });
+		}
+	}
+
+	private updateAgentProfile(
+		mutation: Extract<CommonspaceMutation, { action: "update-agent-profile" }>,
+	) {
+		for (const agent of [...this.data.agents, ...this.data.state.agents]) {
+			if (agent.id !== mutation.agentId) continue;
+			agent.displayName = mutation.displayName;
+			if (mutation.avatarEmoji !== undefined)
+				agent.avatarEmoji = mutation.avatarEmoji;
+			if (mutation.accentColor !== undefined)
+				agent.accentColor = mutation.accentColor;
+			if (mutation.fullAccess !== undefined)
+				agent.fullAccess = mutation.fullAccess;
+		}
+	}
+
+	private removeAgent(agentId: string) {
+		const state = this.data.state;
+		this.data.agents = this.data.agents.filter((agent) => agent.id !== agentId);
+		state.agents = state.agents.filter((agent) => agent.id !== agentId);
+		for (const channel of state.channels)
+			channel.agentIds = channel.agentIds.filter(
+				(candidate) => candidate !== agentId,
+			);
+		for (const thread of state.threads)
+			thread.agentIds = thread.agentIds.filter(
+				(candidate) => candidate !== agentId,
+			);
+		delete state.dmSessions[agentId];
+		delete state.agentSessions[agentId];
+		delete state.messages[`dm:${agentId}`];
+		if (
+			this.data.routing?.provider === CommonspaceRoutingProvider.Harness &&
+			this.data.routing.harnessAgentId === agentId
+		) {
+			this.data.routing = {
+				provider: CommonspaceRoutingProvider.Unconfigured,
+				reason: RoutingConfigurationIssue.Missing,
+				message: "Choose a workspace inference agent.",
+			};
+		}
+	}
+
+	private prepareThread(
+		request: SendMessageRequest,
+		accepted: CommonspaceMessage,
+		agentId: string | undefined,
+	) {
+		let thread = request.threadId
+			? this.data.state.threads.find((item) => item.id === request.threadId)
+			: undefined;
+		if (request.conversation.kind === "channel" && !thread) {
+			thread = {
+				id: id(),
+				channelId: request.conversation.id,
+				rootMessageId: accepted.id,
+				projectId: accepted.projectIds?.[0] ?? null,
+				context: emptyContext(),
+				agentIds: agentId === undefined ? [] : [agentId],
+				projectIds: accepted.projectIds ?? [],
+				createdAt: now(),
+			};
+			this.data.state.threads.push(thread);
+		}
+		if (request.threadId && thread) {
+			accepted.threadId = thread.id;
+			accepted.parentMessageId = thread.rootMessageId;
+		}
+		return thread;
+	}
+
+	private send(request: SendMessageRequest) {
 		const key = `${request.conversation.kind}:${request.conversation.id}`;
-		const list = data.state.messages[key] ?? [];
-		data.state.messages[key] = list;
+		const list = this.data.state.messages[key] ?? [];
+		this.data.state.messages[key] = list;
 		const accepted: CommonspaceMessage = {
 			id: id(),
 			conversation: request.conversation,
@@ -504,34 +612,15 @@ export function createWorkspaceMockApi(
 			projectIds: request.projectIds ?? [],
 			replyStatus: "complete",
 		};
-		let thread = request.threadId
-			? data.state.threads.find((item) => item.id === request.threadId)
-			: undefined;
 		const agentId =
 			request.targetAgentId ??
 			(request.conversation.kind === "dm"
 				? request.conversation.id
-				: data.state.channels.find(
+				: this.data.state.channels.find(
 						(item) => item.id === request.conversation.id,
 					)?.agentIds[0]);
-		const agent = data.agents.find((item) => item.id === agentId);
-		if (request.conversation.kind === "channel" && !thread) {
-			thread = {
-				id: id(),
-				channelId: request.conversation.id,
-				rootMessageId: accepted.id,
-				projectId: accepted.projectIds?.[0] ?? null,
-				context: emptyContext(),
-				agentIds: agent ? [agent.id] : [],
-				projectIds: accepted.projectIds ?? [],
-				createdAt: now(),
-			};
-			data.state.threads.push(thread);
-		}
-		if (request.threadId && thread) {
-			accepted.threadId = thread.id;
-			accepted.parentMessageId = thread.rootMessageId;
-		}
+		const agent = this.data.agents.find((item) => item.id === agentId);
+		const thread = this.prepareThread(request, accepted, agent?.id);
 		if (agent && request.conversation.kind === "channel")
 			accepted.routing = {
 				source: "explicit",
@@ -550,53 +639,51 @@ export function createWorkspaceMockApi(
 			};
 		if (request.attachments?.length)
 			accepted.attachments = request.attachments.map((file) =>
-				saveAttachment(file, "image"),
+				this.saveAttachment(file, "image"),
 			);
 		if (request.files?.length)
 			accepted.files = request.files.map((file) =>
-				saveAttachment(file, "file"),
+				this.saveAttachment(file, "file"),
 			);
 		list.push(accepted);
-		if (agent) {
-			const response: CommonspaceMessage = {
-				id: id(),
-				conversation: request.conversation,
-				text: "Got it. I’ll keep the follow-up in this conversation. This is a simulated reply for the Storybook workspace.",
-				authorType: "agent",
-				authorId: agent.id,
-				authorName: agent.displayName,
-				createdAt: now(),
-				projectIds: accepted.projectIds ?? [],
-				sourceMessageId: accepted.id,
-				replyStatus: "complete",
-			};
-			if (thread) {
-				response.threadId = thread.id;
-				response.parentMessageId = thread.rootMessageId;
-			}
-			list.push(response);
-			data.state.inboxUnreadMessageIds = [
-				...(data.state.inboxUnreadMessageIds ?? []),
-				response.id,
-			];
-		}
-		touch();
-		return { accepted, thread, state: data.state };
+		if (agent)
+			this.recordReply(
+				accepted,
+				agent,
+				thread,
+				"Got it. I’ll keep the follow-up in this conversation. This is a simulated reply for the Storybook workspace.",
+			);
+		this.touch();
+		return { accepted, thread, state: this.data.state };
 	}
-	function appendReply(source: CommonspaceMessage, agentId: string) {
-		const agent = data.agents.find((item) => item.id === agentId);
+	private appendReply(source: CommonspaceMessage, agentId: string) {
+		const agent = this.data.agents.find((item) => item.id === agentId);
 		if (!agent) throw new Error("Choose an agent in this workspace.");
-		const thread = data.state.threads.find(
+		const thread = this.data.state.threads.find(
 			(item) => item.id === source.threadId || item.rootMessageId === source.id,
 		);
 		if (thread) thread.agentIds = [...new Set([...thread.agentIds, agentId])];
+		this.recordReply(
+			source,
+			agent,
+			thread,
+			"I’ve received the request. This reply is simulated in the preview.",
+		);
+	}
+
+	private recordReply(
+		source: CommonspaceMessage,
+		agent: CommonspaceAgentProfile,
+		thread: CommonspaceThread | undefined,
+		text: string,
+	) {
 		const response: CommonspaceMessage = {
 			id: id(),
 			conversation: source.conversation,
-			authorId: agentId,
+			authorId: agent.id,
 			authorName: agent.displayName,
 			authorType: "agent",
-			text: "I’ve received the request. This reply is simulated in the preview.",
+			text,
 			createdAt: now(),
 			sourceMessageId: source.id,
 			projectIds: source.projectIds ?? [],
@@ -607,29 +694,30 @@ export function createWorkspaceMockApi(
 			response.parentMessageId = thread.rootMessageId;
 		}
 		const key = `${source.conversation.kind}:${source.conversation.id}`;
-		const conversationMessages = data.state.messages[key] ?? [];
-		data.state.messages[key] = conversationMessages;
+		const conversationMessages = this.data.state.messages[key] ?? [];
+		this.data.state.messages[key] = conversationMessages;
 		conversationMessages.push(response);
-		data.state.inboxUnreadMessageIds = [
-			...(data.state.inboxUnreadMessageIds ?? []),
+		this.data.state.inboxUnreadMessageIds = [
+			...(this.data.state.inboxUnreadMessageIds ?? []),
 			response.id,
 		];
 	}
-	function retention(
+
+	private retention(
 		conversation: ConversationRef,
 	): CommonspaceRetentionPreview {
 		const list =
-			data.state.messages[`${conversation.kind}:${conversation.id}`] ?? [];
+			this.data.state.messages[`${conversation.kind}:${conversation.id}`] ?? [];
 		const messageIds = new Set(list.map((message) => message.id));
 		const threadIds = new Set(
 			conversation.kind === "channel"
-				? data.state.threads
+				? this.data.state.threads
 						.filter((thread) => thread.channelId === conversation.id)
 						.map((thread) => thread.id)
 				: [],
 		);
 		return {
-			revision: data.state.revision,
+			revision: this.data.state.revision,
 			conversation,
 			messages: list.length,
 			threads: threadIds.size,
@@ -640,7 +728,7 @@ export function createWorkspaceMockApi(
 					(message.files?.length ?? 0),
 				0,
 			),
-			pins: data.state.pins.filter((pin) => {
+			pins: this.data.state.pins.filter((pin) => {
 				const messageId = pin.kind === "note" ? undefined : pin.messageId;
 				return (
 					(pin.scope.kind === "channel" &&
@@ -650,12 +738,12 @@ export function createWorkspaceMockApi(
 					(messageId !== undefined && messageIds.has(messageId))
 				);
 			}).length,
-			permissions: data.state.permissions.filter((permission) =>
+			permissions: this.data.state.permissions.filter((permission) =>
 				messageIds.has(permission.sourceMessageId),
 			).length,
 		};
 	}
-	function archive(): CommonspaceWorkspaceArchive {
+	private archive(): CommonspaceWorkspaceArchive {
 		const {
 			version: _version,
 			revision: _revision,
@@ -663,7 +751,7 @@ export function createWorkspaceMockApi(
 			agentSessions: _agents,
 			projects,
 			...workspace
-		} = structuredClone(data.state);
+		} = structuredClone(this.data.state);
 		void _version;
 		void _revision;
 		void _dm;
@@ -679,11 +767,11 @@ export function createWorkspaceMockApi(
 					rootCount: paths.length,
 				})),
 			},
-			attachments: [...uploads.values()],
+			attachments: [...this.uploads.values()],
 		};
 	}
-	function downloadAttachment(attachmentId: string) {
-		const file = uploads.get(attachmentId);
+	private downloadAttachment(attachmentId: string) {
+		const file = this.uploads.get(attachmentId);
 		if (!file)
 			return HttpResponse.json(
 				{ error: "Attachment not found." },
@@ -699,43 +787,46 @@ export function createWorkspaceMockApi(
 			},
 		});
 	}
-	const diagnostics = () => ({
-		service: {
-			status: "ready",
-			storage: "ready",
-			stateVersion: data.state.version,
-			projectlessWorkspace: "ready",
-		},
-		inference: {
-			provider: CommonspaceRoutingProvider.Harness,
-			location: "runtime-managed",
-			configured: true,
-			sends: ["Storybook mock: no external requests"],
-		},
-		harnesses: data.agents.map((agent) => ({
-			adapter: agent.adapter,
-			installed: true,
-			rostered: true,
-			recordedRunStatus: "has-replies",
-			recovery: "",
-		})),
-	});
-	return [
+
+	private diagnostics() {
+		return {
+			service: {
+				status: "ready",
+				storage: "ready",
+				stateVersion: this.data.state.version,
+				projectlessWorkspace: "ready",
+			},
+			inference: {
+				provider: CommonspaceRoutingProvider.Harness,
+				location: "runtime-managed",
+				configured: true,
+				sends: ["Storybook mock: no external requests"],
+			},
+			harnesses: this.data.agents.map((agent) => ({
+				adapter: agent.adapter,
+				installed: true,
+				rostered: true,
+				recordedRunStatus: "has-replies",
+				recovery: "",
+			})),
+		};
+	}
+	readonly handlers = [
 		http.get("/api/bootstrap", () =>
-			scenario === "offline"
+			this.scenario === "offline"
 				? HttpResponse.json(
 						{
 							error: "The local service is unavailable in this preview state.",
 						},
 						{ status: 503 },
 					)
-				: json(data),
+				: json(this.data),
 		),
 		http.post("/api/mutate", async ({ request }) => {
 			try {
 				const mutation = CommonspaceMutationSchema.parse(await request.json());
-				mutate(mutation);
-				return json(data);
+				this.mutate(mutation);
+				return json(this.data);
 			} catch (error) {
 				return HttpResponse.json(
 					{
@@ -748,7 +839,7 @@ export function createWorkspaceMockApi(
 		}),
 		http.post("/api/send", async ({ request }) => {
 			const input = await trustedRequestJson<SendMessageRequest>(request);
-			return json(send(input));
+			return json(this.send(input));
 		}),
 		http.post("/api/select-directory", () =>
 			json({ path: "/mock/workspace/new-project" }),
@@ -757,17 +848,17 @@ export function createWorkspaceMockApi(
 			const { adapter } = await trustedRequestJson<{ adapter: string }>(
 				request,
 			);
-			data.discoveredAgents = structuredClone(
+			this.data.discoveredAgents = structuredClone(
 				discoveryStoryBootstrap.discoveredAgents.filter(
 					(agent) => agent.adapter === adapter,
 				),
 			);
-			return json(data);
+			return json(this.data);
 		}),
 		http.get("/api/agents/:agentId/capabilities", ({ params }) =>
 			json({ ...populatedCapabilityInventory, agentId: params.agentId }),
 		),
-		http.get("/api/diagnostics", () => json(diagnostics())),
+		http.get("/api/diagnostics", () => json(this.diagnostics())),
 		http.post("/api/notifications/verify", () =>
 			json({
 				status: "delivered",
@@ -778,14 +869,16 @@ export function createWorkspaceMockApi(
 		http.put("/api/routing", async ({ request }) => {
 			const update =
 				await trustedRequestJson<UpdateRoutingConfigurationRequest>(request);
-			data.routing = {
+			this.data.routing = {
 				provider: update.provider,
 				harnessAgentId: update.harnessAgentId,
 			};
-			touch();
-			return json(data.routing);
+			this.touch();
+			return json(this.data.routing);
 		}),
-		http.post("/api/routing/validate", () => json(diagnostics().inference)),
+		http.post("/api/routing/validate", () =>
+			json(this.diagnostics().inference),
+		),
 		http.post("/api/pins", async ({ request }) => {
 			const input = await trustedRequestJson<AddPinRequest>(request);
 			const pin = {
@@ -794,20 +887,20 @@ export function createWorkspaceMockApi(
 				createdAt: now(),
 				removedAt: null,
 			};
-			data.state.pins.push(pin);
-			touch();
+			this.data.state.pins.push(pin);
+			this.touch();
 			return json(pin);
 		}),
 		http.post("/api/pins/:pinId/remove", ({ params }) => {
-			const pin = data.state.pins.find((item) => item.id === params.pinId);
+			const pin = this.data.state.pins.find((item) => item.id === params.pinId);
 			if (pin) pin.removedAt = now();
-			touch();
+			this.touch();
 			return json(pin);
 		}),
 		http.put("/api/threads/:threadId/context", async ({ request, params }) => {
 			const update =
 				await trustedRequestJson<UpdateThreadContextRequest>(request);
-			const thread = data.state.threads.find(
+			const thread = this.data.state.threads.find(
 				(item) => item.id === params.threadId,
 			);
 			if (thread?.context)
@@ -815,50 +908,52 @@ export function createWorkspaceMockApi(
 					updatedAt: now(),
 					origin: "user",
 				});
-			touch();
+			this.touch();
 			return json(thread);
 		}),
 		http.post("/api/threads/:threadId/context/compact", ({ params }) => {
-			const thread = data.state.threads.find(
+			const thread = this.data.state.threads.find(
 				(item) => item.id === params.threadId,
 			);
 			if (thread?.context) {
 				thread.context.memory.status = "current";
 				thread.context.memory.updatedAt = now();
 			}
-			touch();
+			this.touch();
 			return json(thread);
 		}),
 		http.post("/api/channels/:channelId/context/compact", ({ params }) => {
-			const channel = data.state.channels.find(
+			const channel = this.data.state.channels.find(
 				(item) => item.id === params.channelId,
 			);
 			if (channel?.memory) {
 				channel.memory.status = "current";
 				channel.memory.updatedAt = now();
 			}
-			touch();
+			this.touch();
 			return json(channel);
 		}),
 		http.post("/api/messages/:messageId/delete", ({ params }) => {
-			const message = findMessage(String(params.messageId));
+			const message = this.findMessage(String(params.messageId));
 			for (const file of [
 				...(message.attachments ?? []),
 				...(message.files ?? []),
 			])
-				uploads.delete(file.id);
+				this.uploads.delete(file.id);
 			message.text = "";
 			delete message.attachments;
 			delete message.files;
 			delete message.trace;
 			message.deletedAt = now();
-			touch();
+			this.touch();
 			return json(message);
 		}),
 		http.post("/api/stop", () => {
-			data.liveActivities = [];
-			touch();
-			return json({ stoppedAgentIds: data.agents.map((agent) => agent.id) });
+			this.data.liveActivities = [];
+			this.touch();
+			return json({
+				stoppedAgentIds: this.data.agents.map((agent) => agent.id),
+			});
 		}),
 		http.get("/api/search", ({ request }) => {
 			const url = new URL(request.url);
@@ -868,7 +963,7 @@ export function createWorkspaceMockApi(
 			);
 			const projectId = url.searchParams.get("project");
 			const candidates: CommonspaceSearchResult[] = [
-				...data.state.channels.map((channel) => ({
+				...this.data.state.channels.map((channel) => ({
 					id: channel.id,
 					kind: "channel" as const,
 					title: `#${channel.name}`,
@@ -880,7 +975,7 @@ export function createWorkspaceMockApi(
 						conversation: { kind: "channel" as const, id: channel.id },
 					},
 				})),
-				...data.state.projects.map((project) => ({
+				...this.data.state.projects.map((project) => ({
 					id: project.id,
 					kind: "project" as const,
 					title: project.name,
@@ -890,7 +985,7 @@ export function createWorkspaceMockApi(
 					projectIds: [project.id],
 					target: { kind: "project" as const, projectId: project.id },
 				})),
-				...data.agents.map((agent) => ({
+				...this.data.agents.map((agent) => ({
 					id: agent.id,
 					kind: "agent" as const,
 					title: agent.displayName,
@@ -899,13 +994,13 @@ export function createWorkspaceMockApi(
 					highlights: [],
 					target: { kind: "agent" as const, agentId: agent.id },
 				})),
-				...messages()
+				...this.messages()
 					.filter((message) => !message.deletedAt)
 					.map((message) => {
 						const location =
 							message.conversation.kind === "channel"
-								? `#${data.state.channels.find((channel) => channel.id === message.conversation.id)?.name ?? message.conversation.id}`
-								: (data.agents.find(
+								? `#${this.data.state.channels.find((channel) => channel.id === message.conversation.id)?.name ?? message.conversation.id}`
+								: (this.data.agents.find(
 										(agent) => agent.id === message.conversation.id,
 									)?.displayName ?? message.conversation.id);
 						const target: CommonspaceSearchTarget = {
@@ -947,8 +1042,8 @@ export function createWorkspaceMockApi(
 				await trustedRequestJson<Omit<EditMessageRequest, "messageId">>(
 					request,
 				);
-			const original = findMessage(String(params.messageId));
-			const result = send({
+			const original = this.findMessage(String(params.messageId));
+			const result = this.send({
 				conversation: original.conversation,
 				text: update.text,
 				projectIds: update.projectIds ?? original.projectIds,
@@ -958,9 +1053,9 @@ export function createWorkspaceMockApi(
 		}),
 		http.post("/api/routing/retry", async ({ request }) => {
 			const retry = await trustedRequestJson<RetryRoutingRequest>(request);
-			const accepted = findMessage(retry.sourceMessageId);
+			const accepted = this.findMessage(retry.sourceMessageId);
 			const agentId =
-				retry.mode === "manual" ? retry.agentId : data.agents[0]?.id;
+				retry.mode === "manual" ? retry.agentId : this.data.agents[0]?.id;
 			if (!agentId)
 				return HttpResponse.json(
 					{ error: "Add an agent before retrying." },
@@ -979,18 +1074,18 @@ export function createWorkspaceMockApi(
 				corrections: [],
 				reason: "Preview retry delivered to the selected agent.",
 			};
-			const thread = data.state.threads.find(
+			const thread = this.data.state.threads.find(
 				(item) => item.rootMessageId === accepted.id,
 			);
 			if (thread) thread.agentIds = [agentId];
-			appendReply(accepted, agentId);
-			touch();
-			return json({ accepted, thread, state: data.state });
+			this.appendReply(accepted, agentId);
+			this.touch();
+			return json({ accepted, thread, state: this.data.state });
 		}),
 		http.post("/api/reroute", async ({ request }) => {
 			const reroute =
 				await trustedRequestJson<RerouteAssignmentRequest>(request);
-			const source = findMessage(reroute.sourceMessageId);
+			const source = this.findMessage(reroute.sourceMessageId);
 			if (!source.routing)
 				return HttpResponse.json(
 					{ error: "This message has no routing decision." },
@@ -1009,13 +1104,13 @@ export function createWorkspaceMockApi(
 			};
 			source.routing.assignments.push(assignment);
 			source.routing.corrections.push(correction);
-			appendReply(source, reroute.agentId);
-			touch();
+			this.appendReply(source, reroute.agentId);
+			this.touch();
 			return json({
 				sourceMessageId: source.id,
 				assignment,
 				correction,
-				state: data.state,
+				state: this.data.state,
 			});
 		}),
 		http.post(
@@ -1024,7 +1119,7 @@ export function createWorkspaceMockApi(
 				const { optionId } = await trustedRequestJson<{ optionId: string }>(
 					request,
 				);
-				const permission = data.state.permissions.find(
+				const permission = this.data.state.permissions.find(
 					(item) => item.id === params.permissionId,
 				);
 				if (permission) {
@@ -1032,7 +1127,7 @@ export function createWorkspaceMockApi(
 					permission.status = "resolved";
 					permission.resolvedAt = now();
 				}
-				touch();
+				this.touch();
 				return json(permission);
 			},
 		),
@@ -1040,34 +1135,37 @@ export function createWorkspaceMockApi(
 			const { messageId } = await trustedRequestJson<{ messageId: string }>(
 				request,
 			);
-			data.queuedFollowups =
-				data.queuedFollowups?.filter((item) => item.messageId !== messageId) ??
-				[];
-			const removed = messages().find((message) => message.id === messageId);
+			this.data.queuedFollowups =
+				this.data.queuedFollowups?.filter(
+					(item) => item.messageId !== messageId,
+				) ?? [];
+			const removed = this.messages().find(
+				(message) => message.id === messageId,
+			);
 			if (removed) removed.replyStatus = "cancelled";
-			data.queuedFollowups.forEach((entry, position) => {
+			this.data.queuedFollowups.forEach((entry, position) => {
 				entry.position = position;
 			});
-			touch();
-			return json({ queuedFollowups: data.queuedFollowups });
+			this.touch();
+			return json({ queuedFollowups: this.data.queuedFollowups });
 		}),
 		http.get("/api/attachments/:attachmentId", ({ params }) =>
-			downloadAttachment(String(params.attachmentId)),
+			this.downloadAttachment(String(params.attachmentId)),
 		),
 		http.get("/api/files/:fileId", ({ params }) =>
-			downloadAttachment(String(params.fileId)),
+			this.downloadAttachment(String(params.fileId)),
 		),
-		http.get("/api/export", () => json(archive())),
+		http.get("/api/export", () => json(this.archive())),
 		http.post("/api/import", async ({ request }) => {
 			const input = await trustedRequestJson<{
 				archive: CommonspaceWorkspaceArchive;
 				projectMappings: Record<string, string[]>;
 			}>(request);
 			if (
-				data.state.channels.length ||
-				data.state.projects.length ||
-				data.state.agents.length ||
-				messages().length
+				this.data.state.channels.length ||
+				this.data.state.projects.length ||
+				this.data.state.agents.length ||
+				this.messages().length
 			)
 				return HttpResponse.json(
 					{
@@ -1107,45 +1205,45 @@ export function createWorkspaceMockApi(
 				createdAt: project.createdAt,
 				paths: input.projectMappings[project.id] ?? [],
 			}));
-			data.state = {
+			this.data.state = {
 				...imported,
-				version: data.state.version,
-				revision: data.state.revision + 1,
+				version: this.data.state.version,
+				revision: this.data.state.revision + 1,
 				projects,
 				dmSessions: {},
 				agentSessions: {},
 			};
-			data.agents = imported.agents.map((agent) => ({
+			this.data.agents = imported.agents.map((agent) => ({
 				...agent,
 				status: "stopped",
 			}));
-			uploads.clear();
+			this.uploads.clear();
 			for (const file of saved.attachments)
-				uploads.set(file.id, structuredClone(file));
-			return json(data.state);
+				this.uploads.set(file.id, structuredClone(file));
+			return json(this.data.state);
 		}),
 		http.post("/api/retention/preview", async ({ request }) => {
 			const { conversation } = await trustedRequestJson<{
 				conversation: ConversationRef;
 			}>(request);
-			return json(retention(conversation));
+			return json(this.retention(conversation));
 		}),
 		http.post("/api/retention/apply", async ({ request }) => {
 			const { conversation, expectedRevision } = await trustedRequestJson<{
 				conversation: ConversationRef;
 				expectedRevision: number;
 			}>(request);
-			if (expectedRevision !== data.state.revision)
+			if (expectedRevision !== this.data.state.revision)
 				return HttpResponse.json(
 					{ error: "The workspace changed. Preview retention again." },
 					{ status: 409 },
 				);
-			const preview = retention(conversation);
+			const preview = this.retention(conversation);
 			const key = `${conversation.kind}:${conversation.id}`;
-			const list = data.state.messages[key] ?? [];
+			const list = this.data.state.messages[key] ?? [];
 			const messageIds = new Set(list.map((message) => message.id));
 			const threadIds = new Set(
-				data.state.threads
+				this.data.state.threads
 					.filter((thread) => messageIds.has(thread.rootMessageId))
 					.map((thread) => thread.id),
 			);
@@ -1154,12 +1252,12 @@ export function createWorkspaceMockApi(
 					...(message.attachments ?? []),
 					...(message.files ?? []),
 				])
-					uploads.delete(file.id);
-			delete data.state.messages[key];
-			data.state.threads = data.state.threads.filter(
+					this.uploads.delete(file.id);
+			delete this.data.state.messages[key];
+			this.data.state.threads = this.data.state.threads.filter(
 				(thread) => !threadIds.has(thread.id),
 			);
-			data.state.pins = data.state.pins.filter((pin) => {
+			this.data.state.pins = this.data.state.pins.filter((pin) => {
 				const referencesRemovedMessage =
 					pin.kind !== "note" && messageIds.has(pin.messageId);
 				return !(
@@ -1170,19 +1268,17 @@ export function createWorkspaceMockApi(
 					(pin.scope.kind === "thread" && threadIds.has(pin.scope.id))
 				);
 			});
-			data.state.permissions = data.state.permissions.filter(
+			this.data.state.permissions = this.data.state.permissions.filter(
 				(permission) => !messageIds.has(permission.sourceMessageId),
 			);
-			data.state.inboxUnreadMessageIds = (
-				data.state.inboxUnreadMessageIds ?? []
+			this.data.state.inboxUnreadMessageIds = (
+				this.data.state.inboxUnreadMessageIds ?? []
 			).filter((id) => !messageIds.has(id));
-			data.state.inboxReadMessageIds = data.state.inboxReadMessageIds.filter(
-				(id) => !messageIds.has(id),
-			);
-			data.state.inboxSavedItemIds = data.state.inboxSavedItemIds.filter(
-				(id) => !messageIds.has(id),
-			);
-			touch();
+			this.data.state.inboxReadMessageIds =
+				this.data.state.inboxReadMessageIds.filter((id) => !messageIds.has(id));
+			this.data.state.inboxSavedItemIds =
+				this.data.state.inboxSavedItemIds.filter((id) => !messageIds.has(id));
+			this.touch();
 			return json(preview);
 		}),
 		http.post("/api/followups/reorder", async ({ request }) => {
@@ -1190,7 +1286,7 @@ export function createWorkspaceMockApi(
 				messageId: string;
 				direction: "up" | "down";
 			}>(request);
-			const queue = data.queuedFollowups ?? [];
+			const queue = this.data.queuedFollowups ?? [];
 			const index = queue.findIndex((item) => item.messageId === messageId);
 			const destination = index + (direction === "up" ? -1 : 1);
 			const item = queue[index],
@@ -1202,7 +1298,7 @@ export function createWorkspaceMockApi(
 			queue.forEach((entry, position) => {
 				entry.position = position;
 			});
-			touch();
+			this.touch();
 			return json({ queuedFollowups: queue });
 		}),
 		http.post("/api/projects/:projectId/open", () =>
@@ -1212,7 +1308,7 @@ export function createWorkspaceMockApi(
 			const url = new URL(request.url),
 				path = url.searchParams.get("path") ?? "";
 			const rootIndex = Number(url.searchParams.get("root") ?? 0);
-			const project = data.state.projects.find(
+			const project = this.data.state.projects.find(
 				(item) => item.id === params.projectId,
 			);
 			if (!project?.paths[rootIndex])
@@ -1228,32 +1324,11 @@ export function createWorkspaceMockApi(
 					"# Release notes\n\n- Simplified conversation layout\n- Routing and activity in message headers\n",
 			};
 			if (params.surface === "files") {
-				const prefix = path ? `${path}/` : "";
-				const entries = new Map<string, ProjectFileEntry>();
-				for (const [filePath, content] of Object.entries(files)) {
-					if (!filePath.startsWith(prefix)) continue;
-					const remainder = filePath.slice(prefix.length);
-					const name = remainder.split("/")[0];
-					if (name === undefined) continue;
-					entries.set(
-						name,
-						remainder.includes("/")
-							? { name, path: `${prefix}${name}`, kind: "directory" }
-							: {
-									name,
-									path: filePath,
-									kind: "file",
-									preview: "text",
-									contentType: "text/plain",
-									size: new TextEncoder().encode(content).length,
-								},
-					);
-				}
 				return json({
 					projectId: project.id,
 					rootIndex,
 					path,
-					entries: [...entries.values()],
+					entries: projectEntries(files, path),
 					truncated: false,
 				});
 			}

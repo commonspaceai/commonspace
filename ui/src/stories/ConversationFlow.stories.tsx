@@ -102,137 +102,151 @@ export const DesktopConversation: Story = {
 export const Docked: Story = { args: { width: 1440 } };
 export const RightOverlay: Story = { args: { width: 1000 } };
 
+async function verifyChannelComposer(canvasElement: HTMLElement) {
+	const canvas = within(canvasElement);
+	await userEvent.click(
+		await canvas.findByRole("button", { name: "Channels" }),
+	);
+	await expect(
+		await canvas.findByRole("heading", { name: "Channels" }),
+	).toBeVisible();
+	await userEvent.click(
+		canvas.getByRole("button", { name: "Open channel design-review" }),
+	);
+	const rootComposer = canvas.getByRole("textbox", {
+		name: "Post in design-review",
+	});
+	const rootComposerFrame = canvas.getByRole("form", {
+		name: "Start a new Thread in design-review",
+	});
+	await expect(rootComposer).toHaveAttribute(
+		"placeholder",
+		"Start a new Thread in #design-review",
+	);
+	await expect(
+		within(rootComposerFrame).queryByText(/AI selects/u),
+	).not.toBeInTheDocument();
+	await expect(
+		within(rootComposerFrame).queryByText("Post to #design-review"),
+	).not.toBeInTheDocument();
+	await expect(
+		within(rootComposerFrame).queryByText("Starts a new Thread"),
+	).not.toBeInTheDocument();
+	const rootAttachment = canvas.getByLabelText("Attach files");
+	rootAttachment.focus();
+	await expect(rootAttachment).toHaveFocus();
+	await userEvent.type(rootComposer, "@");
+	const namedAgentMenu = await canvas.findByRole("listbox", {
+		name: "Tag suggestions",
+	});
+	const namedAgentOption = within(namedAgentMenu).getByRole("option", {
+		name: /@review-bot/u,
+	});
+	await expect(
+		within(namedAgentMenu).queryByRole("option", { name: /@all/u }),
+	).not.toBeInTheDocument();
+	const namedAgentRect = namedAgentOption.getBoundingClientRect();
+	await expect(
+		namedAgentOption.contains(
+			canvasElement.ownerDocument.elementFromPoint(
+				namedAgentRect.left + namedAgentRect.width / 2,
+				namedAgentRect.top + namedAgentRect.height / 2,
+			),
+		),
+	).toBe(true);
+	await userEvent.clear(rootComposer);
+	await userEvent.type(rootComposer, "@all");
+	const broadcastOption = within(
+		await canvas.findByRole("listbox", { name: "Tag suggestions" }),
+	).getByRole("option", { name: /sends to everyone in this channel/u });
+	const broadcastRect = broadcastOption.getBoundingClientRect();
+	await expect(
+		broadcastOption.contains(
+			canvasElement.ownerDocument.elementFromPoint(
+				broadcastRect.left + broadcastRect.width / 2,
+				broadcastRect.top + broadcastRect.height / 2,
+			),
+		),
+	).toBe(true);
+	await userEvent.clear(rootComposer);
+}
+
 export const FlowVerification: Story = {
 	args: { width: 1440 },
-	play: async ({ canvasElement }) => {
+	play: async ({ canvasElement, step }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Channels" }),
+		await step("Channel composer mentions and attachment focus", () =>
+			verifyChannelComposer(canvasElement),
 		);
-		await expect(
-			await canvas.findByRole("heading", { name: "Channels" }),
-		).toBeVisible();
-		await userEvent.click(
-			canvas.getByRole("button", { name: "Open channel design-review" }),
-		);
-		const rootComposer = canvas.getByRole("textbox", {
-			name: "Post in design-review",
-		});
-		const rootComposerFrame = canvas.getByRole("form", {
-			name: "Start a new Thread in design-review",
-		});
-		await expect(rootComposer).toHaveAttribute(
-			"placeholder",
-			"Start a new Thread in #design-review",
-		);
-		await expect(
-			within(rootComposerFrame).queryByText(/AI selects/u),
-		).not.toBeInTheDocument();
-		await expect(
-			within(rootComposerFrame).queryByText("Post to #design-review"),
-		).not.toBeInTheDocument();
-		await expect(
-			within(rootComposerFrame).queryByText("Starts a new Thread"),
-		).not.toBeInTheDocument();
-		const rootAttachment = canvas.getByLabelText("Attach files");
-		rootAttachment.focus();
-		await expect(rootAttachment).toHaveFocus();
-		await userEvent.type(rootComposer, "@");
-		const namedAgentMenu = await canvas.findByRole("listbox", {
-			name: "Tag suggestions",
-		});
-		const namedAgentOption = within(namedAgentMenu).getByRole("option", {
-			name: /@review-bot/u,
-		});
-		await expect(
-			within(namedAgentMenu).queryByRole("option", { name: /@all/u }),
-		).not.toBeInTheDocument();
-		const namedAgentRect = namedAgentOption.getBoundingClientRect();
-		await expect(
-			namedAgentOption.contains(
-				canvasElement.ownerDocument.elementFromPoint(
-					namedAgentRect.left + namedAgentRect.width / 2,
-					namedAgentRect.top + namedAgentRect.height / 2,
-				),
-			),
-		).toBe(true);
-		await userEvent.clear(rootComposer);
-		await userEvent.type(rootComposer, "@all");
-		const broadcastOption = within(
-			await canvas.findByRole("listbox", { name: "Tag suggestions" }),
-		).getByRole("option", { name: /sends to everyone in this channel/u });
-		const broadcastRect = broadcastOption.getBoundingClientRect();
-		await expect(
-			broadcastOption.contains(
-				canvasElement.ownerDocument.elementFromPoint(
-					broadcastRect.left + broadcastRect.width / 2,
-					broadcastRect.top + broadcastRect.height / 2,
-				),
-			),
-		).toBe(true);
-		await userEvent.clear(rootComposer);
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "1 reply, 1 unread" }),
 		);
 		const thread = within(
 			await canvas.findByRole("complementary", { name: "Thread replies" }),
 		);
-		await expect(
-			thread.getByRole("textbox", { name: "Reply in thread" }),
-		).toHaveAttribute("placeholder", "Continue this Thread…");
-		await expect(thread.queryByText(/AI selects/u)).not.toBeInTheDocument();
-		await expect(
-			thread.queryByText("Reply in this Thread"),
-		).not.toBeInTheDocument();
-		const attachment = thread.getByLabelText("Attach files to Thread");
-		attachment.focus();
-		await expect(attachment).toHaveFocus();
 		const reply = thread.getByRole("textbox", { name: "Reply in thread" });
-		await userEvent.type(reply, "@");
-		const threadAgentMenu = await thread.findByRole("listbox", {
-			name: "Tag suggestions",
+		await step("Thread composer mentions and attachment focus", async () => {
+			await expect(
+				thread.getByRole("textbox", { name: "Reply in thread" }),
+			).toHaveAttribute("placeholder", "Continue this Thread…");
+			await expect(thread.queryByText(/AI selects/u)).not.toBeInTheDocument();
+			await expect(
+				thread.queryByText("Reply in this Thread"),
+			).not.toBeInTheDocument();
+			const attachment = thread.getByLabelText("Attach files to Thread");
+			attachment.focus();
+			await expect(attachment).toHaveFocus();
+			await userEvent.type(reply, "@");
+			const threadAgentMenu = await thread.findByRole("listbox", {
+				name: "Tag suggestions",
+			});
+			await expect(
+				within(threadAgentMenu).getByText("In this thread"),
+			).toBeVisible();
+			await userEvent.clear(reply);
+			await userEvent.type(reply, "@all");
+			await expect(
+				within(
+					await thread.findByRole("listbox", { name: "Tag suggestions" }),
+				).getByRole("option", { name: /sends to everyone in this thread/u }),
+			).toBeVisible();
+			await userEvent.clear(reply);
+			await userEvent.type(reply, "@build-smith @@platform");
+			await expect(reply).toHaveValue("@build-smith @@platform");
+			await userEvent.clear(reply);
 		});
-		await expect(
-			within(threadAgentMenu).getByText("In this thread"),
-		).toBeVisible();
-		await userEvent.clear(reply);
-		await userEvent.type(reply, "@all");
-		await expect(
-			within(
-				await thread.findByRole("listbox", { name: "Tag suggestions" }),
-			).getByRole("option", { name: /sends to everyone in this thread/u }),
-		).toBeVisible();
-		await userEvent.clear(reply);
-		await userEvent.type(reply, "@build-smith @@platform");
-		await expect(reply).toHaveValue("@build-smith @@platform");
-		await userEvent.clear(reply);
-		await userEvent.click(
-			thread.getByRole("button", {
-				name: /Routing details: Routed to Review Bot/u,
-			}),
+		await step(
+			"Routing details and context preserve the reply draft",
+			async () => {
+				await userEvent.click(
+					thread.getByRole("button", {
+						name: /Routing details: Routed to Review Bot/u,
+					}),
+				);
+				const page = within(canvasElement.ownerDocument.body);
+				await expect(
+					await page.findByRole("dialog", { name: "Routing details" }),
+				).toBeVisible();
+				await userEvent.keyboard("{Escape}");
+				await expect(
+					canvas.getByRole("complementary", { name: "Thread replies" }),
+				).toBeVisible();
+				await userEvent.type(reply, "A local preview reply.");
+				await userEvent.click(
+					thread.getByRole("button", { name: "Open thread context" }),
+				);
+				await expect(reply).not.toBeVisible();
+				await userEvent.click(
+					thread.getByRole("button", { name: "Back to replies" }),
+				);
+				await expect(reply).toHaveValue("A local preview reply.");
+				await waitFor(() => expect(reply).toHaveFocus());
+				await userEvent.keyboard("{Enter}");
+				await expect(
+					await thread.findByText("A local preview reply."),
+				).toBeVisible();
+				await expect(reply).toHaveValue("");
+			},
 		);
-		const page = within(canvasElement.ownerDocument.body);
-		await expect(
-			await page.findByRole("dialog", { name: "Routing details" }),
-		).toBeVisible();
-		await userEvent.keyboard("{Escape}");
-		await expect(
-			canvas.getByRole("complementary", { name: "Thread replies" }),
-		).toBeVisible();
-		await userEvent.type(reply, "A local preview reply.");
-		await userEvent.click(
-			thread.getByRole("button", { name: "Open thread context" }),
-		);
-		await expect(reply).not.toBeVisible();
-		await userEvent.click(
-			thread.getByRole("button", { name: "Back to replies" }),
-		);
-		await expect(reply).toHaveValue("A local preview reply.");
-		await waitFor(() => expect(reply).toHaveFocus());
-		await userEvent.keyboard("{Enter}");
-		await expect(
-			await thread.findByText("A local preview reply."),
-		).toBeVisible();
-		await expect(reply).toHaveValue("");
 	},
 };
