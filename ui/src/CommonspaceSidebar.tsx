@@ -518,6 +518,7 @@ export function CommonspaceSidebar({
 	const [form, setForm] = useState<"project" | "channel" | "agent" | null>(
 		null,
 	);
+	const creationRevision = useRef(0);
 	const [formError, setFormError] = useState<string | null>(null);
 	const [name, setName] = useState("");
 	const [path, setPath] = useState("");
@@ -629,6 +630,7 @@ export function CommonspaceSidebar({
 		navigationToken,
 	]);
 	const openCreation = useCallback((kind: CommonspaceCollectionKind) => {
+		creationRevision.current += 1;
 		setSettingsOpen(false);
 		setForm(kind);
 		setFormError(null);
@@ -1103,13 +1105,16 @@ export function CommonspaceSidebar({
 				agentIds,
 			};
 		} else return;
+		const submittedRevision = creationRevision.current;
 		try {
 			await store.mutate(mutation);
 		} catch (error) {
+			if (submittedRevision !== creationRevision.current) return;
 			// Keep the form open while the application-level toast shows the error.
 			setFormError(error instanceof Error ? error.message : String(error));
 			return;
 		}
+		if (submittedRevision !== creationRevision.current) return;
 		setForm(null);
 		setFormError(null);
 		setName("");

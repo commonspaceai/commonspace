@@ -801,11 +801,14 @@ export const WorkspaceSettingsDiagnostics: Story = {
 	},
 };
 
+const createCollection = fn(async (): Promise<void> => undefined);
 export const CreateChannelRequest: Story = {
 	args: {
 		createRequest: { kind: "channel", token: 1 },
+		store: createStoryStore(storyBootstrap, { mutate: createCollection }),
 	},
 	play: async ({ canvas }) => {
+		createCollection.mockReset();
 		const page = within(document.body);
 		await expect(
 			page.getByRole("textbox", { name: "Channel name" }),
@@ -833,6 +836,64 @@ export const CreateChannelRequest: Story = {
 		await expect(
 			page.getByRole("textbox", { name: "Project path" }),
 		).toHaveValue("");
+
+		for (const kind of ["project", "channel"] as const) {
+			let finish: (() => void) | undefined;
+			const pending = new Promise<void>((resolve, reject) => {
+				finish =
+					kind === "project"
+						? resolve
+						: () => reject(new Error("Earlier channel creation failed."));
+			});
+			if (finish === undefined)
+				throw new Error("Creation resolver was not initialized");
+			createCollection.mockImplementationOnce(() => pending);
+			const nameLabel = kind === "project" ? "Project name" : "Channel name";
+			await userEvent.clear(page.getByRole("textbox", { name: nameLabel }));
+			await userEvent.type(
+				page.getByRole("textbox", { name: nameLabel }),
+				`Submitted ${kind}`,
+			);
+			if (kind === "project")
+				await userEvent.type(
+					page.getByRole("textbox", { name: "Project path" }),
+					"/workspace/submitted",
+				);
+			await userEvent.click(
+				page.getByRole("button", { name: `Create ${kind}` }),
+			);
+			await userEvent.click(page.getByRole("button", { name: "Cancel" }));
+			await userEvent.click(
+				canvas.getByRole("button", { name: "Add channel" }),
+			);
+			await userEvent.type(
+				page.getByRole("textbox", { name: "Channel name" }),
+				"Keep this newer draft",
+			);
+			finish();
+			await pending.catch(() => undefined);
+			await userEvent.tab();
+			await expect(
+				page.getByRole("textbox", { name: "Channel name" }),
+			).toHaveValue("Keep this newer draft");
+			await expect(page.queryByRole("alert")).not.toBeInTheDocument();
+		}
+
+		createCollection.mockRejectedValueOnce(
+			new Error("Current creation failed."),
+		);
+		await userEvent.click(page.getByRole("button", { name: "Create channel" }));
+		await expect(await page.findByRole("alert")).toHaveTextContent(
+			"Current creation failed.",
+		);
+		await expect(
+			page.getByRole("textbox", { name: "Channel name" }),
+		).toHaveValue("Keep this newer draft");
+		createCollection.mockResolvedValueOnce(undefined);
+		await userEvent.click(page.getByRole("button", { name: "Create channel" }));
+		await waitFor(() =>
+			expect(page.queryByRole("dialog")).not.toBeInTheDocument(),
+		);
 	},
 };
 
