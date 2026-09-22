@@ -122,28 +122,10 @@ function threadContextStatusLabel(
 	}
 }
 
-function restoreImages(
-	current: SendImageAttachment[],
-	restored: SendImageAttachment[],
-): SendImageAttachment[] {
-	return [
-		...restored,
-		...current.filter(
-			(candidate) =>
-				!restored.some(
-					(item) =>
-						item.name === candidate.name &&
-						item.mimeType === candidate.mimeType &&
-						item.data === candidate.data,
-				),
-		),
-	];
-}
-
-function restoreFiles(
-	current: SendFileAttachment[],
-	restored: SendFileAttachment[],
-): SendFileAttachment[] {
+function restoreAttachments<T extends SendFileAttachment>(
+	current: T[],
+	restored: T[],
+) {
 	return [
 		...restored,
 		...current.filter(
@@ -2337,10 +2319,10 @@ export function CommonspaceConversation({
 		if (thread) {
 			setThreadDraft((current) => restoreText(current, submission.text));
 			setPendingThreadImages((current) =>
-				restoreImages(current, submission.attachments),
+				restoreAttachments(current, submission.attachments),
 			);
 			setPendingThreadFiles((current) =>
-				restoreFiles(current, submission.files),
+				restoreAttachments(current, submission.files),
 			);
 			if (submission.targetAgentId !== undefined) {
 				const agent = bootstrap?.agents.find(
@@ -2355,9 +2337,11 @@ export function CommonspaceConversation({
 		} else {
 			setDraft((current) => restoreText(current, submission.text));
 			setPendingImages((current) =>
-				restoreImages(current, submission.attachments),
+				restoreAttachments(current, submission.attachments),
 			);
-			setPendingFiles((current) => restoreFiles(current, submission.files));
+			setPendingFiles((current) =>
+				restoreAttachments(current, submission.files),
+			);
 			composer.current?.focus();
 		}
 		store.dismissPendingSubmission(submission.id);

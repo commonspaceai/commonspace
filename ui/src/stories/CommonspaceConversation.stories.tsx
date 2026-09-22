@@ -800,8 +800,16 @@ export const PendingAdmissionRecovery: Story = {
 					id: "submission-failed",
 					conversation: directMessage,
 					text: "Restore this failed direction.",
-					attachments: [],
-					files: [],
+					attachments: [
+						{
+							name: "draft.png",
+							mimeType: "image/png",
+							data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+						},
+					],
+					files: [
+						{ name: "notes.txt", mimeType: "text/plain", data: "bm90ZXM=" },
+					],
 					delivery: "steer",
 					createdAt: "2026-09-03T10:00:11.000Z",
 					status: "failed",
@@ -817,8 +825,17 @@ export const PendingAdmissionRecovery: Story = {
 		});
 		await expect(composer).toBeEnabled();
 		await expect(canvas.getByText("Admitting · Queued")).toBeVisible();
+		await userEvent.type(composer, "Newer direction.");
 		await userEvent.click(canvas.getByRole("button", { name: "Restore" }));
-		await expect(composer).toHaveValue("Restore this failed direction.");
+		await expect(composer).toHaveValue(
+			"Restore this failed direction.\n\nNewer direction.",
+		);
+		await expect(
+			canvas.getByRole("button", { name: "Remove draft.png" }),
+		).toBeVisible();
+		await expect(
+			canvas.getByRole("button", { name: "Remove notes.txt" }),
+		).toBeVisible();
 		await expect(canvas.getByRole("button", { name: "Queue" })).toBeEnabled();
 	},
 };
