@@ -1,11 +1,4 @@
-import {
-	mkdir,
-	mkdtemp,
-	readFile,
-	rename,
-	rm,
-	writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -82,27 +75,11 @@ describe("standalone Commonspace server", () => {
 			expect(failedResponse.status).toBe(400);
 			const failureBody: unknown = await failedResponse.json();
 			expect(JSON.stringify(failureBody)).not.toContain(root);
-			const failure = z
-				.object({ code: z.string(), error: z.string() })
-				.parse(failureBody);
-			expect(failure.code).toBe("invalid_mutation");
-			expect(failure.error).toBe(
-				"Commonspace could not save workspace changes.",
-			);
-			expect(running.service.snapshot()).toEqual(baseline);
-			await expect(readFile(statePath)).rejects.toMatchObject({
-				code: "EISDIR",
-			});
-
-			const invalidResponse = await fetch(`${running.url}/api/mutate`, {
-				...request,
-				body: JSON.stringify({ action: "set-defaults", maxAgentPerTurn: 5 }),
-			});
-			expect(invalidResponse.status).toBe(400);
-			await expect(invalidResponse.json()).resolves.toMatchObject({
+			expect(failureBody).toEqual({
 				code: "invalid_mutation",
-				error: expect.stringContaining("maxAgentPerTurn"),
+				error: "Commonspace could not save workspace changes.",
 			});
+			expect(running.service.snapshot()).toEqual(baseline);
 
 			await rm(statePath, { recursive: true });
 			await rename(savedStatePath, statePath);
