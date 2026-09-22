@@ -5960,7 +5960,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					);
 				}
 			}
-			throw error;
+			throw new Error("Commonspace could not save workspace changes.", {
+				cause: error,
+			});
 		}
 	}
 

@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	rename,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -31,6 +38,83 @@ afterEach(async () => {
 });
 
 describe("standalone Commonspace server", () => {
+	it.each(["state.json", "state.backup.json"])(
+		"keeps %s persistence failures private and restores the last durable state",
+		async (failedFile) => {
+			const root = await mkdtemp(
+				join(tmpdir(), "commonspace-private-mutation-"),
+			);
+			roots.push(root);
+			const options = {
+				root,
+				port: 0,
+				logger: { warn: () => undefined, info: () => undefined },
+			};
+			const running = await startCommonspaceServer(options);
+			servers.push(running);
+			const request = {
+				method: "POST",
+				headers: { origin: running.url, "content-type": "application/json" },
+			};
+			const baselineResponse = await fetch(`${running.url}/api/mutate`, {
+				...request,
+				body: JSON.stringify({
+					action: "create-channel",
+					name: "baseline",
+					agentIds: [],
+				}),
+			});
+			expect(baselineResponse.status).toBe(200);
+			const baseline = running.service.snapshot();
+			const statePath = join(root, failedFile);
+			const savedStatePath = join(root, "saved-state.json");
+			await rename(statePath, savedStatePath);
+			await mkdir(statePath);
+
+			const failedResponse = await fetch(`${running.url}/api/mutate`, {
+				...request,
+				body: JSON.stringify({
+					action: "create-channel",
+					name: "failed",
+					agentIds: [],
+				}),
+			});
+			expect(failedResponse.status).toBe(400);
+			const failureBody: unknown = await failedResponse.json();
+			expect(JSON.stringify(failureBody)).not.toContain(root);
+			const failure = z
+				.object({ code: z.string(), error: z.string() })
+				.parse(failureBody);
+			expect(failure.code).toBe("invalid_mutation");
+			expect(failure.error).toBe(
+				"Commonspace could not save workspace changes.",
+			);
+			expect(running.service.snapshot()).toEqual(baseline);
+			await expect(readFile(statePath)).rejects.toMatchObject({
+				code: "EISDIR",
+			});
+
+			const invalidResponse = await fetch(`${running.url}/api/mutate`, {
+				...request,
+				body: JSON.stringify({ action: "set-defaults", maxAgentPerTurn: 5 }),
+			});
+			expect(invalidResponse.status).toBe(400);
+			await expect(invalidResponse.json()).resolves.toMatchObject({
+				code: "invalid_mutation",
+				error: expect.stringContaining("maxAgentPerTurn"),
+			});
+
+			await rm(statePath, { recursive: true });
+			await rename(savedStatePath, statePath);
+			await running.close();
+			servers.splice(servers.indexOf(running), 1);
+			const restarted = await startCommonspaceServer(options);
+			servers.push(restarted);
+			expect(restarted.service.snapshot().channels).toEqual(baseline.channels);
+			expect(restarted.service.snapshot().revision).toBe(baseline.revision);
+		},
+	);
+
 	it("keeps canonical Project roots out of browser-visible state", async () => {
 		const root = await mkdtemp(
 			join(tmpdir(), "commonspace-private-project-roots-"),
