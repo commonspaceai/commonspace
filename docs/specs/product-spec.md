@@ -170,8 +170,9 @@ Agent settings provide an on-demand, read-only native capability browser for eve
 
 1. One or more explicit `@agent` mentions are authoritative.
 2. A mentioned Agent that is not already a Channel member is added immediately and invoked.
-3. When several Agents are mentioned, each receives the original message; routing may not replace them with different Agents.
-4. Explicit Project references are authoritative for the message. Inference may assign a relevant subset to each participant delivery.
+3. A single mentioned Agent is delivered directly without inference. When several Agents are mentioned, the accepted message is persisted before inference classifies only collaboration mode and speaker order. Independent work runs in parallel; discussion, review of one another, reconciliation, debate, or a shared conclusion uses an ordered relay. Each receives the original message, and later relay speakers also receive a bounded preceding peer reply.
+4. The explicitly named participant set is fixed, including when it exceeds the default inference selection limit. Classification cannot add, drop, duplicate, or substitute Agents, or change the message's existing Project scope. Invalid classification or inference failure leaves the accepted request visibly failed and retryable without dispatching parallel work.
+5. Explicit Project references are authoritative for the message. Explicitly addressed participants retain the message's selected or inherited Project references; shape classification does not infer additional Projects.
 
 ### 5.5 Thread continuation and peer handoff
 

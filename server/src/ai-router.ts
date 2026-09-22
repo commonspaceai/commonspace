@@ -69,6 +69,7 @@ export interface AiRouteInput {
 	projects: Array<{ id: string; name: string }>;
 	inferProjects: boolean;
 	maxAgents: number;
+	fixedAgentIds?: string[];
 }
 
 const CONVERSATIONAL_ADDRESSING =
@@ -85,8 +86,9 @@ export function buildRoutingPrompt(input: AiRouteInput): string {
 		matchedTerms: candidate.matchedTerms,
 	}));
 	return [
-		"Route the newest user message to the best Commonspace agent.",
-		`Select one owner by default. Select at most ${String(input.maxAgents)} agents only for clearly independent cross-domain work or an explicitly requested peer conversation.`,
+		input.fixedAgentIds === undefined
+			? `Route the newest user message to the best Commonspace agent. Select one owner by default. Select at most ${String(input.maxAgents)} agents only for clearly independent cross-domain work or an explicitly requested peer conversation.`
+			: `The user explicitly selected these Agents: ${JSON.stringify(input.fixedAgentIds)}. Return each exactly once, without adding, dropping, or substituting participants. Classify only delivery mode and speaker order. Preserve the mention order unless the request specifies another speaker order.`,
 		'Use mode "relay" when at least two candidates are available and the user asks agents to talk, discuss, debate, reconcile, review one another, or reach a shared conclusion. Otherwise use mode "parallel".',
 		"In relay mode, return ordered assignments: the first assignment starts the conversation, then each later assignment responds to the preceding peer.",
 		"Return at least one assignment. Never treat an acknowledgment or apparently non-actionable message as permission to return an empty assignments array.",
@@ -98,9 +100,11 @@ export function buildRoutingPrompt(input: AiRouteInput): string {
 		'Return JSON only: {"mode":"parallel","assignments":[{"agentId":"id","projectIds":["project-id"]}],"confidence":0.0,"reason":"short explanation"}.',
 		`Candidates: ${JSON.stringify(candidates)}`,
 		`Available Projects: ${JSON.stringify(input.projects)}`,
-		input.inferProjects
-			? "Project selection: infer the relevant Project subset for each assignment; empty means genuinely projectless."
-			: "Project selection: explicit references are authoritative; each assignment may use only the relevant subset.",
+		input.fixedAgentIds !== undefined
+			? "Project selection is fixed: every assignment must retain all Available Project ids, including an empty set. Do not infer or change Project scope."
+			: input.inferProjects
+				? "Project selection: infer the relevant Project subset for each assignment; empty means genuinely projectless."
+				: "Project selection: explicit references are authoritative; each assignment may use only the relevant subset.",
 		input.context.length === 0
 			? "Recent thread context: none"
 			: `Recent thread context:\n${input.context.join("\n")}`,

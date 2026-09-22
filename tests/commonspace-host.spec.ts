@@ -23,6 +23,8 @@ import { requestIsLoopback, requestIsSameOrigin } from "../server/src/app.ts";
 import {
 	type AgentRunInput,
 	CommonspaceHostService,
+	type CommonspaceRouteInput,
+	type CommonspaceRouteResult,
 	unsafeModeForAdapter,
 } from "../server/src/service.ts";
 import { addTestHarness, discoverTestHarnesses } from "./test-harnesses.ts";
@@ -482,86 +484,98 @@ describe("Commonspace host authority", () => {
 		]);
 	});
 
-	it("terminalizes queued pending routing when its selected Project is removed", async () => {
-		const root = await mkdtemp(
-			join(tmpdir(), "commonspace-pending-routing-project-removal-"),
-		);
-		roots.push(root);
-		const workspace = join(root, "workspace");
-		await mkdir(workspace);
-		const firstStarted = deferred<void>();
-		const firstCompleted = deferred<{ text: string }>();
-		const runAgent = vi.fn(async () => {
-			if (runAgent.mock.calls.length === 1) {
-				firstStarted.resolve();
-				return firstCompleted.promise;
-			}
-			return { text: "The queued request ran without its selected Project." };
-		});
-		const routeAgents = vi.fn(async () => ({
-			assignments: [{ agentId: "codex", projectIds: [] }],
-			reason: "Route the queued request after the active turn.",
-		}));
-		const service = new CommonspaceHostService(
-			{},
-			{ root },
-			{
-				discoverAgents: discoverTestHarnesses,
-				runAgent: withHarnessUtilities(runAgent),
-				routeAgents,
-			},
-		);
-		await service.initialize();
-		await addTestHarness(service, "codex", "Review Bot");
-		const project = mustExist(
-			(
-				await service.mutate({
-					action: "create-project",
-					name: "Removable",
-					paths: [workspace],
-				})
-			).projects[0],
-		);
-		const channel = mustExist(
-			(
-				await service.mutate({
-					action: "create-channel",
-					name: "review",
-					agentIds: ["codex"],
-				})
-			).channels[0],
-		);
+	it.each(["inferred", "explicit"])(
+		"terminalizes queued %s routing when its selected Project is removed",
+		async (addressing) => {
+			const root = await mkdtemp(
+				join(tmpdir(), "commonspace-pending-routing-project-removal-"),
+			);
+			roots.push(root);
+			const workspace = join(root, "workspace");
+			await mkdir(workspace);
+			const firstStarted = deferred<void>();
+			const firstCompleted = deferred<{ text: string }>();
+			const runAgent = vi.fn(async () => {
+				if (runAgent.mock.calls.length === 1) {
+					firstStarted.resolve();
+					return firstCompleted.promise;
+				}
+				return { text: "The queued request ran without its selected Project." };
+			});
+			const routeAgents = vi.fn(async () => ({
+				assignments: [{ agentId: "codex", projectIds: [] }],
+				reason: "Route the queued request after the active turn.",
+			}));
+			const service = new CommonspaceHostService(
+				{},
+				{ root },
+				{
+					discoverAgents: discoverTestHarnesses,
+					runAgent: withHarnessUtilities(runAgent),
+					routeAgents,
+				},
+			);
+			await service.initialize();
+			await addTestHarness(service, "codex", "Review Bot");
+			await addTestHarness(service, "hermes", "UI Bot");
+			const project = mustExist(
+				(
+					await service.mutate({
+						action: "create-project",
+						name: "Removable",
+						paths: [workspace],
+					})
+				).projects[0],
+			);
+			const channel = mustExist(
+				(
+					await service.mutate({
+						action: "create-channel",
+						name: "review",
+						agentIds: ["codex", "hermes"],
+					})
+				).channels[0],
+			);
 
-		const first = await service.send({
-			conversation: { kind: "channel", id: channel.id },
-			text: "@review-bot Start the review.",
-		});
-		await firstStarted.promise;
-		const queued = await service.send({
-			conversation: { kind: "channel", id: channel.id },
-			threadId: mustExist(first.thread).id,
-			projectId: project.id,
-			delivery: "queue",
-			text: "Continue the review in the selected Project.",
-		});
-		await service.mutate({ action: "remove-project", projectId: project.id });
-		const afterRemoval = service.snapshot();
-		firstCompleted.resolve({ text: "The active request completed." });
-		await service.whenIdle();
+			const first = await service.send({
+				conversation: { kind: "channel", id: channel.id },
+				text: "@review-bot Start the review.",
+			});
+			await firstStarted.promise;
+			const queued = await service.send({
+				conversation: { kind: "channel", id: channel.id },
+				threadId: mustExist(first.thread).id,
+				projectId: project.id,
+				delivery: "queue",
+				text:
+					addressing === "explicit"
+						? "@review-bot @ui-bot reconcile the review in the selected Project."
+						: "Continue the review in the selected Project.",
+			});
+			await service.mutate({ action: "remove-project", projectId: project.id });
+			const afterRemoval = service.snapshot();
+			firstCompleted.resolve({ text: "The active request completed." });
+			await service.whenIdle();
 
-		const reason =
-			"Interrupted because a Project used by this run was removed.";
-		expect(afterRemoval.messages[`channel:${channel.id}`]).toContainEqual(
-			expect.objectContaining({
-				id: queued.accepted.id,
-				replyStatus: "failed",
-				replyError: reason,
-				routing: expect.objectContaining({ status: "failed", reason }),
-			}),
-		);
-		expect(routeAgents).not.toHaveBeenCalled();
-		expect(runAgent).toHaveBeenCalledOnce();
-	});
+			const reason =
+				"Interrupted because a Project used by this run was removed.";
+			expect(afterRemoval.messages[`channel:${channel.id}`]).toContainEqual(
+				expect.objectContaining({
+					id: queued.accepted.id,
+					replyStatus: "failed",
+					replyError: reason,
+					routing: expect.objectContaining({
+						status: "failed",
+						reason,
+						source: addressing === "explicit" ? "explicit" : "ai",
+						agentIds: addressing === "explicit" ? ["codex", "hermes"] : [],
+					}),
+				}),
+			);
+			expect(routeAgents).not.toHaveBeenCalled();
+			expect(runAgent).toHaveBeenCalledOnce();
+		},
+	);
 
 	it("keeps an active Project turn running when another path is added", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-project-path-add-"));
@@ -1612,6 +1626,411 @@ esac
 		second.resolve("Second response.");
 		await service.whenIdle();
 		expect(runAgent).toHaveBeenCalledTimes(2);
+	});
+
+	it.each([
+		[
+			"relay",
+			"@backend @frontend review this together and reconcile one answer.",
+		],
+		[
+			"parallel",
+			"@backend inspect the API independently and @frontend inspect the UI independently.",
+		],
+		["direct", "@backend review the API."],
+	] as const)(
+		"preserves explicit participants in %s work",
+		async (mode, text) => {
+			const root = await mkdtemp(join(tmpdir(), "commonspace-explicit-shape-"));
+			roots.push(root);
+			const backend = deferred<string>();
+			const frontend = deferred<string>();
+			const agents = ["backend", "frontend", "outside"].map((id) => ({
+				id,
+				displayName: id.slice(0, 1).toLocaleUpperCase() + id.slice(1),
+				adapter: "hermes" as const,
+				status: "stopped" as const,
+			}));
+			const runAgent = vi.fn((input: AgentRunInput) =>
+				input.agent.id === "backend" ? backend.promise : frontend.promise,
+			);
+			const routeAgents = vi.fn<
+				(input: CommonspaceRouteInput) => Promise<CommonspaceRouteResult>
+			>(async () => {
+				return {
+					mode: mode === "relay" ? ("relay" as const) : ("parallel" as const),
+					assignments: [
+						{ agentId: "backend", projectIds: [] },
+						{ agentId: "frontend", projectIds: [] },
+					],
+					reason: "Collaboration shape classified for the fixed participants.",
+				};
+			});
+			const service = new CommonspaceHostService(
+				{},
+				{ root },
+				{
+					discoverAgents: async () => agents,
+					runAgent,
+					routeAgents,
+				},
+			);
+			await service.initialize();
+			await addDiscoveredAgents(service, ...agents.map((agent) => agent.id));
+			await service.mutate({ action: "set-defaults", maxAgentsPerTurn: 1 });
+			const channel = mustExist(
+				(
+					await service.mutate({
+						action: "create-channel",
+						name: "engineering",
+						agentIds: agents.map((agent) => agent.id),
+					})
+				).channels[0],
+			);
+			const response = await service.send({
+				conversation: { kind: "channel", id: channel.id },
+				text,
+			});
+			expect(response.accepted.routing?.status).toBe(
+				mode === "direct" ? undefined : "pending",
+			);
+			await vi.waitFor(() => expect(runAgent).toHaveBeenCalled());
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			const beforeBackendCompleted = runAgent.mock.calls.map(([input]) => ({
+				agentId: input.agent.id,
+				message: input.message,
+			}));
+			backend.resolve("Backend owns API contracts.");
+			frontend.resolve("Frontend accepts the API contract.");
+			await service.whenIdle();
+			const accepted = mustExist(
+				service
+					.snapshot()
+					.messages[`channel:${channel.id}`]?.find(
+						(message) => message.id === response.accepted.id,
+					),
+			);
+			if (mode === "direct") {
+				expect(routeAgents).not.toHaveBeenCalled();
+				expect(runAgent).toHaveBeenCalledOnce();
+				expect(runAgent.mock.calls[0]?.[0].message).toBe(text);
+				expect(accepted.routing?.agentIds).toEqual(["backend"]);
+				await service.close();
+				return;
+			}
+			expect(routeAgents).toHaveBeenCalledExactlyOnceWith(
+				expect.objectContaining({
+					fixedAgentIds: ["backend", "frontend"],
+					inferProjects: false,
+				}),
+			);
+			expect(accepted.text).toBe(text);
+			expect(accepted.routing?.source).toBe("explicit");
+			expect(accepted.routing?.agentIds).toEqual(["backend", "frontend"]);
+			expect(
+				accepted.routing?.assignments.map((assignment) => assignment.agentId),
+			).toEqual(["backend", "frontend"]);
+			expect(beforeBackendCompleted).toEqual(
+				mode === "relay"
+					? [{ agentId: "backend", message: text }]
+					: [
+							{ agentId: "backend", message: text },
+							{ agentId: "frontend", message: text },
+						],
+			);
+			expect(accepted.routing?.mode).toBe(mode);
+			expect(runAgent.mock.calls[1]?.[0].message).toBe(
+				mode === "relay"
+					? `Original user message:\n\n${text}\n\nFrom Backend:\n\nBackend owns API contracts.`
+					: text,
+			);
+			if (mode === "relay") {
+				const threadId = mustExist(response.thread).id;
+				await service.send({
+					conversation: response.accepted.conversation,
+					threadId,
+					text: "@outside add context.",
+				});
+				await service.whenIdle();
+				await service.send({
+					conversation: response.accepted.conversation,
+					threadId,
+					text,
+				});
+				await service.whenIdle();
+				expect(
+					service.snapshot().threads.find((thread) => thread.id === threadId)
+						?.agentIds,
+				).toEqual(["backend", "frontend", "outside"]);
+			}
+			await service.close();
+		},
+	);
+
+	it.each([
+		["added participant", ["backend", "frontend", "outside"], "relay"],
+		["omitted participant", ["backend"], "parallel"],
+		["substituted participant", ["backend", "outside"], "relay"],
+		["duplicate participant", ["backend", "backend"], "relay"],
+		["missing mode", ["backend", "frontend"], undefined],
+		["changed Project scope", ["backend", "frontend"], "relay"],
+		["inference failure", ["backend", "frontend"], "relay"],
+	] as const)(
+		"retains a retryable explicit request after %s",
+		async (failure, agentIds, mode) => {
+			const root = await mkdtemp(
+				join(tmpdir(), "commonspace-explicit-failure-"),
+			);
+			roots.push(root);
+			const workspace = join(root, "workspace");
+			await mkdir(workspace);
+			const agents = ["backend", "frontend", "outside"].map((id) => ({
+				id,
+				displayName: id.slice(0, 1).toLocaleUpperCase() + id.slice(1),
+				adapter: "hermes" as const,
+				status: "stopped" as const,
+			}));
+			const runAgent = vi.fn(async () => "Reviewed the request.");
+			const routeAgents = vi.fn(
+				async (
+					input: CommonspaceRouteInput,
+				): Promise<CommonspaceRouteResult> => {
+					if (failure === "inference failure")
+						throw new Error("Classifier unavailable.");
+					const result: CommonspaceRouteResult = {
+						assignments: agentIds.map((agentId) => ({
+							agentId,
+							projectIds:
+								failure === "changed Project scope"
+									? []
+									: input.projects.map((project) => project.id),
+						})),
+						reason: "Invalid explicit shape result.",
+					};
+					if (mode !== undefined) result.mode = mode;
+					return result;
+				},
+			);
+			const service = new CommonspaceHostService(
+				{},
+				{ root },
+				{
+					discoverAgents: async () => agents,
+					runAgent,
+					routeAgents,
+				},
+			);
+			await service.initialize();
+			await addDiscoveredAgents(service, ...agents.map((agent) => agent.id));
+			const project = mustExist(
+				(
+					await service.mutate({
+						action: "create-project",
+						name: "App",
+						paths: [workspace],
+					})
+				).projects[0],
+			);
+			const channel = mustExist(
+				(
+					await service.mutate({
+						action: "create-channel",
+						name: "engineering",
+						agentIds: agents.map((agent) => agent.id),
+					})
+				).channels[0],
+			);
+			const text =
+				"@backend @frontend review this together and reconcile one answer.";
+			const response = await service.send({
+				conversation: { kind: "channel", id: channel.id },
+				text,
+				projectIds: [project.id],
+			});
+			await service.whenIdle();
+			const failed = mustExist(
+				service
+					.snapshot()
+					.messages[`channel:${channel.id}`]?.find(
+						(message) => message.id === response.accepted.id,
+					),
+			);
+			expect(failed).toMatchObject({
+				text,
+				replyStatus: "failed",
+				projectIds: [project.id],
+				routing: {
+					source: "explicit",
+					status: "failed",
+					agentIds: ["backend", "frontend"],
+					assignments: [],
+				},
+			});
+			expect(runAgent).not.toHaveBeenCalled();
+			expect(
+				routeAgents.mock.calls[0]?.[0].candidates
+					.map((candidate) => candidate.id)
+					.sort(),
+			).toEqual(["backend", "frontend"]);
+			const persisted: unknown = JSON.parse(
+				await readFile(join(root, "state.json"), "utf8"),
+			);
+			expect(persisted).toMatchObject({
+				messages: {
+					[`channel:${channel.id}`]: [
+						expect.objectContaining({
+							id: failed.id,
+							text,
+							replyStatus: "failed",
+						}),
+					],
+				},
+			});
+			routeAgents.mockResolvedValueOnce({
+				mode: "relay",
+				assignments: ["backend", "frontend"].map((agentId) => ({
+					agentId,
+					projectIds: [project.id],
+				})),
+				reason: "Recovered collaboration classification.",
+			});
+			if (failure === "inference failure") {
+				await service.mutate({
+					action: "update-agent-profile",
+					agentId: "backend",
+					displayName: "Renamed Backend",
+				});
+			}
+			await service.retryRouting({ sourceMessageId: failed.id, mode: "ai" });
+			await service.whenIdle();
+			const messages =
+				service.snapshot().messages[`channel:${channel.id}`] ?? [];
+			expect(
+				messages.filter((message) => message.authorType === "user"),
+			).toEqual([
+				expect.objectContaining({
+					id: failed.id,
+					text,
+					routing: expect.objectContaining({
+						source: "explicit",
+						status: "resolved",
+						mode: "relay",
+						agentIds: ["backend", "frontend"],
+						assignments: expect.arrayContaining([
+							expect.objectContaining({
+								agentId: "backend",
+								projectIds: [project.id],
+							}),
+							expect.objectContaining({
+								agentId: "frontend",
+								projectIds: [project.id],
+							}),
+						]),
+					}),
+				}),
+			]);
+			expect(
+				messages
+					.filter((message) => message.authorType === "agent")
+					.map((message) => message.authorId),
+			).toEqual(["backend", "frontend"]);
+			await service.close();
+		},
+	);
+
+	it("makes interrupted explicit classification retryable after restart", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-explicit-pending-"));
+		const restartedRoot = await mkdtemp(
+			join(tmpdir(), "commonspace-explicit-restart-"),
+		);
+		roots.push(root, restartedRoot);
+		const agents = ["backend", "frontend"].map((id) => ({
+			id,
+			displayName: id,
+			adapter: "hermes" as const,
+			status: "stopped" as const,
+		}));
+		const route = deferred<CommonspaceRouteResult>();
+		const result: CommonspaceRouteResult = {
+			mode: "relay",
+			assignments: agents.map((agent) => ({
+				agentId: agent.id,
+				projectIds: [],
+			})),
+			reason: "The user requested a shared conclusion.",
+		};
+		const dependencies = {
+			discoverAgents: async () => agents,
+			runAgent: async () => "Reviewed.",
+			routeAgents: async () => route.promise,
+		};
+		const service = new CommonspaceHostService({}, { root }, dependencies);
+		await service.initialize();
+		await addDiscoveredAgents(service, "backend", "frontend");
+		const channel = mustExist(
+			(
+				await service.mutate({
+					action: "create-channel",
+					name: "engineering",
+					agentIds: ["backend", "frontend"],
+				})
+			).channels[0],
+		);
+		const sent = await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			text: "@backend @frontend discuss and reconcile one answer.",
+		});
+		const pendingState = await readFile(join(root, "state.json"), "utf8");
+		route.resolve(result);
+		await service.whenIdle();
+		await service.close();
+		await writeFile(join(restartedRoot, "state.json"), pendingState);
+		const restarted = new CommonspaceHostService(
+			{},
+			{ root: restartedRoot },
+			{
+				...dependencies,
+				routeAgents: async () => result,
+			},
+		);
+		await restarted.initialize();
+		expect(restarted.snapshot().messages[`channel:${channel.id}`]).toEqual([
+			expect.objectContaining({
+				id: sent.accepted.id,
+				text: sent.accepted.text,
+				replyStatus: "failed",
+				routing: expect.objectContaining({
+					source: "explicit",
+					status: "failed",
+					agentIds: ["backend", "frontend"],
+				}),
+			}),
+		]);
+		await restarted.retryRouting({
+			sourceMessageId: sent.accepted.id,
+			mode: "ai",
+		});
+		await restarted.whenIdle();
+		const messages =
+			restarted.snapshot().messages[`channel:${channel.id}`] ?? [];
+		expect(messages.filter((message) => message.authorType === "user")).toEqual(
+			[
+				expect.objectContaining({
+					id: sent.accepted.id,
+					routing: expect.objectContaining({
+						source: "explicit",
+						status: "resolved",
+						mode: "relay",
+					}),
+				}),
+			],
+		);
+		expect(
+			messages
+				.filter((message) => message.authorType === "agent")
+				.map((message) => message.authorId),
+		).toEqual(["backend", "frontend"]);
+		await restarted.close();
 	});
 
 	it("starts one speaker and passes each peer response through an inferred relay", async () => {
@@ -3945,6 +4364,14 @@ esac
 			{
 				discoverAgents: async () => agents,
 				runAgent,
+				routeAgents: async () => ({
+					mode: "parallel",
+					assignments: agents.map((agent) => ({
+						agentId: agent.id,
+						projectIds: [],
+					})),
+					reason: "All explicitly addressed participants work independently.",
+				}),
 			},
 		);
 		await service.initialize();
@@ -4230,6 +4657,14 @@ esac
 					},
 				],
 				runAgent,
+				routeAgents: async () => ({
+					mode: "parallel",
+					assignments: ["backend", "frontend"].map((agentId) => ({
+						agentId,
+						projectIds: [],
+					})),
+					reason: "All explicitly addressed participants work independently.",
+				}),
 			},
 		);
 		await service.initialize();

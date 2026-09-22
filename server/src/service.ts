@@ -993,14 +993,15 @@ function completedRoutingTiming(
 }
 
 function failedRoutingDecision(
+	previous: CommonspaceRoutingDecision | undefined,
 	startedAt: string,
 	reason: string,
 ): CommonspaceRoutingDecision {
 	return {
-		source: "ai",
+		source: previous?.source === "explicit" ? "explicit" : "ai",
 		status: "failed",
 		...completedRoutingTiming(startedAt),
-		agentIds: [],
+		agentIds: previous?.source === "explicit" ? [...previous.agentIds] : [],
 		assignments: [],
 		corrections: [],
 		inferredProjectIds: [],
@@ -5762,6 +5763,19 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			Object.entries(this.state.messages).map(([key, conversationMessages]) => [
 				key,
 				conversationMessages.map((message) => {
+					if (message.routing?.status === "pending") {
+						changed = true;
+						return {
+							...message,
+							routing: failedRoutingDecision(
+								message.routing,
+								message.routing.startedAt ?? message.createdAt,
+								replyError,
+							),
+							replyStatus: "failed" as const,
+							replyError,
+						};
+					}
 					if (
 						message.replyStatus !== "queued" &&
 						message.replyStatus !== "running"
@@ -6444,6 +6458,15 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		if (projectIds.length > 0) sendRequest.projectIds = projectIds;
 		if (request.mode === "manual") sendRequest.targetAgentId = request.agentId;
 		const prepared = await this.prepareSend(sendRequest);
+		if (request.mode === "ai" && located.source.routing.source === "explicit") {
+			prepared.agentIds = [...located.source.routing.agentIds];
+			prepared.inferProjects = false;
+			prepared.routing = this.explicitSendRouting(
+				prepared.agentIds,
+				prepared.projects,
+				"Retrying explicitly addressed Agents.",
+			);
+		}
 		if (prepared.routing === undefined)
 			throw new Error("routing retry did not produce a routing decision");
 		const attachments = await Promise.all(
@@ -7220,7 +7243,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		const routingAt = now();
 		return {
 			source: "explicit",
-			...completedRoutingTiming(routingAt),
+			...(agentIds.length > 1
+				? { status: "pending" as const, startedAt: routingAt }
+				: completedRoutingTiming(routingAt)),
 			agentIds,
 			assignments: agentIds.map((agentId) => ({
 				id: crypto.randomUUID(),
@@ -7383,6 +7408,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	): PreparedSend {
 		const inferProjects =
 			conversation.kind === "channel" &&
+			!(
+				conversation.routing.source === "explicit" &&
+				conversation.routing.status === "pending"
+			) &&
 			request.threadId === undefined &&
 			!input.projectSelection.selectionProvided;
 		const prepared: PreparedSend = {
@@ -7439,7 +7468,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	}
 
 	private prepareChannelRoute(
-		send: Pick<PreparedSend, "text" | "request" | "agents" | "inferProjects">,
+		send: Pick<
+			PreparedSend,
+			"text" | "request" | "agents" | "inferProjects" | "routing"
+		>,
 		thread: CommonspaceThread | undefined,
 		memberIds: readonly string[],
 	): PreparedChannelRoute {
@@ -7515,6 +7547,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				candidates.length,
 			),
 		};
+		if (send.routing?.source === "explicit") {
+			input.fixedAgentIds = send.routing.agentIds;
+			input.maxAgents = send.routing.agentIds.length;
+		}
 		return { channelId, candidates, projects, input };
 	}
 
@@ -7579,6 +7615,15 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				throw new Error("inference routing returned an invalid assignment");
 			}
 			const projectIds = [...new Set(assignment.projectIds)];
+			if (
+				prepared.input.fixedAgentIds !== undefined &&
+				!sameIdentifierSet(
+					projectIds,
+					prepared.projects.map((project) => project.id),
+				)
+			) {
+				throw new Error("inference routing must retain explicit Project scope");
+			}
 			if (projectIds.some((projectId) => !allowedProjectIds.has(projectId))) {
 				throw new Error("inference routing returned an invalid assignment");
 			}
@@ -7599,6 +7644,17 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			this.currentAllowedRouteProjectIds(prepared),
 		);
 		const agentIds = assignments.map((assignment) => assignment.agentId);
+		if (prepared.input.fixedAgentIds !== undefined) {
+			if (!sameIdentifierSet(prepared.input.fixedAgentIds, agentIds)) {
+				throw new Error(
+					"inference routing must retain every explicitly addressed Agent exactly once",
+				);
+			}
+			if (result.mode !== "parallel" && result.mode !== "relay")
+				throw new Error(
+					"inference routing must classify explicit collaboration as parallel or relay",
+				);
+		}
 		const reason = result.reason.normalize("NFKC").trim().slice(0, 500);
 		if (agentIds.length === 0 || reason === "")
 			throw new Error("inference routing returned no valid decision");
@@ -7618,7 +7674,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	}
 
 	private async routeChannelMessage(
-		send: Pick<PreparedSend, "text" | "request" | "agents" | "inferProjects">,
+		send: Pick<
+			PreparedSend,
+			"text" | "request" | "agents" | "inferProjects" | "routing"
+		>,
 		thread: CommonspaceThread | undefined,
 		memberIds: readonly string[],
 	): Promise<CommonspaceRouteResult> {
@@ -7715,6 +7774,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			}
 			changed = true;
 			const routing = failedRoutingDecision(
+				message.routing,
 				message.routing.startedAt ?? message.createdAt,
 				reason,
 			);
@@ -8176,12 +8236,13 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		prepared: PreparedSend,
 		response: SendMessageResponse,
 	): ReplyDeliverySession {
-		const explicitlyTargetsAll =
-			prepared.request.conversation.kind === "channel" &&
-			parseTags(prepared.text).agents.includes("all");
-		const effectiveLimit = explicitlyTargetsAll
-			? prepared.agentIds.length
-			: this.state.defaults.maxAgentsPerTurn;
+		const effectiveLimit =
+			prepared.routing?.source === "explicit"
+				? Math.max(
+						this.state.defaults.maxAgentsPerTurn,
+						prepared.agentIds.length,
+					)
+				: this.state.defaults.maxAgentsPerTurn;
 		const routingAssignments = prepared.routing?.assignments ?? [];
 		const relayMode = prepared.routing?.mode === "relay";
 		return {
@@ -8895,7 +8956,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		projects,
 	}: PendingRoutingDecisionInput): CommonspaceRoutingDecision {
 		const routing: CommonspaceRoutingDecision = {
-			source: "ai",
+			source: prepared.routing?.source === "explicit" ? "explicit" : "ai",
 			status: "resolved",
 			...completedRoutingTiming(
 				prepared.routing?.startedAt ?? response.accepted.createdAt,
@@ -8927,7 +8988,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		if (currentThread === undefined) return undefined;
 		return {
 			...currentThread,
-			agentIds: routing.agentIds,
+			agentIds:
+				routing.source === "explicit"
+					? currentThread.agentIds
+					: routing.agentIds,
 			projectIds: projects.map((project) => project.id),
 			projectId: projects[0]?.id ?? null,
 		};
@@ -9031,6 +9095,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		if (this.currentPendingRoutingMessage(prepared, response) === undefined)
 			return null;
 		const routing = failedRoutingDecision(
+			prepared.routing,
 			prepared.routing?.startedAt ?? response.accepted.createdAt,
 			reason,
 		);
@@ -9072,9 +9137,11 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				(thread) => thread.id === (prepared.thread ?? response.thread)?.id,
 			);
 			const memberIds =
-				prepared.thread !== undefined && prepared.thread.agentIds.length > 0
-					? prepared.thread.agentIds
-					: (prepared.channel?.agentIds ?? []);
+				prepared.routing.source === "explicit"
+					? prepared.routing.agentIds
+					: prepared.thread !== undefined && prepared.thread.agentIds.length > 0
+						? prepared.thread.agentIds
+						: (prepared.channel?.agentIds ?? []);
 			const decision = await this.routeChannelMessage(
 				prepared,
 				routingThread,

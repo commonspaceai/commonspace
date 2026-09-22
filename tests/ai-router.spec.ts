@@ -121,6 +121,23 @@ describe("Commonspace AI router", () => {
 		);
 	});
 
+	it("limits explicit collaboration inference to shape and ordering", () => {
+		const prompt = buildRoutingPrompt({
+			...input,
+			fixedAgentIds: ["backend", "frontend"],
+			text: "@backend @frontend review this together.",
+		});
+		expect(prompt).toContain(
+			'The user explicitly selected these Agents: ["backend","frontend"]',
+		);
+		expect(prompt).toContain("Return each exactly once");
+		expect(prompt).toContain("Classify only delivery mode and speaker order");
+		expect(prompt).toContain(
+			"every assignment must retain all Available Project ids",
+		);
+		expect(prompt).not.toContain("Select one owner by default");
+	});
+
 	it(
 		"requires terse thread follow-ups to keep an existing participant",
 		expectTerseFollowupContinuity,

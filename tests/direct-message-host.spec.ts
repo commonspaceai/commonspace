@@ -355,7 +355,18 @@ describe("Commonspace direct-message host sessions", () => {
 		const service = new CommonspaceHostService(
 			{},
 			{ root },
-			{ discoverAgents: discoverTestHarnesses, runAgent },
+			{
+				discoverAgents: discoverTestHarnesses,
+				runAgent,
+				routeAgents: async () => ({
+					mode: "parallel",
+					assignments: ["codex", "hermes"].map((agentId) => ({
+						agentId,
+						projectIds: [],
+					})),
+					reason: "Both explicitly addressed Agents investigate independently.",
+				}),
+			},
 		);
 		await service.initialize();
 		await addTestHarness(service, "codex", "Frontend");
