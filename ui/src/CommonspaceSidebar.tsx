@@ -349,6 +349,141 @@ function collectionDropPositionFor(
 	return sourceIndex < targetIndex ? "after" : "before";
 }
 
+interface AgentProfileDraft {
+	agentId: string;
+	displayName: string;
+	avatarEmoji: string;
+	accentColor: string;
+	fullAccess: boolean;
+}
+
+function AgentProfileEditor({
+	agent,
+	draft,
+	removable,
+	store,
+	onDraftChange,
+	onClose,
+}: {
+	agent: CommonspaceAgentProfile;
+	draft: AgentProfileDraft;
+	removable: boolean;
+	store: CommonspaceStore;
+	onDraftChange: (fields: Partial<Omit<AgentProfileDraft, "agentId">>) => void;
+	onClose: () => void;
+}) {
+	const previewAgent: CommonspaceAgentProfile = {
+		...agent,
+		displayName: draft.displayName || agent.displayName,
+		accentColor: draft.accentColor,
+	};
+	if (draft.avatarEmoji !== "") previewAgent.avatarEmoji = draft.avatarEmoji;
+	const saveAgentProfile = async (event: FormEvent) => {
+		event.preventDefault();
+		await store.mutate({ action: "update-agent-profile", ...draft });
+		onClose();
+	};
+
+	return (
+		<SidebarDialog title={`Customize ${agent.displayName}`} onClose={onClose}>
+			<form
+				className="grid gap-3 [&_button:not([data-slot])]:min-h-9 [&_button:not([data-slot])]:rounded-sm [&_button:not([data-slot])]:border [&_button:not([data-slot])]:px-3 [&_input]:min-h-11 [&_input]:rounded-md [&_input]:border [&_input]:px-3"
+				onSubmit={(event) => {
+					void saveAgentProfile(event);
+				}}
+			>
+				<div className="flex items-center gap-3 rounded-md border bg-muted p-3">
+					<AgentAvatar agent={previewAgent} />
+					<span>
+						<strong>{draft.displayName || agent.displayName}</strong>
+						<small>Commonspace appearance only</small>
+					</span>
+				</div>
+				<label>
+					Workspace name
+					<input
+						aria-label="Workspace name"
+						value={draft.displayName}
+						onChange={(event) => {
+							onDraftChange({ displayName: event.target.value });
+						}}
+					/>
+				</label>
+				<label>
+					Avatar emoji
+					<input
+						aria-label="Avatar emoji"
+						value={draft.avatarEmoji}
+						onChange={(event) => {
+							onDraftChange({ avatarEmoji: event.target.value });
+						}}
+						placeholder={(draft.displayName || agent.displayName)
+							.slice(0, 1)
+							.toLocaleUpperCase()}
+						maxLength={16}
+					/>
+				</label>
+				<label>
+					Accent color
+					<input
+						aria-label="Accent color"
+						type="color"
+						value={draft.accentColor}
+						onChange={(event) => {
+							onDraftChange({ accentColor: event.target.value });
+						}}
+					/>
+				</label>
+				<label className="flex items-start gap-3 rounded-md border bg-muted p-3">
+					<input
+						type="checkbox"
+						className="mt-0.5 size-4"
+						checked={
+							agent.permissionPolicy?.source === "server"
+								? agent.permissionPolicy.fullAccess
+								: draft.fullAccess
+						}
+						disabled={agent.permissionPolicy?.source === "server"}
+						onChange={(event) => {
+							onDraftChange({ fullAccess: event.target.checked });
+						}}
+					/>
+					<span>
+						<strong className="block text-sm">Full access</strong>
+						<small className="block text-xs leading-5 text-muted-foreground">
+							{agent.permissionPolicy?.source === "server"
+								? "Full access is enabled by server configuration and cannot be disabled here."
+								: "Bypass approval prompts for this agent’s Commonspace runs."}
+						</small>
+					</span>
+				</label>
+				<p className="text-xs text-muted-foreground">
+					Changing access stops active work; future turns keep their native
+					session references.
+				</p>
+				<div>
+					<button type="submit">Save agent settings</button>
+					{removable && (
+						<button
+							type="button"
+							aria-label={`Remove agent ${agent.displayName}`}
+							onClick={() => {
+								void store.mutate({
+									action: "remove-agent",
+									agentId: agent.id,
+								});
+								onClose();
+							}}
+						>
+							Remove agent
+						</button>
+					)}
+				</div>
+			</form>
+		</SidebarDialog>
+	);
+}
+
 export function CommonspaceSidebar({
 	wide,
 	expandSidebar,
@@ -399,11 +534,8 @@ export function CommonspaceSidebar({
 		null,
 	);
 	const [agentFullAccess, setAgentFullAccess] = useState(false);
-	const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
-	const [agentProfileName, setAgentProfileName] = useState("");
-	const [agentAvatarEmoji, setAgentAvatarEmoji] = useState("");
-	const [agentAccentColor, setAgentAccentColor] = useState("#6d5dfc");
-	const [agentProfileFullAccess, setAgentProfileFullAccess] = useState(false);
+	const [agentDraft, setAgentDraft] = useState<AgentProfileDraft | null>(null);
+	const editingAgentId = agentDraft?.agentId;
 	const [editingChannelId, setEditingChannelId] = useState<string | null>(null);
 	const [channelAgentIds, setChannelAgentIds] = useState<string[]>([]);
 	const [channelInstructions, setChannelInstructions] = useState("");
@@ -566,6 +698,14 @@ export function CommonspaceSidebar({
 		return counts;
 	}, [inboxItems]);
 	const agents = bootstrap?.agents ?? [];
+	const editingAgent = useMemo(
+		() => agents.find((agent) => agent.id === editingAgentId),
+		[agents, editingAgentId],
+	);
+	const editingAgentRemovable = useMemo(
+		() => state?.agents.some((agent) => agent.id === editingAgentId) === true,
+		[state?.agents, editingAgentId],
+	);
 	const normalizedChannelAgentQuery = channelAgentQuery
 		.trim()
 		.toLocaleLowerCase();
@@ -1230,19 +1370,6 @@ export function CommonspaceSidebar({
 		} finally {
 			setImportingWorkspace(false);
 		}
-	};
-
-	const saveAgentProfile = async (event: FormEvent, agentId: string) => {
-		event.preventDefault();
-		await store.mutate({
-			action: "update-agent-profile",
-			agentId,
-			displayName: agentProfileName,
-			avatarEmoji: agentAvatarEmoji,
-			accentColor: agentAccentColor,
-			fullAccess: agentProfileFullAccess,
-		});
-		setEditingAgentId(null);
 	};
 
 	const startDirectMessage = (agentId: string) => {
@@ -2233,21 +2360,7 @@ export function CommonspaceSidebar({
 												onOpenConversation?.(conversation);
 											}}
 											onSettings={() => {
-												if (onOpenContextSettings !== undefined) {
-													onOpenContextSettings("channel", channel.id);
-													return;
-												}
-												setEditingChannelId(channel.id);
-												setChannelAgentIds(channel.agentIds);
-												setChannelInstructions(channel.instructions);
-												setChannelSummary(channel.memory.summary);
-												setChannelDecisions(
-													channel.memory.decisions.join("\n"),
-												);
-												setChannelQuestions(
-													channel.memory.openQuestions.join("\n"),
-												);
-												setChannelPinNote("");
+												onOpenContextSettings("channel", channel.id);
 											}}
 											onMarkRead={() => {
 												for (const item of inboxItems) {
@@ -2330,36 +2443,28 @@ export function CommonspaceSidebar({
 													{channel.memory.status ?? "current"}
 												</span>
 											</header>
-											<label className="grid gap-1.5">
-												Summary
-												<textarea
-													aria-label={`Channel summary for ${channel.name}`}
-													value={channelSummary}
-													onChange={(event) => {
-														setChannelSummary(event.target.value);
-													}}
-												/>
-											</label>
-											<label className="grid gap-1.5">
-												Decisions
-												<textarea
-													aria-label={`Channel decisions for ${channel.name}`}
-													value={channelDecisions}
-													onChange={(event) => {
-														setChannelDecisions(event.target.value);
-													}}
-												/>
-											</label>
-											<label className="grid gap-1.5">
-												Open questions
-												<textarea
-													aria-label={`Channel open questions for ${channel.name}`}
-													value={channelQuestions}
-													onChange={(event) => {
-														setChannelQuestions(event.target.value);
-													}}
-												/>
-											</label>
+											{(
+												[
+													["Summary", channelSummary, setChannelSummary],
+													["Decisions", channelDecisions, setChannelDecisions],
+													[
+														"Open questions",
+														channelQuestions,
+														setChannelQuestions,
+													],
+												] as const
+											).map(([label, value, setValue]) => (
+												<label key={label} className="grid gap-1.5">
+													{label}
+													<textarea
+														aria-label={`Channel ${label.toLowerCase()} for ${channel.name}`}
+														value={value}
+														onChange={(event) => {
+															setValue(event.target.value);
+														}}
+													/>
+												</label>
+											))}
 											<button
 												type="button"
 												aria-label={`Compact context for channel ${channel.name}`}
@@ -2604,131 +2709,22 @@ export function CommonspaceSidebar({
 							</div>
 						</SidebarDialog>
 					)}
-					{editingAgentId !== null &&
-						(() => {
-							const editingAgent = agents.find(
-								(agent) => agent.id === editingAgentId,
-							);
-							if (editingAgent === undefined) return null;
-							const previewAgent: CommonspaceAgentProfile = {
-								...editingAgent,
-								displayName: agentProfileName || editingAgent.displayName,
-								accentColor: agentAccentColor,
-							};
-							if (agentAvatarEmoji !== "")
-								previewAgent.avatarEmoji = agentAvatarEmoji;
-							return (
-								<SidebarDialog
-									title={`Customize ${editingAgent.displayName}`}
-									onClose={() => {
-										setEditingAgentId(null);
-									}}
-								>
-									<form
-										className="grid gap-3 [&_button:not([data-slot])]:min-h-9 [&_button:not([data-slot])]:rounded-sm [&_button:not([data-slot])]:border [&_button:not([data-slot])]:px-3 [&_input]:min-h-11 [&_input]:rounded-md [&_input]:border [&_input]:px-3"
-										onSubmit={(event) => {
-											void saveAgentProfile(event, editingAgent.id);
-										}}
-									>
-										<div className="flex items-center gap-3 rounded-md border bg-muted p-3">
-											<AgentAvatar agent={previewAgent} />
-											<span>
-												<strong>
-													{agentProfileName || editingAgent.displayName}
-												</strong>
-												<small>Commonspace appearance only</small>
-											</span>
-										</div>
-										<label>
-											Workspace name
-											<input
-												aria-label="Workspace name"
-												value={agentProfileName}
-												onChange={(event) => {
-													setAgentProfileName(event.target.value);
-												}}
-											/>
-										</label>
-										<label>
-											Avatar emoji
-											<input
-												aria-label="Avatar emoji"
-												value={agentAvatarEmoji}
-												onChange={(event) => {
-													setAgentAvatarEmoji(event.target.value);
-												}}
-												placeholder={(
-													agentProfileName || editingAgent.displayName
-												)
-													.slice(0, 1)
-													.toLocaleUpperCase()}
-												maxLength={16}
-											/>
-										</label>
-										<label>
-											Accent color
-											<input
-												aria-label="Accent color"
-												type="color"
-												value={agentAccentColor}
-												onChange={(event) => {
-													setAgentAccentColor(event.target.value);
-												}}
-											/>
-										</label>
-										<label className="flex items-start gap-3 rounded-md border bg-muted p-3">
-											<input
-												type="checkbox"
-												className="mt-0.5 size-4"
-												checked={
-													editingAgent.permissionPolicy?.source === "server"
-														? editingAgent.permissionPolicy.fullAccess
-														: agentProfileFullAccess
-												}
-												disabled={
-													editingAgent.permissionPolicy?.source === "server"
-												}
-												onChange={(event) => {
-													setAgentProfileFullAccess(event.target.checked);
-												}}
-											/>
-											<span>
-												<strong className="block text-sm">Full access</strong>
-												<small className="block text-xs leading-5 text-muted-foreground">
-													{editingAgent.permissionPolicy?.source === "server"
-														? "Full access is enabled by server configuration and cannot be disabled here."
-														: "Bypass approval prompts for this agent’s Commonspace runs."}
-												</small>
-											</span>
-										</label>
-										<p className="text-xs text-muted-foreground">
-											Changing access stops active work; future turns keep their
-											native session references.
-										</p>
-										<div>
-											<button type="submit">Save agent settings</button>
-											{state?.agents.some(
-												(candidate) => candidate.id === editingAgent.id,
-											) === true && (
-												<button
-													type="button"
-													aria-label={`Remove agent ${editingAgent.displayName}`}
-													onClick={() => {
-														void store.mutate({
-															action: "remove-agent",
-															agentId: editingAgent.id,
-														});
-														setEditingAgentId(null);
-													}}
-												>
-													Remove agent
-												</button>
-											)}
-										</div>
-									</form>
-								</SidebarDialog>
-							);
-						})()}
+					{agentDraft !== null && editingAgent !== undefined && (
+						<AgentProfileEditor
+							agent={editingAgent}
+							draft={agentDraft}
+							removable={editingAgentRemovable}
+							store={store}
+							onDraftChange={(fields) => {
+								setAgentDraft((current) =>
+									current === null ? null : { ...current, ...fields },
+								);
+							}}
+							onClose={() => {
+								setAgentDraft(null);
+							}}
+						/>
+					)}
 
 					{agentItems.map((agent) => {
 						const effectiveStatus = activeAgentIds.has(agent.id)
@@ -2802,11 +2798,13 @@ export function CommonspaceSidebar({
 										<CollectionActionButton
 											label={`Customize agent ${agent.displayName}`}
 											onClick={() => {
-												setEditingAgentId(agent.id);
-												setAgentProfileName(agent.displayName);
-												setAgentAvatarEmoji(agent.avatarEmoji ?? "");
-												setAgentAccentColor(agent.accentColor ?? "#6d5dfc");
-												setAgentProfileFullAccess(agent.fullAccess === true);
+												setAgentDraft({
+													agentId: agent.id,
+													displayName: agent.displayName,
+													avatarEmoji: agent.avatarEmoji ?? "",
+													accentColor: agent.accentColor ?? "#6d5dfc",
+													fullAccess: agent.fullAccess === true,
+												});
 											}}
 										/>
 									) : (
@@ -2820,15 +2818,7 @@ export function CommonspaceSidebar({
 												startDirectMessage(agent.id);
 											}}
 											onSettings={() => {
-												if (onOpenContextSettings !== undefined) {
-													onOpenContextSettings("agent", agent.id);
-													return;
-												}
-												setEditingAgentId(agent.id);
-												setAgentProfileName(agent.displayName);
-												setAgentAvatarEmoji(agent.avatarEmoji ?? "");
-												setAgentAccentColor(agent.accentColor ?? "#6d5dfc");
-												setAgentProfileFullAccess(agent.fullAccess === true);
+												onOpenContextSettings("agent", agent.id);
 											}}
 											onStartFreshChat={() => {
 												void store
@@ -3071,10 +3061,7 @@ export function CommonspaceSidebar({
 												onOpenProject?.(project.id);
 											}}
 											onSettings={() => {
-												if (onOpenContextSettings === undefined) {
-													store.selectProject(project.id);
-													onOpenProject?.(project.id);
-												} else onOpenContextSettings("project", project.id);
+												onOpenContextSettings("project", project.id);
 											}}
 											onAddFolder={() => {
 												void addProjectFolder(project.id);

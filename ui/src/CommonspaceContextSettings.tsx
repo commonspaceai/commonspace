@@ -15,7 +15,9 @@ import {
 	XIcon,
 } from "lucide-react";
 import {
+	type Dispatch,
 	type FormEvent,
+	type SetStateAction,
 	useCallback,
 	useEffect,
 	useMemo,
@@ -222,22 +224,17 @@ export function ChannelSettingsPane(props: SettingsPaneProps) {
 	);
 }
 
-function ChannelSettingsEditor({
-	bootstrap,
-	id,
-	store,
-	onClose,
-	channel,
-}: ChannelSettingsEditorProps) {
-	const agents = bootstrap.agents;
-	const [agentIds, setAgentIds] = useSettingsDraftValue(channel.agentIds);
+function ChannelMembers({
+	agents,
+	agentIds,
+	setAgentIds,
+}: {
+	agents: CommonspaceAgentProfile[];
+	agentIds: string[];
+	setAgentIds: Dispatch<SetStateAction<string[]>>;
+}) {
 	const [query, setQuery] = useState("");
 	const [filter, setFilter] = useState<"all" | "included" | "available">("all");
-	const [pinNote, setPinNote] = useState("");
-	const [pinning, setPinning] = useState(false);
-	const [pinError, setPinError] = useState<string | null>(null);
-	const [saving, setSaving] = useState(false);
-	const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
 
 	const visibleAgents = useMemo(() => {
 		const normalized = query.trim().toLocaleLowerCase();
@@ -252,6 +249,164 @@ function ChannelSettingsEditor({
 			);
 		});
 	}, [agentIds, agents, filter, query]);
+	const updateVisible = (include: boolean) => {
+		const visibleIds = new Set(visibleAgents.map((agent) => agent.id));
+		setAgentIds((current) =>
+			include
+				? [
+						...current,
+						...visibleAgents
+							.map((agent) => agent.id)
+							.filter((agentId) => !current.includes(agentId)),
+					]
+				: current.filter((agentId) => !visibleIds.has(agentId)),
+		);
+	};
+
+	return (
+		<section aria-labelledby="channel-members-heading">
+			<header className="mb-4 flex items-start justify-between gap-3">
+				<div>
+					<h3
+						id="channel-members-heading"
+						className="font-heading text-sm font-bold"
+					>
+						Members
+					</h3>
+					<p className="mt-1 text-xs text-muted-foreground">
+						Choose which agents can be mentioned in this channel.
+					</p>
+				</div>
+				<span className="shrink-0 rounded-full border px-2 py-1 text-xs text-muted-foreground">
+					{String(agentIds.length)} of {String(agents.length)} included
+				</span>
+			</header>
+			<div className="overflow-hidden rounded-md border">
+				<div className="border-b bg-muted p-3">
+					<label className="flex min-h-9 items-center gap-2 rounded-sm border bg-background px-3 text-muted-foreground focus-within:border-primary">
+						<SearchIcon className="size-4" aria-hidden="true" />
+						<span className="sr-only">Search agents</span>
+						<input
+							className="min-w-0 flex-1 border-0 bg-transparent text-[13px] text-foreground outline-none"
+							type="search"
+							aria-label="Search agents"
+							placeholder="Search agents by name or role"
+							value={query}
+							onChange={(event) => {
+								setQuery(event.target.value);
+							}}
+						/>
+					</label>
+					<fieldset
+						className="mt-2 flex min-w-0 gap-1 border-0 p-0"
+						aria-label="Filter channel members"
+					>
+						{(["all", "included", "available"] as const).map((value) => (
+							<button
+								key={value}
+								type="button"
+								className="min-h-9 rounded-md border-0 px-3 text-xs font-medium capitalize text-muted-foreground aria-pressed:bg-muted aria-pressed:text-foreground"
+								aria-pressed={filter === value}
+								onClick={() => {
+									setFilter(value);
+								}}
+							>
+								{value}
+							</button>
+						))}
+					</fieldset>
+				</div>
+				<div className="flex min-h-9 items-center justify-between gap-3 border-b px-3 text-xs text-muted-foreground">
+					<span>
+						{String(visibleAgents.length)}{" "}
+						{visibleAgents.length === 1 ? "agent" : "agents"}
+					</span>
+					<span>
+						<button
+							type="button"
+							className="min-h-9 px-2 font-semibold text-primary"
+							onClick={() => {
+								updateVisible(true);
+							}}
+						>
+							Include visible
+						</button>
+						<button
+							type="button"
+							className="min-h-9 px-2 font-semibold text-muted-foreground"
+							onClick={() => {
+								updateVisible(false);
+							}}
+						>
+							Remove visible
+						</button>
+					</span>
+				</div>
+				<div>
+					{visibleAgents.map((agent) => {
+						const included = agentIds.includes(agent.id);
+						return (
+							<label
+								key={agent.id}
+								className="grid min-h-[62px] grid-cols-[18px_36px_minmax(0,1fr)_auto] items-center gap-3 border-b px-3 py-2 last:border-b-0 hover:bg-muted"
+							>
+								<input
+									type="checkbox"
+									checked={included}
+									onChange={(event) => {
+										setAgentIds((current) =>
+											event.target.checked
+												? [...current, agent.id]
+												: current.filter((agentId) => agentId !== agent.id),
+										);
+									}}
+								/>
+								<AgentAvatar agent={agent} />
+								<span className="min-w-0">
+									<strong className="block truncate text-[13px]">
+										{agent.displayName}
+									</strong>
+									<small className="block truncate text-xs text-muted-foreground">
+										{runtimeLabel(agent)} ·{" "}
+										{agent.description ?? agent.model ?? "native profile"}
+									</small>
+								</span>
+								<span
+									className={cn(
+										"rounded-full border px-2 py-1 text-[10px]",
+										agent.status === "running"
+											? "border-[var(--status-success)]/30 text-[var(--status-success)]"
+											: "text-muted-foreground",
+									)}
+								>
+									{agent.status === "running" ? "Working" : "Available"}
+								</span>
+							</label>
+						);
+					})}
+					{visibleAgents.length === 0 && (
+						<div className="p-8 text-center">
+							<strong className="block text-[13px]">No agents found</strong>
+							<span className="mt-1 block text-xs text-muted-foreground">
+								Try another name or role, or show all agents.
+							</span>
+						</div>
+					)}
+				</div>
+			</div>
+		</section>
+	);
+}
+
+function ChannelPins({
+	bootstrap,
+	id,
+	store,
+}: Pick<SettingsPaneProps, "bootstrap" | "id" | "store">) {
+	const [pinNote, setPinNote] = useState("");
+	const [pinning, setPinning] = useState(false);
+	const [pinError, setPinError] = useState<string | null>(null);
+
 	const pins = useMemo(
 		() =>
 			bootstrap.state.pins.filter(
@@ -278,22 +433,6 @@ function ChannelSettingsEditor({
 		[messagesById, pins],
 	);
 
-	const save = async (event: FormEvent) => {
-		event.preventDefault();
-		if (saving) return;
-		setSaving(true);
-		try {
-			await store.mutate({
-				action: "set-channel-agents",
-				channelId: id,
-				agentIds,
-			});
-			onClose();
-		} finally {
-			setSaving(false);
-		}
-	};
-
 	const addNote = async () => {
 		const submittedDraft = pinNote;
 		const note = submittedDraft.trim();
@@ -314,18 +453,110 @@ function ChannelSettingsEditor({
 		}
 	};
 
-	const updateVisible = (include: boolean) => {
-		const visibleIds = new Set(visibleAgents.map((agent) => agent.id));
-		setAgentIds((current) =>
-			include
-				? [
-						...current,
-						...visibleAgents
-							.map((agent) => agent.id)
-							.filter((agentId) => !current.includes(agentId)),
-					]
-				: current.filter((agentId) => !visibleIds.has(agentId)),
-		);
+	return (
+		<section
+			className="mt-7 border-t pt-6"
+			aria-labelledby="channel-pins-heading"
+		>
+			<div className="flex items-center justify-between">
+				<h3
+					id="channel-pins-heading"
+					className="font-heading text-sm font-bold"
+				>
+					Pinned messages & notes
+				</h3>
+				<span className="text-xs text-muted-foreground">{pinRows.length}</span>
+			</div>
+			<p className="mt-2 text-xs text-muted-foreground">
+				Keep useful messages, files, and notes available to everyone in this
+				channel.
+			</p>
+			<div className="mt-3 grid gap-2">
+				{pinRows.length === 0 && (
+					<p className="text-xs text-muted-foreground">
+						No pins yet. Open a message’s menu and choose Pin message, or add a
+						note below.
+					</p>
+				)}
+				{pinRows.map(({ label, pin, source }) => (
+					<div
+						key={pin.id}
+						className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-sm border bg-muted p-3 text-xs"
+					>
+						<div className="min-w-0">
+							{source !== undefined && (
+								<p className="mb-1 font-semibold">{source.authorName}</p>
+							)}
+							<p className="whitespace-pre-wrap break-words">{label}</p>
+						</div>
+						<button
+							type="button"
+							className="text-destructive"
+							aria-label={`Remove channel pin ${label}`}
+							onClick={() => {
+								void store.removePin(pin.id);
+							}}
+						>
+							Remove
+						</button>
+					</div>
+				))}
+				<div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+					<input
+						className="min-h-9 rounded-sm border px-3 text-[13px]"
+						aria-label="New channel pin note"
+						placeholder="Pin a channel note"
+						value={pinNote}
+						onChange={(event) => {
+							setPinNote(event.target.value);
+						}}
+					/>
+					<Button
+						type="button"
+						variant="outline"
+						disabled={pinning || pinNote.trim() === ""}
+						onClick={() => {
+							void addNote();
+						}}
+					>
+						{pinning ? "Pinning..." : "Pin"}
+					</Button>
+				</div>
+				{pinError === null ? null : (
+					<p role="alert" className="text-xs text-destructive">
+						{pinError}
+					</p>
+				)}
+			</div>
+		</section>
+	);
+}
+
+function ChannelSettingsEditor({
+	bootstrap,
+	id,
+	store,
+	onClose,
+	channel,
+}: ChannelSettingsEditorProps) {
+	const [agentIds, setAgentIds] = useSettingsDraftValue(channel.agentIds);
+	const [saving, setSaving] = useState(false);
+	const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
+
+	const save = async (event: FormEvent) => {
+		event.preventDefault();
+		if (saving) return;
+		setSaving(true);
+		try {
+			await store.mutate({
+				action: "set-channel-agents",
+				channelId: id,
+				agentIds,
+			});
+			onClose();
+		} finally {
+			setSaving(false);
+		}
 	};
 
 	return (
@@ -361,219 +592,13 @@ function ChannelSettingsEditor({
 					disabled={saving}
 					className="min-h-0 min-w-0 flex-1 overflow-y-auto border-0 p-6"
 				>
-					<section aria-labelledby="channel-members-heading">
-						<header className="mb-4 flex items-start justify-between gap-3">
-							<div>
-								<h3
-									id="channel-members-heading"
-									className="font-heading text-sm font-bold"
-								>
-									Members
-								</h3>
-								<p className="mt-1 text-xs text-muted-foreground">
-									Choose which agents can be mentioned in this channel.
-								</p>
-							</div>
-							<span className="shrink-0 rounded-full border px-2 py-1 text-xs text-muted-foreground">
-								{String(agentIds.length)} of {String(agents.length)} included
-							</span>
-						</header>
-						<div className="overflow-hidden rounded-md border">
-							<div className="border-b bg-muted p-3">
-								<label className="flex min-h-9 items-center gap-2 rounded-sm border bg-background px-3 text-muted-foreground focus-within:border-primary">
-									<SearchIcon className="size-4" aria-hidden="true" />
-									<span className="sr-only">Search agents</span>
-									<input
-										className="min-w-0 flex-1 border-0 bg-transparent text-[13px] text-foreground outline-none"
-										type="search"
-										aria-label="Search agents"
-										placeholder="Search agents by name or role"
-										value={query}
-										onChange={(event) => {
-											setQuery(event.target.value);
-										}}
-									/>
-								</label>
-								<fieldset
-									className="mt-2 flex min-w-0 gap-1 border-0 p-0"
-									aria-label="Filter channel members"
-								>
-									{(["all", "included", "available"] as const).map((value) => (
-										<button
-											key={value}
-											type="button"
-											className="min-h-9 rounded-md border-0 px-3 text-xs font-medium capitalize text-muted-foreground aria-pressed:bg-muted aria-pressed:text-foreground"
-											aria-pressed={filter === value}
-											onClick={() => {
-												setFilter(value);
-											}}
-										>
-											{value}
-										</button>
-									))}
-								</fieldset>
-							</div>
-							<div className="flex min-h-9 items-center justify-between gap-3 border-b px-3 text-xs text-muted-foreground">
-								<span>
-									{String(visibleAgents.length)}{" "}
-									{visibleAgents.length === 1 ? "agent" : "agents"}
-								</span>
-								<span>
-									<button
-										type="button"
-										className="min-h-9 px-2 font-semibold text-primary"
-										onClick={() => {
-											updateVisible(true);
-										}}
-									>
-										Include visible
-									</button>
-									<button
-										type="button"
-										className="min-h-9 px-2 font-semibold text-muted-foreground"
-										onClick={() => {
-											updateVisible(false);
-										}}
-									>
-										Remove visible
-									</button>
-								</span>
-							</div>
-							<div>
-								{visibleAgents.map((agent) => {
-									const included = agentIds.includes(agent.id);
-									return (
-										<label
-											key={agent.id}
-											className="grid min-h-[62px] grid-cols-[18px_36px_minmax(0,1fr)_auto] items-center gap-3 border-b px-3 py-2 last:border-b-0 hover:bg-muted"
-										>
-											<input
-												type="checkbox"
-												checked={included}
-												onChange={(event) => {
-													setAgentIds((current) =>
-														event.target.checked
-															? [...current, agent.id]
-															: current.filter(
-																	(agentId) => agentId !== agent.id,
-																),
-													);
-												}}
-											/>
-											<AgentAvatar agent={agent} />
-											<span className="min-w-0">
-												<strong className="block truncate text-[13px]">
-													{agent.displayName}
-												</strong>
-												<small className="block truncate text-xs text-muted-foreground">
-													{runtimeLabel(agent)} ·{" "}
-													{agent.description ?? agent.model ?? "native profile"}
-												</small>
-											</span>
-											<span
-												className={cn(
-													"rounded-full border px-2 py-1 text-[10px]",
-													agent.status === "running"
-														? "border-[var(--status-success)]/30 text-[var(--status-success)]"
-														: "text-muted-foreground",
-												)}
-											>
-												{agent.status === "running" ? "Working" : "Available"}
-											</span>
-										</label>
-									);
-								})}
-								{visibleAgents.length === 0 && (
-									<div className="p-8 text-center">
-										<strong className="block text-[13px]">
-											No agents found
-										</strong>
-										<span className="mt-1 block text-xs text-muted-foreground">
-											Try another name or role, or show all agents.
-										</span>
-									</div>
-								)}
-							</div>
-						</div>
-					</section>
+					<ChannelMembers
+						agents={bootstrap.agents}
+						agentIds={agentIds}
+						setAgentIds={setAgentIds}
+					/>
 
-					<section
-						className="mt-7 border-t pt-6"
-						aria-labelledby="channel-pins-heading"
-					>
-						<div className="flex items-center justify-between">
-							<h3
-								id="channel-pins-heading"
-								className="font-heading text-sm font-bold"
-							>
-								Pinned messages & notes
-							</h3>
-							<span className="text-xs text-muted-foreground">
-								{pinRows.length}
-							</span>
-						</div>
-						<p className="mt-2 text-xs text-muted-foreground">
-							Keep useful messages, files, and notes available to everyone in
-							this channel.
-						</p>
-						<div className="mt-3 grid gap-2">
-							{pinRows.length === 0 && (
-								<p className="text-xs text-muted-foreground">
-									No pins yet. Open a message’s menu and choose Pin message, or
-									add a note below.
-								</p>
-							)}
-							{pinRows.map(({ label, pin, source }) => (
-								<div
-									key={pin.id}
-									className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-sm border bg-muted p-3 text-xs"
-								>
-									<div className="min-w-0">
-										{source !== undefined && (
-											<p className="mb-1 font-semibold">{source.authorName}</p>
-										)}
-										<p className="whitespace-pre-wrap break-words">{label}</p>
-									</div>
-									<button
-										type="button"
-										className="text-destructive"
-										aria-label={`Remove channel pin ${label}`}
-										onClick={() => {
-											void store.removePin(pin.id);
-										}}
-									>
-										Remove
-									</button>
-								</div>
-							))}
-							<div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-								<input
-									className="min-h-9 rounded-sm border px-3 text-[13px]"
-									aria-label="New channel pin note"
-									placeholder="Pin a channel note"
-									value={pinNote}
-									onChange={(event) => {
-										setPinNote(event.target.value);
-									}}
-								/>
-								<Button
-									type="button"
-									variant="outline"
-									disabled={pinning || pinNote.trim() === ""}
-									onClick={() => {
-										void addNote();
-									}}
-								>
-									{pinning ? "Pinning..." : "Pin"}
-								</Button>
-							</div>
-							{pinError === null ? null : (
-								<p role="alert" className="text-xs text-destructive">
-									{pinError}
-								</p>
-							)}
-						</div>
-					</section>
+					<ChannelPins bootstrap={bootstrap} id={id} store={store} />
 
 					<ChannelContextBrief channel={channel} store={store} />
 

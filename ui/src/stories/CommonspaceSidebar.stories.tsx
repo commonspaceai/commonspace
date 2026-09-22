@@ -272,6 +272,43 @@ export const InlineChannelPinsIndexed: Story = {
 	},
 };
 
+export const InlineAgentProfileDraft: Story = {
+	render: (args) => {
+		const inlineArgs = { ...args };
+		delete inlineArgs.onOpenContextSettings;
+		return <CommonspaceSidebar {...inlineArgs} />;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Customize agent Review Bot" }),
+		);
+		const screen = within(canvasElement.ownerDocument.body);
+		const workspaceName = screen.getByRole("textbox", {
+			name: "Workspace name",
+		});
+		await userEvent.clear(workspaceName);
+		await userEvent.type(workspaceName, "Unsaved agent name");
+		await userEvent.click(
+			screen.getByRole("button", { name: "Close Customize Review Bot" }),
+		);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Customize agent Review Bot" }),
+		);
+		await expect(
+			screen.getByRole("textbox", { name: "Workspace name" }),
+		).toHaveValue("Review Bot");
+		await userEvent.click(
+			screen.getByRole("button", { name: "Save agent settings" }),
+		);
+		await waitFor(() => {
+			expect(
+				screen.queryByRole("dialog", { name: "Customize Review Bot" }),
+			).not.toBeInTheDocument();
+		});
+	},
+};
+
 export const ChannelsByRecentActivity: Story = {
 	args: {
 		...meta.args,
