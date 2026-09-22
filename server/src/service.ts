@@ -3207,6 +3207,39 @@ function loadedStateSource(value: JsonValue): LoadedStateSource {
 	return { record, version: record.version };
 }
 
+function loadedAttachmentDeletionIds(value: JsonValue | undefined): string[] {
+	if (!Array.isArray(value))
+		throw new Error("Invalid pending attachment deletion IDs");
+	return value.map((id) => {
+		if (typeof id !== "string" || !IMAGE_ATTACHMENT_ID_PATTERN.test(id))
+			throw new Error("Invalid pending attachment deletion ID");
+		return id;
+	});
+}
+
+function loadedAttachmentDeletions(
+	value: JsonValue | undefined,
+	messages: CommonspaceState["messages"],
+): CommonspaceState["pendingAttachmentDeletions"] {
+	if (value === undefined) return undefined;
+	const record = plainRecord(value);
+	const pending = {
+		imageIds: loadedAttachmentDeletionIds(record?.imageIds),
+		fileIds: loadedAttachmentDeletionIds(record?.fileIds),
+	};
+	const liveIds = new Set(
+		Object.values(messages).flatMap((entries) =>
+			entries.flatMap((message) => [
+				...(message.attachments ?? []).map((attachment) => attachment.id),
+				...(message.files ?? []).map((file) => file.id),
+			]),
+		),
+	);
+	if ([...pending.imageIds, ...pending.fileIds].some((id) => liveIds.has(id)))
+		throw new Error("Pending attachment deletion references retained content");
+	return pending;
+}
+
 function sanitizeLoadedState(value: JsonValue): CommonspaceState {
 	const { record, version } = loadedStateSource(value);
 	const defaults = sanitizeLoadedDefaults(record.defaults);
@@ -3265,7 +3298,7 @@ function sanitizeLoadedState(value: JsonValue): CommonspaceState {
 		agentIds,
 		messageById: messageIndex.byId,
 	});
-	return {
+	const sanitized: CommonspaceState = {
 		version: COMMONSPACE_STATE_VERSION,
 		revision: loadedBoundedInteger(
 			record.revision,
@@ -3312,6 +3345,12 @@ function sanitizeLoadedState(value: JsonValue): CommonspaceState {
 		permissions,
 		messages,
 	};
+	const pending = loadedAttachmentDeletions(
+		record.pendingAttachmentDeletions,
+		messages,
+	);
+	if (pending !== undefined) sanitized.pendingAttachmentDeletions = pending;
+	return sanitized;
 }
 
 function appendArchiveAttachment(
@@ -3586,8 +3625,6 @@ interface RetentionSessionPlan {
 
 interface PreparedRetention {
 	readonly state: CommonspaceState;
-	readonly imageIds: readonly string[];
-	readonly fileIds: readonly string[];
 	readonly removedProcessScopeNames: ReadonlySet<string>;
 }
 
@@ -3692,11 +3729,19 @@ function prepareRetention(
 	const messages = { ...state.messages };
 	delete messages[key];
 	return {
-		imageIds,
-		fileIds,
 		removedProcessScopeNames: sessionPlan.removedProcessScopeNames,
 		state: {
 			...state,
+			pendingAttachmentDeletions: {
+				imageIds: [
+					...(state.pendingAttachmentDeletions?.imageIds ?? []),
+					...imageIds,
+				],
+				fileIds: [
+					...(state.pendingAttachmentDeletions?.fileIds ?? []),
+					...fileIds,
+				],
+			},
 			revision: state.revision + 1,
 			inboxReadMessageIds: state.inboxReadMessageIds.filter(
 				(id) => !removedMessageIds.has(id),
@@ -3809,6 +3854,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private state: CommonspaceState = createInitialState();
 	private routingConfiguration: PrivateRoutingConfiguration = missingRouting;
 	private writeTail = Promise.resolve();
+	private deletionTail = Promise.resolve();
 	private routingConfigurationTail: Promise<void> = Promise.resolve();
 	private readonly agentSessionTails = new Map<string, Promise<unknown>>();
 	private readonly channelMemoryTails = new Map<string, Promise<unknown>>();
@@ -3912,6 +3958,13 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			"The previous Commonspace process ended before the agent completed.",
 		);
 		await this.persist();
+		try {
+			await this.removePendingAttachmentDeletions();
+		} catch {
+			this.environment.logger?.warn(
+				"Attachment cleanup is pending. Retry deletion or restart Commonspace after restoring storage access.",
+			);
+		}
 		this.synchronizeNotificationBaseline();
 	}
 
@@ -4106,6 +4159,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 
 	private publicSnapshot(): CommonspaceState {
 		const snapshot = this.snapshot();
+		delete snapshot.pendingAttachmentDeletions;
 		return {
 			...snapshot,
 			dmSessions: {},
@@ -4758,6 +4812,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		assertWorkspaceProjectMappingsSize(projectMappings);
 		return this.withAdmission(async () => {
 			assertWorkspaceImportTargetEmpty(this.state);
+			await this.removePendingAttachmentDeletions();
 			const plan = await prepareWorkspaceImport(
 				archiveValue,
 				projectMappings,
@@ -4859,21 +4914,26 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	async applyRetention(
 		request: ApplyRetentionRequest,
 	): Promise<CommonspaceRetentionPreview> {
-		return this.withAdmission(async () => {
-			const preview = this.previewRetention(request.conversation);
-			if (
-				!Number.isSafeInteger(request.expectedRevision) ||
-				request.expectedRevision !== preview.revision
-			)
-				throw new Error("retention preview is stale");
-			const removedThreads = retentionThreads(this.state, request.conversation);
-			if (this.retentionHasActiveWork(request.conversation, removedThreads))
-				throw new Error("conversation has active work");
-			await this.commitRetention(
-				prepareRetention(this.state, request.conversation, removedThreads),
-			);
-			return preview;
-		});
+		return this.withAdmission(() =>
+			this.withDeletion(async () => {
+				const preview = this.previewRetention(request.conversation);
+				if (
+					!Number.isSafeInteger(request.expectedRevision) ||
+					request.expectedRevision !== preview.revision
+				)
+					throw new Error("retention preview is stale");
+				const removedThreads = retentionThreads(
+					this.state,
+					request.conversation,
+				);
+				if (this.retentionHasActiveWork(request.conversation, removedThreads))
+					throw new Error("conversation has active work");
+				await this.commitRetention(
+					prepareRetention(this.state, request.conversation, removedThreads),
+				);
+				return preview;
+			}),
+		);
 	}
 
 	private retentionHasActiveWork(
@@ -4901,8 +4961,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 
 	private async commitRetention({
 		state,
-		imageIds,
-		fileIds,
 		removedProcessScopeNames,
 	}: PreparedRetention): Promise<void> {
 		const previousState = this.state;
@@ -4913,13 +4971,12 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			this.state = previousState;
 			throw error;
 		}
-		await this.removeImageAttachments(imageIds);
-		await this.removeFileAttachments(fileIds);
 		await this.closeAcpProcessesMatching((_agentId, scopeName) =>
 			removedProcessScopeNames.has(scopeName),
 		);
 		this.revokeInvalidMcpCredentials();
 		this.broadcastRevision();
+		await this.removePendingAttachmentDeletions();
 	}
 	routing(): CommonspaceRoutingConfiguration {
 		return this.publicRoutingConfiguration();
@@ -6348,6 +6405,16 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		messages[deletion.location.index] = deletion.deleted;
 		this.state = {
 			...this.state,
+			pendingAttachmentDeletions: {
+				imageIds: [
+					...(this.state.pendingAttachmentDeletions?.imageIds ?? []),
+					...deletion.imageIds,
+				],
+				fileIds: [
+					...(this.state.pendingAttachmentDeletions?.fileIds ?? []),
+					...deletion.fileIds,
+				],
+			},
 			revision: this.state.revision + 1,
 			messages: {
 				...this.state.messages,
@@ -6375,16 +6442,29 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		messageId: string,
 	): Promise<CommonspaceMessage> {
 		const deletion = this.prepareMessageDeletion(messageId);
-		if (deletion.kind === "existing") return structuredClone(deletion.deleted);
+		if (deletion.kind === "existing") {
+			await this.removePendingAttachmentDeletions();
+			return structuredClone(deletion.deleted);
+		}
 		await this.persistMessageDeletion(deletion);
-		await this.removeImageAttachments(deletion.imageIds);
-		await this.removeFileAttachments(deletion.fileIds);
 		this.broadcastRevision();
+		await this.removePendingAttachmentDeletions();
 		return structuredClone(deletion.deleted);
 	}
 
 	async deleteMessage(messageId: string): Promise<CommonspaceMessage> {
-		return this.withAdmission(() => this.commitMessageDeletion(messageId));
+		return this.withAdmission(() =>
+			this.withDeletion(() => this.commitMessageDeletion(messageId)),
+		);
+	}
+
+	private withDeletion<T>(operation: () => Promise<T>): Promise<T> {
+		const task = this.deletionTail.then(operation);
+		this.deletionTail = task.then(
+			() => undefined,
+			() => undefined,
+		);
+		return task;
 	}
 
 	private async acceptPreparedSend(
@@ -10752,6 +10832,50 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		} catch (error) {
 			await this.removeFileAttachments(storedIds);
 			throw error;
+		}
+	}
+
+	private async removePendingAttachmentDeletions() {
+		const pending = this.state.pendingAttachmentDeletions;
+		if (pending === undefined) return;
+		try {
+			await this.removeImageAttachments(pending.imageIds);
+			await this.removeFileAttachments(pending.fileIds);
+			const removed = new Set([...pending.imageIds, ...pending.fileIds]);
+			const remaining = {
+				imageIds: (
+					this.state.pendingAttachmentDeletions?.imageIds ?? []
+				).filter((id) => !removed.has(id)),
+				fileIds: (this.state.pendingAttachmentDeletions?.fileIds ?? []).filter(
+					(id) => !removed.has(id),
+				),
+			};
+			this.state = { ...this.state, pendingAttachmentDeletions: remaining };
+			if (remaining.imageIds.length === 0 && remaining.fileIds.length === 0)
+				delete this.state.pendingAttachmentDeletions;
+			await this.persist();
+		} catch (cause) {
+			this.state = {
+				...this.state,
+				pendingAttachmentDeletions: {
+					imageIds: [
+						...new Set([
+							...(this.state.pendingAttachmentDeletions?.imageIds ?? []),
+							...pending.imageIds,
+						]),
+					],
+					fileIds: [
+						...new Set([
+							...(this.state.pendingAttachmentDeletions?.fileIds ?? []),
+							...pending.fileIds,
+						]),
+					],
+				},
+			};
+			throw new Error(
+				"Conversation changes were saved, but attachment cleanup is pending. Retry deletion or restart Commonspace.",
+				{ cause },
+			);
 		}
 	}
 

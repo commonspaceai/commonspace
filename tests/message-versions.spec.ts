@@ -1,15 +1,25 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { COMMONSPACE_STATE_VERSION } from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type AgentRunInput,
 	CommonspaceHostService,
 } from "../server/src/service.ts";
+import { createInitialState } from "../server/src/state.ts";
 import { addTestHarness, discoverTestHarnesses } from "./test-harnesses.ts";
 import { mustExist } from "./test-helpers.ts";
 
 const roots: string[] = [];
+
+function deletionBoundary(service: CommonspaceHostService) {
+	// biome-ignore lint/nursery/noUnsafeTypeAssertion lint/plugin: Test-only access to the service's known private I/O methods avoids a production dependency seam.
+	return service as unknown as {
+		removeFileAttachments(ids: readonly string[]): Promise<void>;
+		persist(): Promise<void>;
+	};
+}
 
 afterEach(async () => {
 	await Promise.all(
@@ -275,99 +285,338 @@ describe("message versions", () => {
 		await service.close();
 	});
 
-	it("replaces delivered content with a durable deletion marker", async () => {
-		const root = await mkdtemp(join(tmpdir(), "commonspace-message-deletion-"));
+	it.each([
+		{ cleanupFails: false, startupFails: false },
+		{ cleanupFails: true, startupFails: false },
+		{ cleanupFails: true, startupFails: true },
+	])(
+		"replaces delivered content and recovers cleanup (failure: $cleanupFails, startup failure: $startupFails)",
+		async ({ cleanupFails, startupFails }) => {
+			const root = await mkdtemp(
+				join(tmpdir(), "commonspace-message-deletion-"),
+			);
+			roots.push(root);
+			const service = new CommonspaceHostService(
+				{},
+				{ root },
+				{
+					discoverAgents: discoverTestHarnesses,
+					runAgent: async () => ({
+						text: "Deletion-safe reply.",
+						sessionId: "native-deletion-session",
+					}),
+				},
+			);
+			await service.initialize();
+			await addTestHarness(service, "codex", "Review Bot");
+			const channel = mustExist(
+				(
+					await service.mutate({
+						action: "create-channel",
+						name: "deletions",
+						agentIds: ["codex"],
+					})
+				).channels[0],
+			);
+			const sent = await service.send({
+				conversation: { kind: "channel", id: channel.id },
+				text: "@review-bot remove secret-delete-body after delivery.",
+				attachments: [
+					{ name: "remove.png", mimeType: "image/png", data: "AA==" },
+				],
+				files: [
+					{ name: "remove.txt", mimeType: "text/plain", data: "cmVtb3Zl" },
+				],
+			});
+			await service.whenIdle();
+			const attachmentId = mustExist(sent.accepted.attachments?.[0]).id;
+			const fileId = mustExist(sent.accepted.files?.[0]).id;
+			const imagePath = join(root, "attachments", attachmentId);
+			const filePath = join(root, "attachments", fileId);
+			expect(await readFile(imagePath)).toEqual(Buffer.from([0]));
+			expect(await readFile(filePath, "utf8")).toBe("remove");
+			const deleteMessage = service.deleteMessage;
+
+			if (cleanupFails) {
+				const cleanup = vi
+					.spyOn(deletionBoundary(service), "removeFileAttachments")
+					.mockRejectedValueOnce(new Error("synthetic cleanup failure"));
+				await expect(
+					deleteMessage.call(service, sent.accepted.id),
+				).rejects.toThrow("attachment cleanup is pending");
+				cleanup.mockRestore();
+				expect(await readFile(filePath, "utf8")).toBe("remove");
+				expect(
+					JSON.parse(await readFile(join(root, "state.json"), "utf8")),
+				).toMatchObject({
+					pendingAttachmentDeletions: {
+						imageIds: [attachmentId],
+						fileIds: [fileId],
+					},
+				});
+				expect((await service.bootstrap()).state).not.toHaveProperty(
+					"pendingAttachmentDeletions",
+				);
+				expect((await service.exportWorkspace()).workspace).not.toHaveProperty(
+					"pendingAttachmentDeletions",
+				);
+			} else {
+				await deleteMessage.call(service, sent.accepted.id);
+				await expect(readFile(filePath)).rejects.toMatchObject({
+					code: "ENOENT",
+				});
+			}
+			await expect(readFile(imagePath)).rejects.toMatchObject({
+				code: "ENOENT",
+			});
+			expect(
+				JSON.parse(await readFile(join(root, "state.json"), "utf8")),
+			).toMatchObject({
+				messages: {
+					[`channel:${channel.id}`]: expect.arrayContaining([
+						expect.objectContaining({
+							id: sent.accepted.id,
+							text: "",
+							deletedAt: expect.any(String),
+						}),
+					]),
+				},
+			});
+
+			const messages =
+				service.snapshot().messages[`channel:${channel.id}`] ?? [];
+			expect(
+				messages.find((message) => message.id === sent.accepted.id),
+			).toMatchObject({
+				text: "",
+				deletedAt: expect.any(String),
+				routing: expect.objectContaining({ source: "explicit" }),
+			});
+			expect(
+				messages.find((message) => message.id === sent.accepted.id)
+					?.attachments,
+			).toBeUndefined();
+			expect(
+				messages.find((message) => message.id === sent.accepted.id)?.files,
+			).toBeUndefined();
+			expect(
+				messages.some(
+					(message) =>
+						message.authorType === "agent" &&
+						message.text === "Deletion-safe reply.",
+				),
+			).toBe(true);
+			expect(JSON.stringify(service.snapshot())).not.toContain(
+				"secret-delete-body",
+			);
+			await expect(
+				service.readImageAttachment(mustExist(attachmentId)),
+			).rejects.toThrow("unknown image attachment");
+			await expect(
+				service.editMessage({
+					messageId: sent.accepted.id,
+					text: "Revive deleted content.",
+				}),
+			).rejects.toThrow("deleted messages cannot be edited");
+			await service.close();
+			const beforeRestart = service.snapshot();
+			expect(JSON.stringify(beforeRestart.agentSessions)).toContain(
+				"native-deletion-session",
+			);
+			if (!cleanupFails) {
+				await writeFile(
+					join(root, "state.json"),
+					JSON.stringify({ ...beforeRestart, version: 32 }),
+				);
+			}
+
+			const warn = vi.fn();
+			const restarted = new CommonspaceHostService(
+				{ logger: { info: vi.fn(), warn } },
+				{ root },
+				{
+					discoverAgents: discoverTestHarnesses,
+					runAgent: async () => ({ text: "No run expected." }),
+				},
+			);
+			const startupCleanup = startupFails
+				? vi
+						.spyOn(deletionBoundary(restarted), "removeFileAttachments")
+						.mockRejectedValueOnce(
+							new Error("synthetic startup cleanup failure"),
+						)
+				: undefined;
+			await restarted.initialize();
+			startupCleanup?.mockRestore();
+			if (startupFails) {
+				expect(await readFile(filePath, "utf8")).toBe("remove");
+				expect(warn).toHaveBeenCalledWith(
+					expect.stringContaining("Attachment cleanup is pending"),
+				);
+			} else {
+				await expect(readFile(filePath)).rejects.toMatchObject({
+					code: "ENOENT",
+				});
+			}
+			expect(restarted.snapshot().version).toBe(COMMONSPACE_STATE_VERSION);
+			expect(restarted.snapshot().agentSessions).toEqual(
+				beforeRestart.agentSessions,
+			);
+			await restarted.deleteMessage(sent.accepted.id);
+			expect(
+				JSON.parse(await readFile(join(root, "state.json"), "utf8")),
+			).not.toHaveProperty("pendingAttachmentDeletions");
+			await expect(readFile(filePath)).rejects.toMatchObject({
+				code: "ENOENT",
+			});
+			await expect(readFile(imagePath)).rejects.toMatchObject({
+				code: "ENOENT",
+			});
+			expect(
+				restarted
+					.snapshot()
+					.messages[`channel:${channel.id}`]?.find(
+						(message) => message.id === sent.accepted.id,
+					),
+			).toMatchObject({ text: "", deletedAt: expect.any(String) });
+			expect(JSON.stringify(restarted.snapshot())).not.toContain(
+				"secret-delete-body",
+			);
+			await expect(
+				restarted.readImageAttachment(mustExist(attachmentId)),
+			).rejects.toThrow("unknown image attachment");
+			await restarted.close();
+		},
+	);
+
+	it("keeps overlapping deletion bytes recoverable when cleanup acknowledgement and the next commit fail", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-deletion-overlap-"));
 		roots.push(root);
 		const service = new CommonspaceHostService(
 			{},
 			{ root },
 			{
 				discoverAgents: discoverTestHarnesses,
-				runAgent: async () => ({ text: "Deletion-safe reply." }),
+				runAgent: async () => ({ text: "Reply." }),
 			},
 		);
 		await service.initialize();
 		await addTestHarness(service, "codex", "Review Bot");
-		const channel = mustExist(
-			(
-				await service.mutate({
-					action: "create-channel",
-					name: "deletions",
-					agentIds: ["codex"],
-				})
-			).channels[0],
-		);
-		const sent = await service.send({
-			conversation: { kind: "channel", id: channel.id },
-			text: "@review-bot remove secret-delete-body after delivery.",
-			attachments: [
-				{ name: "remove.png", mimeType: "image/png", data: "AA==" },
-			],
+		const first = await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "Delete first.",
+			files: [{ name: "first.txt", mimeType: "text/plain", data: "Zmlyc3Q=" }],
 		});
 		await service.whenIdle();
-		const attachmentId = sent.accepted.attachments?.[0]?.id;
-		expect(attachmentId).toBeDefined();
-		await expect(
-			service.readImageAttachment(mustExist(attachmentId)),
-		).resolves.toBeDefined();
-		const deleteMessage = service.deleteMessage;
-
-		await deleteMessage.call(service, sent.accepted.id);
-
-		const messages = service.snapshot().messages[`channel:${channel.id}`] ?? [];
-		expect(
-			messages.find((message) => message.id === sent.accepted.id),
-		).toMatchObject({
-			text: "",
-			deletedAt: expect.any(String),
-			routing: expect.objectContaining({ source: "explicit" }),
+		const second = await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "Keep second if commit fails.",
+			files: [{ name: "second.txt", mimeType: "text/plain", data: "c2Vjb25k" }],
 		});
+		await service.whenIdle();
+		const firstId = mustExist(first.accepted.files?.[0]).id;
+		const secondId = mustExist(second.accepted.files?.[0]).id;
+		const boundary = deletionBoundary(service);
+		const originalCleanup = boundary.removeFileAttachments.bind(service);
+		let releaseCleanup = () => {};
+		let signalCleanup = () => {};
+		const cleanupStarted = new Promise<void>((resolve) => {
+			signalCleanup = resolve;
+		});
+		const cleanupReleased = new Promise<void>((resolve) => {
+			releaseCleanup = resolve;
+		});
+		const cleanup = vi
+			.spyOn(boundary, "removeFileAttachments")
+			.mockImplementationOnce(async (ids) => {
+				signalCleanup();
+				await cleanupReleased;
+				await originalCleanup(ids);
+			});
+		const firstDeletion = service.deleteMessage(first.accepted.id);
+		await cleanupStarted;
+		const persistence = vi
+			.spyOn(boundary, "persist")
+			.mockRejectedValueOnce(new Error("synthetic acknowledgement failure"))
+			.mockRejectedValueOnce(new Error("synthetic next commit failure"));
+		const secondDeletion = service.deleteMessage(second.accepted.id);
 		expect(
-			messages.find((message) => message.id === sent.accepted.id)?.attachments,
-		).toBeUndefined();
-		expect(
-			messages.some(
-				(message) =>
-					message.authorType === "agent" &&
-					message.text === "Deletion-safe reply.",
-			),
-		).toBe(true);
-		expect(JSON.stringify(service.snapshot())).not.toContain(
-			"secret-delete-body",
-		);
-		await expect(
-			service.readImageAttachment(mustExist(attachmentId)),
-		).rejects.toThrow("unknown image attachment");
-		await expect(
-			service.editMessage({
-				messageId: sent.accepted.id,
-				text: "Revive deleted content.",
+			service
+				.snapshot()
+				.messages["dm:codex"]?.find(
+					(message) => message.id === second.accepted.id,
+				)?.text,
+		).toBe("Keep second if commit fails.");
+		const firstFailure = expect(firstDeletion).rejects.toMatchObject({
+			message: expect.stringContaining("attachment cleanup is pending"),
+			cause: expect.objectContaining({
+				message: "synthetic acknowledgement failure",
 			}),
-		).rejects.toThrow("deleted messages cannot be edited");
+		});
+		const secondFailure = expect(secondDeletion).rejects.toThrow(
+			"synthetic next commit failure",
+		);
+		releaseCleanup();
+		await Promise.all([firstFailure, secondFailure]);
+		cleanup.mockRestore();
+		persistence.mockRestore();
+		await expect(
+			readFile(join(root, "attachments", firstId)),
+		).rejects.toMatchObject({ code: "ENOENT" });
+		expect(await readFile(join(root, "attachments", secondId), "utf8")).toBe(
+			"second",
+		);
+		expect(
+			JSON.parse(await readFile(join(root, "state.json"), "utf8")),
+		).toMatchObject({
+			pendingAttachmentDeletions: { imageIds: [], fileIds: [firstId] },
+		});
 		await service.close();
-
 		const restarted = new CommonspaceHostService(
 			{},
 			{ root },
-			{
-				discoverAgents: discoverTestHarnesses,
-				runAgent: async () => ({ text: "No run expected." }),
-			},
+			{ discoverAgents: discoverTestHarnesses },
 		);
 		await restarted.initialize();
 		expect(
 			restarted
 				.snapshot()
-				.messages[`channel:${channel.id}`]?.find(
-					(message) => message.id === sent.accepted.id,
-				),
-		).toMatchObject({ text: "", deletedAt: expect.any(String) });
-		expect(JSON.stringify(restarted.snapshot())).not.toContain(
-			"secret-delete-body",
+				.messages["dm:codex"]?.find(
+					(message) => message.id === second.accepted.id,
+				)?.text,
+		).toBe("Keep second if commit fails.");
+		expect(await readFile(join(root, "attachments", secondId), "utf8")).toBe(
+			"second",
 		);
-		await expect(
-			restarted.readImageAttachment(mustExist(attachmentId)),
-		).rejects.toThrow("unknown image attachment");
+		expect(restarted.snapshot()).not.toHaveProperty(
+			"pendingAttachmentDeletions",
+		);
 		await restarted.close();
 	});
+
+	it.each(["../retained.txt", "..\\retained.txt", "/retained.txt"])(
+		"rejects a saved cleanup ID outside managed attachment storage: %s",
+		async (id) => {
+			const root = await mkdtemp(
+				join(tmpdir(), "commonspace-deletion-validation-"),
+			);
+			roots.push(root);
+			await writeFile(join(root, "retained.txt"), "Retained bytes.");
+			await writeFile(
+				join(root, "state.json"),
+				JSON.stringify({
+					...createInitialState(),
+					pendingAttachmentDeletions: { imageIds: [], fileIds: [id] },
+				}),
+			);
+			const service = new CommonspaceHostService({}, { root });
+			await expect(service.initialize()).rejects.toThrow(
+				"Commonspace state and rollback backup are both invalid",
+			);
+			expect(await readFile(join(root, "retained.txt"), "utf8")).toBe(
+				"Retained bytes.",
+			);
+			await service.close();
+		},
+	);
 });

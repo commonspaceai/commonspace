@@ -127,6 +127,8 @@ Commonspace validates the entire archive before activating it. Native harness se
 
 Retention removes data from one Channel or Direct Message. Preview the affected messages, Threads, attachments, pins, and permissions before confirming. A state change after preview requires a new preview. Active work must finish or be stopped first. Commonspace never expires conversation data in the background.
 
+Message deletion and retention save private attachment cleanup IDs atomically with the conversation change. If physical cleanup fails, the conversation change remains committed and the error reports that cleanup is pending. Retry the deletion or retention, or restart Commonspace after restoring storage access; startup retries saved cleanup without blocking access to retained conversations. Pending IDs stay out of browser state and portable exports.
+
 ## Health checks
 
 For a running instance:
@@ -210,6 +212,6 @@ cp -R ~/.commonspace ~/commonspace-backup-YYYYMMDD
 
 Replace `YYYYMMDD` with your backup date, and adjust the source if using `COMMONSPACE_HOME`. The copy includes routing configuration and attachments; keep it private. Native harness stores remain separate and are not included.
 
-The current internal state version is 32 and migrates versions 1–31 on startup. Each write retains the previous valid primary as `state.backup.json`. If the primary is invalid and the backup is valid, startup preserves the primary as `state.corrupt.json` and recovers the backup. If both are invalid, startup stops without replacing them.
+The current internal state version is 33 and migrates versions 1–32 on startup. Version 33 adds private pending attachment cleanup IDs; older workspaces retain their conversations and native-session mappings without creating cleanup work. Each write retains the previous valid primary as `state.backup.json`. If the primary is invalid and the backup is valid, startup preserves the primary as `state.corrupt.json` and recovers the backup. If both are invalid, startup stops without replacing them.
 
 The automatic state backup protects against an invalid write; it is not a complete archive of earlier releases. Application rollback does not reverse migrations. Before starting an older build, restore a data backup compatible with that build, and keep a separate copy of the current data so the recovery attempt remains reversible.

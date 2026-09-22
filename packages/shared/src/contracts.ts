@@ -2,7 +2,7 @@ import type { AgentAdapterKind } from "./agent-adapters.js";
 
 export type { AgentAdapterKind } from "./agent-adapters.js";
 
-export const COMMONSPACE_STATE_VERSION = 32 as const;
+export const COMMONSPACE_STATE_VERSION = 33 as const;
 export const COMMONSPACE_EXPORT_VERSION = 1 as const;
 
 export interface CommonspaceDefaults {
@@ -608,6 +608,8 @@ export interface CommonspaceState {
 	/** Host-private native session scope selected for each direct message. */
 	dmSessions: Record<string, string>;
 	agentSessions: Record<string, Record<string, string>>;
+	/** Host-private cleanup intent, committed with deletion before removing bytes. */
+	pendingAttachmentDeletions?: { imageIds: string[]; fileIds: string[] };
 	projects: CommonspaceProject[];
 	channels: CommonspaceChannel[];
 	threads: CommonspaceThread[];

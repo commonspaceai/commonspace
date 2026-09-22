@@ -104,6 +104,7 @@ Server-sent events carry durable state revisions, routing configuration invalida
 - It accepts work immediately, coordinates independent sessions concurrently, and serializes work targeting the same native session.
 - It retains routing assignments and corrections, binds replies to those assignments, and preserves prior attempts.
 - It stores bounded image and general-file attachments, rejects known credential-bearing source, resolved, and display names before reading bytes, and imports harness artifacts only from permitted canonical roots. Harness files are opened without following the final symlink, rechecked by canonical path and file identity, then read through the same descriptor with a validated-size-plus-one ceiling so replacement or growth cannot bypass limits.
+- Message deletion and retention atomically save private attachment cleanup intent with the changed conversation state. Cleanup is idempotent and retried at startup or on deletion retry; failures never discard the IDs needed to finish removing bytes.
 - It exposes storage checks, harness discovery and recorded run history, inference data-flow information, notifications, portable archives, and explicit retention. Recorded replies or failures describe conversation history; they do not verify current harness model access or authentication.
 
 `server/src/app.ts` owns HTTP limits, loopback and same-origin guards, event framing, status codes, health checks, security headers, and optional static UI delivery. `server/src/acp-runtime.ts` owns the ACP client and subprocess lifecycle. `server/src/commonspace-mcp.ts` owns temporary capabilities and scoped tools. `server/src/index.ts` owns configuration, startup, signals, and graceful shutdown.
@@ -150,7 +151,7 @@ Project scope is inferred unless the user supplies visible `@@project` reference
 
 ## Persistence
 
-The current internal state version is 32, defined by `COMMONSPACE_STATE_VERSION`. Versions 1–31 migrate during load through structural validation and sanitization.
+The current internal state version is 33, defined by `COMMONSPACE_STATE_VERSION`. Versions 1–32 migrate during load through structural validation and sanitization.
 
 Persisted state includes the roster, appearance, workspace coordination defaults, host-private native sessions, bounded activity, Inbox read/unread/saved state, notification preferences, attachments, routing decisions and memory, Project references, Channel/Thread context, pins, message versions, deletion markers, permissions, and execution state. Native model and reasoning settings are not Commonspace state.
 
@@ -172,7 +173,7 @@ Execution completion and attention evidence stay separate. Text-only explicit re
 
 Notification links identify conversations, Threads, and messages by their workspace IDs. The client accepts them only when they match current state on the loopback origin.
 
-Portable archive version 1 is independent of internal state version 32. Export contains sanitized workspace records and exact attachment bytes, replaces Project roots with counts, and omits native sessions. Import requires an empty workspace and explicit existing local roots, and validates all structure, mapping, attachment, and size constraints before writes. Retention requires an owner-triggered, revision-bound preview for one inactive conversation. See [Workspace archive format](../specs/workspace-archive-format.md) for the contract.
+Portable archive version 1 is independent of internal state version 33. Export contains sanitized workspace records and exact attachment bytes, replaces Project roots with counts, and omits native sessions and pending attachment cleanup. Import requires an empty workspace and explicit existing local roots, and validates all structure, mapping, attachment, and size constraints before writes. Retention requires an owner-triggered, revision-bound preview for one inactive conversation. See [Workspace archive format](../specs/workspace-archive-format.md) for the contract.
 
 ## Routing inference
 
