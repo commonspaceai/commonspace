@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type AgentRunInput,
 	CommonspaceHostService,
+	type CommonspaceRouteResult,
 } from "../server/src/service.ts";
 import { mustExist } from "./test-helpers.ts";
 
@@ -22,9 +23,10 @@ describe("routing correction", () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-routing-retry-"));
 		roots.push(root);
 		const routeAgents = vi
-			.fn()
+			.fn<() => Promise<CommonspaceRouteResult>>()
 			.mockRejectedValueOnce(new Error("invalid routing response"))
 			.mockResolvedValueOnce({
+				mode: "parallel",
 				assignments: [
 					{
 						agentId: "frontend",
@@ -216,6 +218,7 @@ describe("routing correction", () => {
 				discoverAgents: async () => agents,
 				runAgent,
 				routeAgents: async (input) => ({
+					mode: "parallel",
 					assignments: [
 						{
 							agentId: "backend",
@@ -386,15 +389,18 @@ describe("routing correction", () => {
 				? '{"summary":"Route review-only requests to Reviewer."}'
 				: `${input.agent.id}: done`,
 		);
-		const routeAgents = vi.fn(async () => ({
-			assignments: [
-				{
-					agentId: "backend",
-					projectIds: [],
-				},
-			],
-			reason: "Backend matched the request.",
-		}));
+		const routeAgents = vi.fn(
+			async (): Promise<CommonspaceRouteResult> => ({
+				mode: "parallel",
+				assignments: [
+					{
+						agentId: "backend",
+						projectIds: [],
+					},
+				],
+				reason: "Backend matched the request.",
+			}),
+		);
 		const service = new CommonspaceHostService(
 			{},
 			{ root },

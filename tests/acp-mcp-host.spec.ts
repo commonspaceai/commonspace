@@ -39,7 +39,13 @@ describe("Commonspace ACP session context", () => {
 			dependencies: {
 				discoverAgents: discoverTestHarnesses,
 				routeAgents: async (input) => ({
-					agentIds: [mustExist(input.candidates[0]).id],
+					mode: "parallel",
+					assignments: [
+						{
+							agentId: mustExist(input.candidates[0]).id,
+							projectIds: input.projects.map((project) => project.id),
+						},
+					],
 					reason: "Test inference selected the channel agent.",
 				}),
 			},
@@ -283,7 +289,13 @@ describe("Commonspace ACP session context", () => {
 					},
 				],
 				routeAgents: async (input) => ({
-					agentIds: [mustExist(input.candidates[0]).id],
+					mode: "parallel",
+					assignments: [
+						{
+							agentId: mustExist(input.candidates[0]).id,
+							projectIds: input.projects.map((project) => project.id),
+						},
+					],
 					reason: "Test inference selected the channel agent.",
 				}),
 			},
@@ -370,7 +382,13 @@ describe("Commonspace ACP session context", () => {
 					},
 				],
 				routeAgents: async (input) => ({
-					agentIds: [mustExist(input.candidates[0]).id],
+					mode: "parallel",
+					assignments: [
+						{
+							agentId: mustExist(input.candidates[0]).id,
+							projectIds: input.projects.map((project) => project.id),
+						},
+					],
 					reason: "Test inference selected the channel agent.",
 				}),
 			},

@@ -164,10 +164,10 @@ try {
 				if (candidate === undefined)
 					throw new Error("E2E routing has no candidate");
 				return {
+					mode: "parallel",
 					assignments: [
 						{
 							agentId: candidate.id,
-							subRequest: input.text,
 							projectIds: input.projects.map((project) => project.id),
 						},
 					],

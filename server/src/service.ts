@@ -42,6 +42,7 @@ import type {
 	CommonspaceRoutingConfiguration,
 	CommonspaceRoutingCorrection,
 	CommonspaceRoutingDecision,
+	CommonspaceRoutingMode,
 	CommonspaceRunAttribution,
 	CommonspaceRunFileChange,
 	CommonspaceRunRootAttribution,
@@ -386,10 +387,10 @@ export interface CommonspaceHostDependencies {
 export type CommonspaceRouteInput = AiRouteInput;
 
 export interface CommonspaceRouteResult {
-	assignments?: Array<Omit<CommonspaceRoutingAssignment, "id">>;
-	/** @deprecated Test-override compatibility while callers migrate to assignments. */
-	agentIds?: string[];
-	mode?: CommonspaceRoutingDecision["mode"];
+	assignments: Array<
+		Pick<CommonspaceRoutingAssignment, "agentId" | "projectIds">
+	>;
+	mode: CommonspaceRoutingMode;
 	confidence?: number;
 	reason: string;
 }
@@ -993,15 +994,15 @@ function completedRoutingTiming(
 }
 
 function failedRoutingDecision(
-	previous: CommonspaceRoutingDecision | undefined,
+	previous: CommonspaceRoutingDecision,
 	startedAt: string,
 	reason: string,
 ): CommonspaceRoutingDecision {
 	return {
-		source: previous?.source === "explicit" ? "explicit" : "ai",
+		source: previous.source,
 		status: "failed",
 		...completedRoutingTiming(startedAt),
-		agentIds: previous?.source === "explicit" ? [...previous.agentIds] : [],
+		agentIds: previous.source === "explicit" ? [...previous.agentIds] : [],
 		assignments: [],
 		corrections: [],
 		inferredProjectIds: [],
@@ -7672,20 +7673,15 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		prepared: PreparedChannelRoute,
 		allowedAgentIds: ReadonlySet<string>,
 		allowedProjectIds: ReadonlySet<string>,
-	): Array<Omit<CommonspaceRoutingAssignment, "id">> {
-		const rawAssignments =
-			result.assignments ??
-			(result.agentIds ?? []).map((agentId) => ({
-				agentId,
-				projectIds: prepared.projects.map((project) => project.id),
-			}));
+	): CommonspaceRouteResult["assignments"] {
+		const rawAssignments = result.assignments;
 		if (
 			rawAssignments.length === 0 ||
 			rawAssignments.length > prepared.input.maxAgents
 		) {
 			throw new Error("inference routing returned an invalid assignment count");
 		}
-		const assignments: Array<Omit<CommonspaceRoutingAssignment, "id">> = [];
+		const assignments: CommonspaceRouteResult["assignments"] = [];
 		const assignedAgents = new Set<string>();
 		for (const assignment of rawAssignments) {
 			if (
@@ -7724,19 +7720,16 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			this.currentAllowedRouteProjectIds(prepared),
 		);
 		const agentIds = assignments.map((assignment) => assignment.agentId);
-		if (prepared.input.fixedAgentIds !== undefined) {
-			if (!sameIdentifierSet(prepared.input.fixedAgentIds, agentIds)) {
-				throw new Error(
-					"inference routing must retain every explicitly addressed Agent exactly once",
-				);
-			}
-			if (result.mode !== "parallel" && result.mode !== "relay")
-				throw new Error(
-					"inference routing must classify explicit collaboration as parallel or relay",
-				);
+		if (
+			prepared.input.fixedAgentIds !== undefined &&
+			!sameIdentifierSet(prepared.input.fixedAgentIds, agentIds)
+		) {
+			throw new Error(
+				"inference routing must retain every explicitly addressed Agent exactly once",
+			);
 		}
 		const reason = result.reason.normalize("NFKC").trim().slice(0, 500);
-		if (agentIds.length === 0 || reason === "")
+		if (reason === "")
 			throw new Error("inference routing returned no valid decision");
 		const confidence =
 			typeof result.confidence === "number" &&
@@ -7745,10 +7738,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				: undefined;
 		const routeResult: CommonspaceRouteResult = {
 			assignments,
-			agentIds,
+			mode: result.mode,
 			reason,
 		};
-		if (result.mode !== undefined) routeResult.mode = result.mode;
 		if (confidence !== undefined) routeResult.confidence = confidence;
 		return routeResult;
 	}
@@ -9041,15 +9033,13 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			...completedRoutingTiming(
 				prepared.routing?.startedAt ?? response.accepted.createdAt,
 			),
-			agentIds:
-				decision.agentIds ??
-				assignments.map((assignment) => assignment.agentId),
+			agentIds: assignments.map((assignment) => assignment.agentId),
+			mode: decision.mode,
 			assignments,
 			corrections: [],
 			inferredProjectIds: projects.inferredProjectIds,
 			reason: decision.reason,
 		};
-		if (decision.mode !== undefined) routing.mode = decision.mode;
 		if (decision.confidence !== undefined)
 			routing.confidence = decision.confidence;
 		return routing;
@@ -9082,12 +9072,11 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		response: SendMessageResponse,
 		decision: CommonspaceRouteResult,
 	): ResolvedPendingRouting {
-		const assignments: CommonspaceRoutingAssignment[] = (
-			decision.assignments ?? []
-		).map((assignment) => ({
-			id: crypto.randomUUID(),
-			...assignment,
-		}));
+		const assignments: CommonspaceRoutingAssignment[] =
+			decision.assignments.map((assignment) => ({
+				id: crypto.randomUUID(),
+				...assignment,
+			}));
 		const projects = this.resolvedRoutingProjects(prepared, assignments);
 		const routing = this.completedPendingRoutingDecision({
 			prepared,
@@ -9172,11 +9161,14 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		response: SendMessageResponse,
 		reason: string,
 	): Promise<null> {
-		if (this.currentPendingRoutingMessage(prepared, response) === undefined)
-			return null;
+		const pending = this.currentPendingRoutingMessage(
+			prepared,
+			response,
+		)?.routing;
+		if (pending === undefined) return null;
 		const routing = failedRoutingDecision(
-			prepared.routing,
-			prepared.routing?.startedAt ?? response.accepted.createdAt,
+			pending,
+			pending.startedAt ?? response.accepted.createdAt,
 			reason,
 		);
 		const key = conversationKey(prepared.request.conversation);

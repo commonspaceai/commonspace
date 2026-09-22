@@ -22,6 +22,7 @@ import { z } from "zod";
 import { requestIsLoopback, requestIsSameOrigin } from "../server/src/app.ts";
 import {
 	type AgentRunInput,
+	type CommonspaceHostDependencies,
 	CommonspaceHostService,
 	type CommonspaceRouteInput,
 	type CommonspaceRouteResult,
@@ -31,6 +32,7 @@ import { addTestHarness, discoverTestHarnesses } from "./test-harnesses.ts";
 import { mustExist } from "./test-helpers.ts";
 
 const roots: string[] = [];
+const services: CommonspaceHostService[] = [];
 const fakeAcpAgentPath = join(
 	dirname(fileURLToPath(import.meta.url)),
 	"fixtures",
@@ -108,7 +110,44 @@ async function addDiscoveredAgents(
 	}
 }
 
+async function explicitRoutingFixture(
+	dependencies: Pick<CommonspaceHostDependencies, "routeAgents" | "runAgent">,
+) {
+	const root = await mkdtemp(join(tmpdir(), "commonspace-explicit-routing-"));
+	roots.push(root);
+	const agentIds = ["backend", "frontend", "outside"];
+	const service = new CommonspaceHostService(
+		{},
+		{ root },
+		{
+			...dependencies,
+			discoverAgents: async () =>
+				agentIds.map((id) => ({
+					id,
+					displayName: id.slice(0, 1).toLocaleUpperCase() + id.slice(1),
+					adapter: "hermes" as const,
+					model: null,
+					status: "stopped" as const,
+				})),
+		},
+	);
+	services.push(service);
+	await service.initialize();
+	await addDiscoveredAgents(service, ...agentIds);
+	const channel = mustExist(
+		(
+			await service.mutate({
+				action: "create-channel",
+				name: "engineering",
+				agentIds,
+			})
+		).channels[0],
+	);
+	return { service, channel, root };
+}
+
 afterEach(async () => {
+	await Promise.all(services.splice(0).map((service) => service.close()));
 	vi.unstubAllGlobals();
 	vi.unstubAllEnvs();
 	await Promise.all(
@@ -502,10 +541,13 @@ describe("Commonspace host authority", () => {
 				}
 				return { text: "The queued request ran without its selected Project." };
 			});
-			const routeAgents = vi.fn(async () => ({
-				assignments: [{ agentId: "codex", projectIds: [] }],
-				reason: "Route the queued request after the active turn.",
-			}));
+			const routeAgents = vi.fn(
+				async (): Promise<CommonspaceRouteResult> => ({
+					mode: "parallel",
+					assignments: [{ agentId: "codex", projectIds: [] }],
+					reason: "Route the queued request after the active turn.",
+				}),
+			);
 			const service = new CommonspaceHostService(
 				{},
 				{ root },
@@ -1637,28 +1679,27 @@ esac
 			"parallel",
 			"@backend inspect the API independently and @frontend inspect the UI independently.",
 		],
-		["direct", "@backend review the API."],
 	] as const)(
-		"preserves explicit participants in %s work",
+		"delivers explicit %s work without capping named participants",
 		async (mode, text) => {
-			const root = await mkdtemp(join(tmpdir(), "commonspace-explicit-shape-"));
-			roots.push(root);
 			const backend = deferred<string>();
 			const frontend = deferred<string>();
-			const agents = ["backend", "frontend", "outside"].map((id) => ({
-				id,
-				displayName: id.slice(0, 1).toLocaleUpperCase() + id.slice(1),
-				adapter: "hermes" as const,
-				status: "stopped" as const,
-			}));
-			const runAgent = vi.fn((input: AgentRunInput) =>
-				input.agent.id === "backend" ? backend.promise : frontend.promise,
-			);
+			const execution: string[] = [];
+			const runAgent = vi.fn((input: AgentRunInput) => {
+				execution.push(`${input.agent.id}:started`);
+				if (input.agent.id === "backend") {
+					return backend.promise.then((reply) => {
+						execution.push("backend:completed");
+						return reply;
+					});
+				}
+				return frontend.promise;
+			});
 			const routeAgents = vi.fn<
 				(input: CommonspaceRouteInput) => Promise<CommonspaceRouteResult>
 			>(async () => {
 				return {
-					mode: mode === "relay" ? ("relay" as const) : ("parallel" as const),
+					mode,
 					assignments: [
 						{ agentId: "backend", projectIds: [] },
 						{ agentId: "frontend", projectIds: [] },
@@ -1666,138 +1707,130 @@ esac
 					reason: "Collaboration shape classified for the fixed participants.",
 				};
 			});
-			const service = new CommonspaceHostService(
-				{},
-				{ root },
-				{
-					discoverAgents: async () => agents,
-					runAgent,
-					routeAgents,
-				},
-			);
-			await service.initialize();
-			await addDiscoveredAgents(service, ...agents.map((agent) => agent.id));
-			await service.mutate({ action: "set-defaults", maxAgentsPerTurn: 1 });
-			const channel = mustExist(
-				(
-					await service.mutate({
-						action: "create-channel",
-						name: "engineering",
-						agentIds: agents.map((agent) => agent.id),
-					})
-				).channels[0],
-			);
-			const response = await service.send({
-				conversation: { kind: "channel", id: channel.id },
-				text,
+			const { service, channel } = await explicitRoutingFixture({
+				runAgent,
+				routeAgents,
 			});
-			expect(response.accepted.routing?.status).toBe(
-				mode === "direct" ? undefined : "pending",
-			);
-			await vi.waitFor(() => expect(runAgent).toHaveBeenCalled());
-			await new Promise<void>((resolve) => setImmediate(resolve));
-			const beforeBackendCompleted = runAgent.mock.calls.map(([input]) => ({
-				agentId: input.agent.id,
-				message: input.message,
-			}));
-			backend.resolve("Backend owns API contracts.");
-			frontend.resolve("Frontend accepts the API contract.");
-			await service.whenIdle();
-			const accepted = mustExist(
-				service
-					.snapshot()
-					.messages[`channel:${channel.id}`]?.find(
-						(message) => message.id === response.accepted.id,
-					),
-			);
-			if (mode === "direct") {
-				expect(routeAgents).not.toHaveBeenCalled();
-				expect(runAgent).toHaveBeenCalledOnce();
-				expect(runAgent.mock.calls[0]?.[0].message).toBe(text);
-				expect(accepted.routing?.agentIds).toEqual(["backend"]);
-				await service.close();
-				return;
-			}
-			expect(routeAgents).toHaveBeenCalledExactlyOnceWith(
-				expect.objectContaining({
-					fixedAgentIds: ["backend", "frontend"],
-					inferProjects: false,
-				}),
-			);
-			expect(accepted.text).toBe(text);
-			expect(accepted.routing?.source).toBe("explicit");
-			expect(accepted.routing?.agentIds).toEqual(["backend", "frontend"]);
-			expect(
-				accepted.routing?.assignments.map((assignment) => assignment.agentId),
-			).toEqual(["backend", "frontend"]);
-			expect(beforeBackendCompleted).toEqual(
-				mode === "relay"
-					? [{ agentId: "backend", message: text }]
-					: [
-							{ agentId: "backend", message: text },
-							{ agentId: "frontend", message: text },
-						],
-			);
-			expect(accepted.routing?.mode).toBe(mode);
-			expect(runAgent.mock.calls[1]?.[0].message).toBe(
-				mode === "relay"
-					? `Original user message:\n\n${text}\n\nFrom Backend:\n\nBackend owns API contracts.`
-					: text,
-			);
-			if (mode === "relay") {
-				const threadId = mustExist(response.thread).id;
-				await service.send({
-					conversation: response.accepted.conversation,
-					threadId,
-					text: "@outside add context.",
-				});
-				await service.whenIdle();
-				await service.send({
-					conversation: response.accepted.conversation,
-					threadId,
+			await service.mutate({ action: "set-defaults", maxAgentsPerTurn: 1 });
+			try {
+				const response = await service.send({
+					conversation: { kind: "channel", id: channel.id },
 					text,
 				});
+				expect(response.accepted.routing?.status).toBe("pending");
+				await vi.waitFor(() =>
+					expect(runAgent).toHaveBeenCalledTimes(mode === "parallel" ? 2 : 1),
+				);
+				backend.resolve("Backend owns API contracts.");
+				frontend.resolve("Frontend accepts the API contract.");
 				await service.whenIdle();
+				const accepted = mustExist(
+					service
+						.snapshot()
+						.messages[`channel:${channel.id}`]?.find(
+							(message) => message.id === response.accepted.id,
+						),
+				);
+				expect(routeAgents).toHaveBeenCalledExactlyOnceWith(
+					expect.objectContaining({
+						fixedAgentIds: ["backend", "frontend"],
+						inferProjects: false,
+					}),
+				);
+				expect(accepted.text).toBe(text);
+				expect(accepted.routing?.source).toBe("explicit");
+				expect(accepted.routing?.agentIds).toEqual(["backend", "frontend"]);
 				expect(
-					service.snapshot().threads.find((thread) => thread.id === threadId)
-						?.agentIds,
-				).toEqual(["backend", "frontend", "outside"]);
+					accepted.routing?.assignments.map((assignment) => assignment.agentId),
+				).toEqual(["backend", "frontend"]);
+				expect(execution).toEqual(
+					mode === "relay"
+						? ["backend:started", "backend:completed", "frontend:started"]
+						: ["backend:started", "frontend:started", "backend:completed"],
+				);
+				expect(accepted.routing?.mode).toBe(mode);
+				expect(runAgent.mock.calls[1]?.[0].message).toBe(
+					mode === "relay"
+						? `Original user message:\n\n${text}\n\nFrom Backend:\n\nBackend owns API contracts.`
+						: text,
+				);
+			} finally {
+				backend.resolve("Backend owns API contracts.");
+				frontend.resolve("Frontend accepts the API contract.");
+				await service.whenIdle();
 			}
-			await service.close();
 		},
 	);
+
+	it("bypasses classification for one explicitly named participant", async () => {
+		const runAgent = vi.fn(async () => "Reviewed.");
+		const routeAgents = vi.fn(async (): Promise<CommonspaceRouteResult> => {
+			throw new Error("Direct addressing must not invoke classification.");
+		});
+		const { service, channel } = await explicitRoutingFixture({
+			runAgent,
+			routeAgents,
+		});
+		const sent = await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			text: "@backend review the API.",
+		});
+		await service.whenIdle();
+		expect(routeAgents).not.toHaveBeenCalled();
+		expect(runAgent).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({
+				agent: expect.objectContaining({ id: "backend" }),
+				message: sent.accepted.text,
+			}),
+		);
+	});
+
+	it("retains earlier thread participants after an explicit relay", async () => {
+		const { service, channel } = await explicitRoutingFixture({
+			runAgent: async () => "Reviewed.",
+			routeAgents: async () => ({
+				mode: "relay",
+				assignments: ["backend", "frontend"].map((agentId) => ({
+					agentId,
+					projectIds: [],
+				})),
+				reason: "The named participants discuss the request.",
+			}),
+		});
+		const first = await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			text: "@outside add context.",
+		});
+		await service.whenIdle();
+		const threadId = mustExist(first.thread).id;
+		await service.send({
+			conversation: first.accepted.conversation,
+			threadId,
+			text: "@backend @frontend discuss the context.",
+		});
+		await service.whenIdle();
+		expect(
+			service.snapshot().threads.find((thread) => thread.id === threadId)
+				?.agentIds,
+		).toEqual(["outside", "backend", "frontend"]);
+	});
 
 	it.each([
 		["added participant", ["backend", "frontend", "outside"], "relay"],
 		["omitted participant", ["backend"], "parallel"],
 		["substituted participant", ["backend", "outside"], "relay"],
 		["duplicate participant", ["backend", "backend"], "relay"],
-		["missing mode", ["backend", "frontend"], undefined],
 		["changed Project scope", ["backend", "frontend"], "relay"],
-		["inference failure", ["backend", "frontend"], "relay"],
 	] as const)(
-		"retains a retryable explicit request after %s",
+		"preserves the explicit request without dispatch after %s",
 		async (failure, agentIds, mode) => {
-			const root = await mkdtemp(
-				join(tmpdir(), "commonspace-explicit-failure-"),
-			);
-			roots.push(root);
-			const workspace = join(root, "workspace");
-			await mkdir(workspace);
-			const agents = ["backend", "frontend", "outside"].map((id) => ({
-				id,
-				displayName: id.slice(0, 1).toLocaleUpperCase() + id.slice(1),
-				adapter: "hermes" as const,
-				status: "stopped" as const,
-			}));
 			const runAgent = vi.fn(async () => "Reviewed the request.");
 			const routeAgents = vi.fn(
 				async (
 					input: CommonspaceRouteInput,
 				): Promise<CommonspaceRouteResult> => {
-					if (failure === "inference failure")
-						throw new Error("Classifier unavailable.");
-					const result: CommonspaceRouteResult = {
+					return {
+						mode,
 						assignments: agentIds.map((agentId) => ({
 							agentId,
 							projectIds:
@@ -1807,21 +1840,14 @@ esac
 						})),
 						reason: "Invalid explicit shape result.",
 					};
-					if (mode !== undefined) result.mode = mode;
-					return result;
 				},
 			);
-			const service = new CommonspaceHostService(
-				{},
-				{ root },
-				{
-					discoverAgents: async () => agents,
-					runAgent,
-					routeAgents,
-				},
-			);
-			await service.initialize();
-			await addDiscoveredAgents(service, ...agents.map((agent) => agent.id));
+			const { service, channel, root } = await explicitRoutingFixture({
+				runAgent,
+				routeAgents,
+			});
+			const workspace = join(root, "app");
+			await mkdir(workspace);
 			const project = mustExist(
 				(
 					await service.mutate({
@@ -1831,15 +1857,6 @@ esac
 					})
 				).projects[0],
 			);
-			const channel = mustExist(
-				(
-					await service.mutate({
-						action: "create-channel",
-						name: "engineering",
-						agentIds: agents.map((agent) => agent.id),
-					})
-				).channels[0],
-			);
 			const text =
 				"@backend @frontend review this together and reconcile one answer.";
 			const response = await service.send({
@@ -1848,24 +1865,6 @@ esac
 				projectIds: [project.id],
 			});
 			await service.whenIdle();
-			const failed = mustExist(
-				service
-					.snapshot()
-					.messages[`channel:${channel.id}`]?.find(
-						(message) => message.id === response.accepted.id,
-					),
-			);
-			expect(failed).toMatchObject({
-				text,
-				replyStatus: "failed",
-				projectIds: [project.id],
-				routing: {
-					source: "explicit",
-					status: "failed",
-					agentIds: ["backend", "frontend"],
-					assignments: [],
-				},
-			});
 			expect(runAgent).not.toHaveBeenCalled();
 			expect(
 				routeAgents.mock.calls[0]?.[0].candidates
@@ -1879,44 +1878,83 @@ esac
 				messages: {
 					[`channel:${channel.id}`]: [
 						expect.objectContaining({
-							id: failed.id,
+							id: response.accepted.id,
 							text,
 							replyStatus: "failed",
+							projectIds: [project.id],
+							routing: expect.objectContaining({
+								source: "explicit",
+								status: "failed",
+								agentIds: ["backend", "frontend"],
+								assignments: [],
+							}),
 						}),
 					],
 				},
 			});
-			routeAgents.mockResolvedValueOnce({
-				mode: "relay",
-				assignments: ["backend", "frontend"].map((agentId) => ({
-					agentId,
-					projectIds: [project.id],
-				})),
-				reason: "Recovered collaboration classification.",
-			});
-			if (failure === "inference failure") {
+		},
+	);
+
+	it("retries explicit inference with the accepted participants and scope after a rename", async () => {
+		const routeAgents = vi
+			.fn<(input: CommonspaceRouteInput) => Promise<CommonspaceRouteResult>>()
+			.mockRejectedValueOnce(new Error("Classifier unavailable."));
+		const runAgent = vi.fn(async () => "Reviewed.");
+		const { service, channel, root } = await explicitRoutingFixture({
+			runAgent,
+			routeAgents,
+		});
+		const workspace = join(root, "app");
+		await mkdir(workspace);
+		const project = mustExist(
+			(
 				await service.mutate({
-					action: "update-agent-profile",
-					agentId: "backend",
-					displayName: "Renamed Backend",
-				});
-			}
-			await service.retryRouting({ sourceMessageId: failed.id, mode: "ai" });
-			await service.whenIdle();
-			const messages =
-				service.snapshot().messages[`channel:${channel.id}`] ?? [];
-			expect(
-				messages.filter((message) => message.authorType === "user"),
-			).toEqual([
+					action: "create-project",
+					name: "App",
+					paths: [workspace],
+				})
+			).projects[0],
+		);
+		const sent = await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			text: "@backend @frontend review this together.",
+			projectIds: [project.id],
+		});
+		await service.whenIdle();
+		expect(runAgent).not.toHaveBeenCalled();
+		await service.mutate({
+			action: "update-agent-profile",
+			agentId: "backend",
+			displayName: "Renamed Backend",
+		});
+		routeAgents.mockResolvedValueOnce({
+			mode: "relay",
+			assignments: ["backend", "frontend"].map((agentId) => ({
+				agentId,
+				projectIds: [project.id],
+			})),
+			reason: "Recovered collaboration classification.",
+		});
+		await service.retryRouting({
+			sourceMessageId: sent.accepted.id,
+			mode: "ai",
+		});
+		await service.whenIdle();
+		const messages = mustExist(
+			service.snapshot().messages[`channel:${channel.id}`],
+		);
+		expect(messages.filter((message) => message.authorType === "user")).toEqual(
+			[
 				expect.objectContaining({
-					id: failed.id,
-					text,
+					id: sent.accepted.id,
+					text: sent.accepted.text,
+					projectIds: [project.id],
 					routing: expect.objectContaining({
 						source: "explicit",
 						status: "resolved",
 						mode: "relay",
 						agentIds: ["backend", "frontend"],
-						assignments: expect.arrayContaining([
+						assignments: [
 							expect.objectContaining({
 								agentId: "backend",
 								projectIds: [project.id],
@@ -1925,74 +1963,59 @@ esac
 								agentId: "frontend",
 								projectIds: [project.id],
 							}),
-						]),
+						],
 					}),
 				}),
-			]);
-			expect(
-				messages
-					.filter((message) => message.authorType === "agent")
-					.map((message) => message.authorId),
-			).toEqual(["backend", "frontend"]);
-			await service.close();
-		},
-	);
+			],
+		);
+		expect(
+			messages
+				.filter((message) => message.authorType === "agent")
+				.map((message) => message.authorId),
+		).toEqual(["backend", "frontend"]);
+	});
 
 	it("makes interrupted explicit classification retryable after restart", async () => {
-		const root = await mkdtemp(join(tmpdir(), "commonspace-explicit-pending-"));
 		const restartedRoot = await mkdtemp(
 			join(tmpdir(), "commonspace-explicit-restart-"),
 		);
-		roots.push(root, restartedRoot);
-		const agents = ["backend", "frontend"].map((id) => ({
-			id,
-			displayName: id,
-			adapter: "hermes" as const,
-			status: "stopped" as const,
-		}));
+		roots.push(restartedRoot);
 		const route = deferred<CommonspaceRouteResult>();
 		const result: CommonspaceRouteResult = {
 			mode: "relay",
-			assignments: agents.map((agent) => ({
-				agentId: agent.id,
+			assignments: ["backend", "frontend"].map((agentId) => ({
+				agentId,
 				projectIds: [],
 			})),
 			reason: "The user requested a shared conclusion.",
 		};
-		const dependencies = {
-			discoverAgents: async () => agents,
+		const { service, channel, root } = await explicitRoutingFixture({
 			runAgent: async () => "Reviewed.",
 			routeAgents: async () => route.promise,
-		};
-		const service = new CommonspaceHostService({}, { root }, dependencies);
-		await service.initialize();
-		await addDiscoveredAgents(service, "backend", "frontend");
-		const channel = mustExist(
-			(
-				await service.mutate({
-					action: "create-channel",
-					name: "engineering",
-					agentIds: ["backend", "frontend"],
-				})
-			).channels[0],
-		);
+		});
 		const sent = await service.send({
 			conversation: { kind: "channel", id: channel.id },
 			text: "@backend @frontend discuss and reconcile one answer.",
 		});
-		const pendingState = await readFile(join(root, "state.json"), "utf8");
-		route.resolve(result);
+		const pendingState = await readFile(
+			join(root, "state.json"),
+			"utf8",
+		).finally(() => route.resolve(result));
 		await service.whenIdle();
-		await service.close();
 		await writeFile(join(restartedRoot, "state.json"), pendingState);
 		const restarted = new CommonspaceHostService(
 			{},
 			{ root: restartedRoot },
 			{
-				...dependencies,
+				discoverAgents: async () =>
+					service
+						.snapshot()
+						.agents.map((agent) => ({ ...agent, status: "stopped" as const })),
+				runAgent: async () => "Reviewed.",
 				routeAgents: async () => result,
 			},
 		);
+		services.push(restarted);
 		await restarted.initialize();
 		expect(restarted.snapshot().messages[`channel:${channel.id}`]).toEqual([
 			expect.objectContaining({
@@ -2030,7 +2053,6 @@ esac
 				.filter((message) => message.authorType === "agent")
 				.map((message) => message.authorId),
 		).toEqual(["backend", "frontend"]);
-		await restarted.close();
 	});
 
 	it("starts one speaker and passes each peer response through an inferred relay", async () => {
@@ -3045,7 +3067,10 @@ esac
 			async (input: AgentRunInput) => `${input.agent.displayName} handled it.`,
 		);
 		const routeAgents = vi.fn(
-			async (input: { projects: Array<{ id: string }> }) => ({
+			async (
+				input: CommonspaceRouteInput,
+			): Promise<CommonspaceRouteResult> => ({
+				mode: "parallel",
 				assignments: [
 					{
 						agentId: "frontend",
@@ -3166,7 +3191,10 @@ esac
 			status: "stopped" as const,
 		}));
 		const routeAgents = vi.fn(
-			async (input: { candidates: Array<{ id: string }> }) => ({
+			async (
+				input: CommonspaceRouteInput,
+			): Promise<CommonspaceRouteResult> => ({
+				mode: "parallel",
 				assignments: [
 					{
 						agentId: mustExist(input.candidates[0]).id,
@@ -3226,11 +3254,12 @@ esac
 		};
 		const runAgent = vi.fn(async () => "Done.");
 		const routeAgents = vi.fn(
-			async (input: { projects: Array<{ id: string; name: string }> }) => {
+			async (input: CommonspaceRouteInput): Promise<CommonspaceRouteResult> => {
 				const project = mustExist(
 					input.projects.find((candidate) => candidate.name === "Second"),
 				);
 				return {
+					mode: "parallel",
 					assignments: [
 						{
 							agentId: agent.id,
@@ -4095,6 +4124,7 @@ esac
 				discoverAgents: async () => agents,
 				runAgent,
 				routeAgents: async () => ({
+					mode: "parallel",
 					assignments: [
 						{
 							agentId: "backend",
@@ -4166,11 +4196,7 @@ esac
 	it("persists an unaddressed message as routing before inference resolves", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-routing-pending-"));
 		roots.push(root);
-		const route = deferred<{
-			agentIds: string[];
-			confidence: number;
-			reason: string;
-		}>();
+		const route = deferred<CommonspaceRouteResult>();
 		const agents = [
 			{
 				id: "backend",
@@ -4221,7 +4247,8 @@ esac
 			}),
 		]);
 		route.resolve({
-			agentIds: ["backend"],
+			mode: "parallel",
+			assignments: [{ agentId: "backend", projectIds: [] }],
 			confidence: 0.95,
 			reason: "API work belongs to Backend.",
 		});

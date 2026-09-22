@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type AgentRunInput,
 	CommonspaceHostService,
+	type CommonspaceRouteResult,
 } from "../server/src/service.ts";
 import { addTestHarness, discoverTestHarnesses } from "./test-harnesses.ts";
 import { mustExist } from "./test-helpers.ts";
@@ -806,11 +807,7 @@ describe("editable shared Channel context", () => {
 			join(tmpdir(), "commonspace-context-acceptance-"),
 		);
 		roots.push(root);
-		const routing = deferred<{
-			agentIds: string[];
-			confidence: number;
-			reason: string;
-		}>();
+		const routing = deferred<CommonspaceRouteResult>();
 		const service = new CommonspaceHostService(
 			{ warn: () => undefined },
 			{ root },
