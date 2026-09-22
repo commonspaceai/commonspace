@@ -10833,36 +10833,13 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		try {
 			await this.removeImageAttachments(pending.imageIds);
 			await this.removeFileAttachments(pending.fileIds);
-			const removed = new Set([...pending.imageIds, ...pending.fileIds]);
-			const remaining = {
-				imageIds: (
-					this.state.pendingAttachmentDeletions?.imageIds ?? []
-				).filter((id) => !removed.has(id)),
-				fileIds: (this.state.pendingAttachmentDeletions?.fileIds ?? []).filter(
-					(id) => !removed.has(id),
-				),
-			};
-			this.state = { ...this.state, pendingAttachmentDeletions: remaining };
-			if (remaining.imageIds.length === 0 && remaining.fileIds.length === 0)
-				delete this.state.pendingAttachmentDeletions;
+			this.state = { ...this.state };
+			delete this.state.pendingAttachmentDeletions;
 			await this.persist();
 		} catch (cause) {
 			this.state = {
 				...this.state,
-				pendingAttachmentDeletions: {
-					imageIds: [
-						...new Set([
-							...(this.state.pendingAttachmentDeletions?.imageIds ?? []),
-							...pending.imageIds,
-						]),
-					],
-					fileIds: [
-						...new Set([
-							...(this.state.pendingAttachmentDeletions?.fileIds ?? []),
-							...pending.fileIds,
-						]),
-					],
-				},
+				pendingAttachmentDeletions: pending,
 			};
 			throw new Error(
 				"Conversation changes were saved, but attachment cleanup is pending. Retry deletion or restart Commonspace.",
