@@ -93,12 +93,24 @@ async function fixture() {
 		run: async (command, args, options = {}) => {
 			calls.push({ command, args, options });
 			if (command === "/bin/launchctl") {
-				if (args[0] === "bootstrap") loaded = true;
-				if (args[0] === "bootout") loaded = false;
-				if (args[0] === "print" && !loaded)
-					return { exitCode: 113, stdout: "", stderr: "not loaded" };
+				switch (args[0]) {
+					case "bootstrap":
+						loaded = true;
+						break;
+					case "bootout":
+						loaded = false;
+						break;
+					case "print":
+						if (!loaded)
+							return { exitCode: 113, stdout: "", stderr: "not loaded" };
+				}
+				return { exitCode: 0, stdout: "", stderr: "" };
 			}
-			if (command === "git" && args[0] === "clone") {
+			if (command !== "git") return { exitCode: 0, stdout: "", stderr: "" };
+			if (args[0] === "rev-parse") {
+				return { exitCode: 0, stdout: `commit-${String(clone)}\n`, stderr: "" };
+			}
+			if (args[0] === "clone") {
 				clone += 1;
 				const target = args.at(-1);
 				await mkdir(join(target, "server", "dist"), { recursive: true });
@@ -117,9 +129,6 @@ async function fixture() {
 					"#!/usr/bin/env node\n",
 				);
 				await writeFile(join(target, "release-marker"), String(clone));
-			}
-			if (command === "git" && args[0] === "rev-parse") {
-				return { exitCode: 0, stdout: `commit-${String(clone)}\n`, stderr: "" };
 			}
 			return { exitCode: 0, stdout: "", stderr: "" };
 		},

@@ -49,16 +49,6 @@ async function retentionWorkspace() {
 		],
 	});
 	await service.whenIdle();
-	await service.addPin({
-		scope: { kind: "thread", id: mustExist(sent.thread).id },
-		kind: "message",
-		messageId: sent.accepted.id,
-	});
-	await service.send({
-		conversation: { kind: "dm", id: "codex" },
-		text: "Unrelated DM history.",
-	});
-	await service.whenIdle();
 	const fileId = mustExist(sent.accepted.files?.[0]).id;
 	return {
 		root,
@@ -95,6 +85,16 @@ describe("explicit retention", () => {
 	it("previews without deleting and purges only the selected conversation", async () => {
 		const { root, service, conversation, sent, fileId, imagePath, filePath } =
 			await retentionWorkspace();
+		await service.addPin({
+			scope: { kind: "thread", id: mustExist(sent.thread).id },
+			kind: "message",
+			messageId: sent.accepted.id,
+		});
+		await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "Unrelated DM history.",
+		});
+		await service.whenIdle();
 		const messages = service.snapshot().messages;
 		expect(await readFile(imagePath)).toEqual(Buffer.from([0]));
 		expect(await readFile(filePath, "utf8")).toBe("retention");
@@ -196,6 +196,11 @@ describe("explicit retention", () => {
 	it("retries partial attachment cleanup on restart without restoring purged history", async () => {
 		const { root, service, conversation, sent, imagePath, filePath } =
 			await retentionWorkspace();
+		await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "Unrelated DM history.",
+		});
+		await service.whenIdle();
 		const unrelatedMessages = service.snapshot().messages["dm:codex"];
 		const preview = service.previewRetention(conversation);
 		const cleanup = vi

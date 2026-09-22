@@ -179,39 +179,9 @@ async function selectColorMode(colorMode, name) {
 		throw new Error(`${name} color mode radio was not checked`);
 }
 
-async function runExperienceAudit(page) {
-	await mkdir(experienceArtifactDir, { recursive: true });
-	const trace = join(experienceArtifactDir, "trace.zip");
-	const context = page.context();
-	const pageErrors = [];
-	const consoleErrors = [];
-	const failedRequests = [];
+function createExperienceRecorder(page) {
 	const states = [];
 	let stateIndex = 0;
-	let failure = null;
-
-	const onPageError = (error) => pageErrors.push(error.message);
-	const onConsole = (message) => {
-		if (message.type() === "error") consoleErrors.push(message.text());
-	};
-	const onRequestFailed = (request) => {
-		const reason = request.failure()?.errorText ?? "unknown failure";
-		if (!/aborted/iu.test(reason))
-			failedRequests.push({
-				method: request.method(),
-				url: request.url(),
-				reason,
-			});
-	};
-	page.on("pageerror", onPageError);
-	page.on("console", onConsole);
-	page.on("requestfailed", onRequestFailed);
-	await context.tracing.start({
-		screenshots: true,
-		snapshots: true,
-		sources: true,
-	});
-
 	const capture = async (id, action, note) => {
 		const state = await captureExperienceState(page, {
 			index: stateIndex,
@@ -236,242 +206,294 @@ async function runExperienceAudit(page) {
 		});
 	};
 
+	return { states, capture, record };
+}
+
+async function auditHome(page, capture, record) {
+	const homeButton = await requireExperienceVisible(
+		page.getByRole("button", {
+			name: /^Open Inbox(?:, \d+ unread)?$/u,
+		}),
+		"the Inbox navigation button",
+	);
+	await record(
+		"return-home",
+		"click",
+		async () => {
+			await homeButton.click();
+			await requireExperienceVisible(
+				page.getByRole("main", { name: "Inbox" }),
+				"the Inbox home surface",
+			);
+		},
+		"Return to the home surface before replaying interaction states.",
+	);
+	await capture(
+		"home-rest",
+		"initial",
+		"Home at the canonical desktop viewport.",
+	);
+
+	const searchButton = await requireExperienceVisible(
+		page.getByRole("button", {
+			name: "Search messages, channels, and agents",
+			exact: true,
+		}),
+		"the global search button",
+	);
+	await record(
+		"topbar-search-hover",
+		"hover",
+		() => searchButton.hover(),
+		"Hover state for the global search control.",
+	);
+	await record(
+		"topbar-search-focus",
+		"focus",
+		() => searchButton.focus(),
+		"Keyboard focus state for the global search control.",
+	);
+	return searchButton;
+}
+
+async function auditChannel(page, record) {
+	const channelActionButton = await requireExperienceVisible(
+		page.getByRole("button", {
+			name: "More actions for verification",
+			exact: true,
+		}),
+		"the verification channel action button",
+	);
+	await record(
+		"channel-actions-hover",
+		"hover",
+		() => channelActionButton.hover(),
+		"Hover reveals the channel action affordance.",
+	);
+	await record(
+		"channel-actions-open",
+		"click",
+		async () => {
+			await channelActionButton.click();
+			await requireExperienceVisible(
+				page.getByRole("menu"),
+				"the channel action menu",
+			);
+		},
+		"Open the channel action menu and inspect its anchoring and density.",
+	);
+	await record(
+		"channel-actions-escape",
+		"keyboard Escape",
+		async () => {
+			await page.keyboard.press("Escape");
+			await page.getByRole("menu").waitFor({ state: "detached" });
+		},
+		"Escape closes the channel action menu.",
+	);
+
+	const channelButton = await requireExperienceVisible(
+		page.getByRole("button", {
+			name: /^Open channel verification(?:, \d+ unread)?$/u,
+		}),
+		"the verification channel",
+	);
+	await record(
+		"channel-open",
+		"click",
+		async () => {
+			await channelButton.click();
+			await requireExperienceVisible(
+				page.getByLabel("Commonspace conversation"),
+				"the Commonspace conversation",
+			);
+		},
+		"Open the channel from the sidebar.",
+	);
+}
+
+async function auditComposer(page, record) {
+	const composer = await requireExperienceVisible(
+		page.getByLabel("Post in verification"),
+		"the verification composer",
+	);
+	await record(
+		"composer-focus",
+		"focus",
+		() => composer.focus(),
+		"Keyboard focus state for the conversation composer.",
+	);
+	await record(
+		"composer-project-suggestion",
+		"type @@",
+		async () => {
+			await composer.fill("@@");
+			await requireExperienceVisible(
+				page.getByRole("option", {
+					name: /@@verification-project.*Verification Project/iu,
+				}),
+				"the project suggestion",
+			);
+		},
+		"Open the project-reference suggestion state in the composer.",
+	);
+	await record(
+		"composer-suggestion-escape",
+		"keyboard Escape",
+		async () => {
+			await page.keyboard.press("Escape");
+			await composer.fill("");
+		},
+		"Dismiss the project suggestion and restore the empty composer.",
+	);
+}
+
+async function auditSettings(page, record) {
+	const settingsButton = await requireExperienceVisible(
+		page.getByRole("button", { name: "Commonspace settings", exact: true }),
+		"the Commonspace settings button",
+	);
+	await record(
+		"settings-open",
+		"click",
+		async () => {
+			await settingsButton.click();
+			await requireExperienceVisible(
+				page.getByRole("group", { name: "Color mode" }),
+				"the color mode group",
+			);
+		},
+		"Open settings and inspect the appearance controls.",
+	);
+	const colorMode = await requireExperienceVisible(
+		page.getByRole("group", { name: "Color mode" }),
+		"the color mode group",
+	);
+	await record(
+		"color-mode-dark",
+		"click Dark",
+		async () => {
+			await selectColorMode(colorMode, "Dark");
+			await page.waitForFunction(() =>
+				globalThis.document.documentElement.classList.contains("dark"),
+			);
+		},
+		"Dark theme after an explicit color-mode click.",
+	);
+	await record(
+		"color-mode-light",
+		"click Light",
+		async () => {
+			await selectColorMode(colorMode, "Light");
+			await page.waitForFunction(() =>
+				globalThis.document.documentElement.classList.contains("light"),
+			);
+		},
+		"Light theme restored after an explicit color-mode click.",
+	);
+	const closeSettingsButton = await requireExperienceVisible(
+		page.getByRole("button", { name: "Close settings", exact: true }),
+		"the close settings button",
+	);
+	await record(
+		"settings-close",
+		"click",
+		async () => {
+			await closeSettingsButton.click();
+			await page
+				.getByRole("group", { name: "Color mode" })
+				.waitFor({ state: "detached" });
+		},
+		"Close settings and return to the conversation.",
+	);
+}
+
+async function auditSearch(page, searchButton, record) {
+	await record(
+		"search-open",
+		"click",
+		async () => {
+			await searchButton.click();
+			await requireExperienceVisible(
+				page.getByRole("dialog", { name: "Search Commonspace" }),
+				"the Commonspace search dialog",
+			);
+		},
+		"Open Search from the top bar.",
+	);
+	const searchInput = await requireExperienceVisible(
+		page.getByRole("searchbox", { name: "Search Commonspace", exact: true }),
+		"the Commonspace search input",
+	);
+	await record(
+		"search-query",
+		"type verification",
+		async () => {
+			await searchInput.fill("verification");
+			await requireExperienceVisible(
+				page.getByRole("listbox", { name: "Commonspace search results" }),
+				"the Commonspace search results",
+			);
+		},
+		"Search results after entering a real fixture query.",
+	);
+	await record(
+		"search-keyboard-next",
+		"keyboard ArrowDown",
+		() => page.keyboard.press("ArrowDown"),
+		"Keyboard selection state in Search.",
+	);
+	await record(
+		"search-close",
+		"keyboard Escape",
+		async () => {
+			await page.keyboard.press("Escape");
+			await page
+				.getByRole("dialog", { name: "Search Commonspace" })
+				.waitFor({ state: "detached" });
+		},
+		"Escape closes Search and returns to the conversation.",
+	);
+}
+
+async function runExperienceAudit(page) {
+	await mkdir(experienceArtifactDir, { recursive: true });
+	const trace = join(experienceArtifactDir, "trace.zip");
+	const context = page.context();
+	const pageErrors = [];
+	const consoleErrors = [];
+	const failedRequests = [];
+	const { states, capture, record } = createExperienceRecorder(page);
+	let failure = null;
+
+	const onPageError = (error) => pageErrors.push(error.message);
+	const onConsole = (message) => {
+		if (message.type() === "error") consoleErrors.push(message.text());
+	};
+	const onRequestFailed = (request) => {
+		const reason = request.failure()?.errorText ?? "unknown failure";
+		if (!/aborted/iu.test(reason))
+			failedRequests.push({
+				method: request.method(),
+				url: request.url(),
+				reason,
+			});
+	};
+	page.on("pageerror", onPageError);
+	page.on("console", onConsole);
+	page.on("requestfailed", onRequestFailed);
+	await context.tracing.start({
+		screenshots: true,
+		snapshots: true,
+		sources: true,
+	});
+
 	try {
-		const homeButton = await requireExperienceVisible(
-			page.getByRole("button", {
-				name: /^Open Inbox(?:, \d+ unread)?$/u,
-			}),
-			"the Inbox navigation button",
-		);
-		await record(
-			"return-home",
-			"click",
-			async () => {
-				await homeButton.click();
-				await requireExperienceVisible(
-					page.getByRole("main", { name: "Inbox" }),
-					"the Inbox home surface",
-				);
-			},
-			"Return to the home surface before replaying interaction states.",
-		);
-		await capture(
-			"home-rest",
-			"initial",
-			"Home at the canonical desktop viewport.",
-		);
-
-		const searchButton = await requireExperienceVisible(
-			page.getByRole("button", {
-				name: "Search messages, channels, and agents",
-				exact: true,
-			}),
-			"the global search button",
-		);
-		await record(
-			"topbar-search-hover",
-			"hover",
-			() => searchButton.hover(),
-			"Hover state for the global search control.",
-		);
-		await record(
-			"topbar-search-focus",
-			"focus",
-			() => searchButton.focus(),
-			"Keyboard focus state for the global search control.",
-		);
-
-		const channelActionButton = await requireExperienceVisible(
-			page.getByRole("button", {
-				name: "More actions for verification",
-				exact: true,
-			}),
-			"the verification channel action button",
-		);
-		await record(
-			"channel-actions-hover",
-			"hover",
-			() => channelActionButton.hover(),
-			"Hover reveals the channel action affordance.",
-		);
-		await record(
-			"channel-actions-open",
-			"click",
-			async () => {
-				await channelActionButton.click();
-				await requireExperienceVisible(
-					page.getByRole("menu"),
-					"the channel action menu",
-				);
-			},
-			"Open the channel action menu and inspect its anchoring and density.",
-		);
-		await record(
-			"channel-actions-escape",
-			"keyboard Escape",
-			async () => {
-				await page.keyboard.press("Escape");
-				await page.getByRole("menu").waitFor({ state: "detached" });
-			},
-			"Escape closes the channel action menu.",
-		);
-
-		const channelButton = await requireExperienceVisible(
-			page.getByRole("button", {
-				name: /^Open channel verification(?:, \d+ unread)?$/u,
-			}),
-			"the verification channel",
-		);
-		await record(
-			"channel-open",
-			"click",
-			async () => {
-				await channelButton.click();
-				await requireExperienceVisible(
-					page.getByLabel("Commonspace conversation"),
-					"the Commonspace conversation",
-				);
-			},
-			"Open the channel from the sidebar.",
-		);
-
-		const composer = await requireExperienceVisible(
-			page.getByLabel("Post in verification"),
-			"the verification composer",
-		);
-		await record(
-			"composer-focus",
-			"focus",
-			() => composer.focus(),
-			"Keyboard focus state for the conversation composer.",
-		);
-		await record(
-			"composer-project-suggestion",
-			"type @@",
-			async () => {
-				await composer.fill("@@");
-				await requireExperienceVisible(
-					page.getByRole("option", {
-						name: /@@verification-project.*Verification Project/iu,
-					}),
-					"the project suggestion",
-				);
-			},
-			"Open the project-reference suggestion state in the composer.",
-		);
-		await record(
-			"composer-suggestion-escape",
-			"keyboard Escape",
-			async () => {
-				await page.keyboard.press("Escape");
-				await composer.fill("");
-			},
-			"Dismiss the project suggestion and restore the empty composer.",
-		);
-
-		const settingsButton = await requireExperienceVisible(
-			page.getByRole("button", { name: "Commonspace settings", exact: true }),
-			"the Commonspace settings button",
-		);
-		await record(
-			"settings-open",
-			"click",
-			async () => {
-				await settingsButton.click();
-				await requireExperienceVisible(
-					page.getByRole("group", { name: "Color mode" }),
-					"the color mode group",
-				);
-			},
-			"Open settings and inspect the appearance controls.",
-		);
-		const colorMode = await requireExperienceVisible(
-			page.getByRole("group", { name: "Color mode" }),
-			"the color mode group",
-		);
-		await record(
-			"color-mode-dark",
-			"click Dark",
-			async () => {
-				await selectColorMode(colorMode, "Dark");
-				await page.waitForFunction(() =>
-					globalThis.document.documentElement.classList.contains("dark"),
-				);
-			},
-			"Dark theme after an explicit color-mode click.",
-		);
-		await record(
-			"color-mode-light",
-			"click Light",
-			async () => {
-				await selectColorMode(colorMode, "Light");
-				await page.waitForFunction(() =>
-					globalThis.document.documentElement.classList.contains("light"),
-				);
-			},
-			"Light theme restored after an explicit color-mode click.",
-		);
-		const closeSettingsButton = await requireExperienceVisible(
-			page.getByRole("button", { name: "Close settings", exact: true }),
-			"the close settings button",
-		);
-		await record(
-			"settings-close",
-			"click",
-			async () => {
-				await closeSettingsButton.click();
-				await page
-					.getByRole("group", { name: "Color mode" })
-					.waitFor({ state: "detached" });
-			},
-			"Close settings and return to the conversation.",
-		);
-
-		await record(
-			"search-open",
-			"click",
-			async () => {
-				await searchButton.click();
-				await requireExperienceVisible(
-					page.getByRole("dialog", { name: "Search Commonspace" }),
-					"the Commonspace search dialog",
-				);
-			},
-			"Open Search from the top bar.",
-		);
-		const searchInput = await requireExperienceVisible(
-			page.getByRole("searchbox", { name: "Search Commonspace", exact: true }),
-			"the Commonspace search input",
-		);
-		await record(
-			"search-query",
-			"type verification",
-			async () => {
-				await searchInput.fill("verification");
-				await requireExperienceVisible(
-					page.getByRole("listbox", { name: "Commonspace search results" }),
-					"the Commonspace search results",
-				);
-			},
-			"Search results after entering a real fixture query.",
-		);
-		await record(
-			"search-keyboard-next",
-			"keyboard ArrowDown",
-			() => page.keyboard.press("ArrowDown"),
-			"Keyboard selection state in Search.",
-		);
-		await record(
-			"search-close",
-			"keyboard Escape",
-			async () => {
-				await page.keyboard.press("Escape");
-				await page
-					.getByRole("dialog", { name: "Search Commonspace" })
-					.waitFor({ state: "detached" });
-			},
-			"Escape closes Search and returns to the conversation.",
-		);
+		const searchButton = await auditHome(page, capture, record);
+		await auditChannel(page, record);
+		await auditComposer(page, record);
+		await auditSettings(page, record);
+		await auditSearch(page, searchButton, record);
 	} catch (error) {
 		failure = {
 			message: error instanceof Error ? error.message : String(error),
@@ -568,6 +590,235 @@ async function stopProcess(child) {
 	}
 }
 
+async function prepareExperienceWorkspace(
+	service,
+	root,
+	referenceRoot,
+	fixtureAgents,
+) {
+	for (const agent of fixtureAgents) {
+		await service.discoverAgents(agent.adapter);
+		await service.mutate({
+			action: "add-discovered-agent",
+			agentId: agent.id,
+		});
+		await service.mutate({
+			action: "update-agent-profile",
+			agentId: agent.id,
+			displayName: agent.displayName,
+			avatarEmoji: agent.id === "hermes" ? "D" : "R",
+			accentColor: agent.id === "hermes" ? "#e879f9" : "#60a5fa",
+		});
+	}
+	await service.updateRoutingConfiguration({
+		provider: "harness",
+		harnessAgentId: "codex",
+	});
+
+	let state = await service.mutate({
+		action: "create-project",
+		name: "Verification Project",
+		paths: [root],
+	});
+	const verificationProject = state.projects.at(-1);
+	if (verificationProject === undefined)
+		throw new Error("fixture project was not created");
+	state = await service.mutate({
+		action: "create-project",
+		name: "Reference Notes",
+		paths: [referenceRoot],
+	});
+	const referenceProject = state.projects.at(-1);
+	if (referenceProject === undefined)
+		throw new Error("fixture reference project was not created");
+
+	state = await service.mutate({
+		action: "create-channel",
+		name: "verification",
+		agentIds: ["codex", "hermes"],
+	});
+	const verificationChannel = state.channels.at(-1);
+	if (verificationChannel === undefined)
+		throw new Error("fixture verification channel was not created");
+	await service.mutate({
+		action: "create-channel",
+		name: "empty-state",
+		agentIds: [],
+	});
+	state = await service.mutate({
+		action: "create-channel",
+		name: "needs-attention",
+		agentIds: [],
+	});
+	const attentionChannel = state.channels.at(-1);
+	if (attentionChannel === undefined)
+		throw new Error("fixture attention channel was not created");
+	await service.mutate({
+		action: "set-channel-context",
+		channelId: verificationChannel.id,
+		instructions: "Keep replies concise and cite the exact visual evidence.",
+	});
+	await service.mutate({
+		action: "set-channel-memory",
+		channelId: verificationChannel.id,
+		summary: "Visual review is anchored to the current desktop workspace.",
+		decisions: ["Use real interaction states, not static display assertions."],
+		openQuestions: ["Does the selected state remain legible in dark mode?"],
+	});
+	return {
+		verificationProject,
+		referenceProject,
+		verificationChannel,
+		attentionChannel,
+	};
+}
+
+async function seedExperienceMessages(
+	service,
+	{
+		verificationProject,
+		referenceProject,
+		verificationChannel,
+		attentionChannel,
+	},
+) {
+	const rootResponse = await service.send({
+		conversation: { kind: "channel", id: verificationChannel.id },
+		projectIds: [verificationProject.id, referenceProject.id],
+		text: "@review-bot Review the workspace hierarchy and report a concise checkpoint.",
+	});
+	await service.whenIdle();
+	const threadId = rootResponse.thread?.id;
+	if (threadId === undefined)
+		throw new Error("fixture root message did not create a thread");
+	const rootMessageId = rootResponse.accepted.id;
+
+	await service.send({
+		conversation: { kind: "channel", id: verificationChannel.id },
+		threadId,
+		targetAgentId: "hermes",
+		projectIds: [verificationProject.id],
+		text: "@design-critic Compare the visual hierarchy against the review notes.",
+	});
+	await service.whenIdle();
+
+	const attachmentResponse = await service.send({
+		conversation: { kind: "channel", id: verificationChannel.id },
+		threadId,
+		targetAgentId: "codex",
+		projectIds: [verificationProject.id],
+		text: "Evidence bundle attached for the next checkpoint.",
+		attachments: [
+			{
+				name: "review-pixel.png",
+				mimeType: "image/png",
+				data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+			},
+		],
+		files: [
+			{
+				name: "review-notes.txt",
+				mimeType: "text/plain",
+				data: "c2hhcmVkIHZpc3VhbCByZXZpZXc=",
+			},
+		],
+	});
+	await service.whenIdle();
+
+	await service.send({
+		conversation: { kind: "channel", id: verificationChannel.id },
+		projectIds: [referenceProject.id],
+		text: "A long evidence note keeps the review surface realistic:\n\n- The selected row must remain visible.\n- The composer must not collide with the thread pane.\n- Metadata should wrap intentionally, never clip.\n\n```text\nvisual-review-fixture\n```",
+	});
+	await service.whenIdle();
+
+	await service.send({
+		conversation: { kind: "dm", id: "codex" },
+		projectIds: [verificationProject.id],
+		text: "Show the current project context and the next review step.",
+	});
+	await service.whenIdle();
+
+	await service.send({
+		conversation: { kind: "channel", id: attentionChannel.id },
+		projectIds: [verificationProject.id],
+		text: "Unassigned request that should remain visible as a failed routing state.",
+	});
+	await service.whenIdle();
+	return { threadId, rootMessageId, attachmentResponse };
+}
+
+async function seedExperienceBookmarks(
+	service,
+	channelId,
+	{ threadId, rootMessageId, attachmentResponse },
+) {
+	const { messages } = service.snapshot();
+	const agentReply = messages[`channel:${channelId}`]?.find(
+		(message) => message.authorType === "agent",
+	);
+	const dmReply = messages["dm:codex"]?.find(
+		(message) => message.authorType === "agent",
+	);
+	const attachmentId = attachmentResponse.accepted.attachments?.[0]?.id;
+	if (agentReply === undefined)
+		throw new Error("fixture channel reply is missing");
+	if (dmReply === undefined)
+		throw new Error("fixture direct-message reply is missing");
+	if (attachmentId === undefined)
+		throw new Error("fixture image attachment is missing");
+	await service.mutate({
+		action: "set-inbox-item-unread",
+		messageId: agentReply.id,
+		unread: true,
+	});
+	await service.mutate({
+		action: "set-inbox-item-saved",
+		messageId: agentReply.id,
+		saved: true,
+	});
+	await service.mutate({
+		action: "set-inbox-item-unread",
+		messageId: dmReply.id,
+		unread: true,
+	});
+	await service.addPin({
+		scope: { kind: "thread", id: threadId },
+		kind: "message",
+		messageId: rootMessageId,
+	});
+	await service.addPin({
+		scope: { kind: "thread", id: threadId },
+		kind: "attachment",
+		messageId: attachmentResponse.accepted.id,
+		attachmentId,
+	});
+}
+
+function experienceBaseline(snapshot) {
+	return {
+		version: "commonspace-visual-baseline-v1",
+		agents: snapshot.agents.map((agent) => agent.displayName),
+		projects: snapshot.projects.map((project) => project.name),
+		channels: snapshot.channels.map((channel) => channel.name),
+		messageCount: Object.values(snapshot.messages).reduce(
+			(total, messages) => total + messages.length,
+			0,
+		),
+		threadCount: snapshot.threads.length,
+		pinCount: snapshot.pins.length,
+		attachmentCount: Object.values(snapshot.messages)
+			.flat()
+			.reduce(
+				(total, message) =>
+					total +
+					(message.attachments?.length ?? 0) +
+					(message.files?.length ?? 0),
+				0,
+			),
+	};
+}
+
 async function seedExperienceFixture(root) {
 	await mkdir(experienceArtifactDir, { recursive: true });
 	const referenceRoot = join(root, "reference");
@@ -638,217 +889,26 @@ async function seedExperienceFixture(root) {
 	);
 	await service.initialize();
 	try {
-		for (const agent of fixtureAgents) {
-			await service.discoverAgents(agent.adapter);
-			await service.mutate({
-				action: "add-discovered-agent",
-				agentId: agent.id,
-			});
-			await service.mutate({
-				action: "update-agent-profile",
-				agentId: agent.id,
-				displayName: agent.displayName,
-				avatarEmoji: agent.id === "hermes" ? "D" : "R",
-				accentColor: agent.id === "hermes" ? "#e879f9" : "#60a5fa",
-			});
-		}
-		await service.updateRoutingConfiguration({
-			provider: "harness",
-			harnessAgentId: "codex",
-		});
-
-		let state = await service.mutate({
-			action: "create-project",
-			name: "Verification Project",
-			paths: [root],
-		});
-		const verificationProject = state.projects.at(-1);
-		if (verificationProject === undefined)
-			throw new Error("fixture project was not created");
-		state = await service.mutate({
-			action: "create-project",
-			name: "Reference Notes",
-			paths: [referenceRoot],
-		});
-		const referenceProject = state.projects.at(-1);
-		if (referenceProject === undefined)
-			throw new Error("fixture reference project was not created");
-
-		state = await service.mutate({
-			action: "create-channel",
-			name: "verification",
-			agentIds: ["codex", "hermes"],
-		});
-		const verificationChannel = state.channels.at(-1);
-		if (verificationChannel === undefined)
-			throw new Error("fixture verification channel was not created");
-		state = await service.mutate({
-			action: "create-channel",
-			name: "empty-state",
-			agentIds: [],
-		});
-		state = await service.mutate({
-			action: "create-channel",
-			name: "needs-attention",
-			agentIds: [],
-		});
-		const attentionChannel = state.channels.at(-1);
-		if (attentionChannel === undefined)
-			throw new Error("fixture attention channel was not created");
-		await service.mutate({
-			action: "set-channel-context",
-			channelId: verificationChannel.id,
-			instructions: "Keep replies concise and cite the exact visual evidence.",
-		});
-		await service.mutate({
-			action: "set-channel-memory",
-			channelId: verificationChannel.id,
-			summary: "Visual review is anchored to the current desktop workspace.",
-			decisions: [
-				"Use real interaction states, not static display assertions.",
-			],
-			openQuestions: ["Does the selected state remain legible in dark mode?"],
-		});
-
-		const rootResponse = await service.send({
-			conversation: { kind: "channel", id: verificationChannel.id },
-			projectIds: [verificationProject.id, referenceProject.id],
-			text: "@review-bot Review the workspace hierarchy and report a concise checkpoint.",
-		});
-		await service.whenIdle();
-		const threadId = rootResponse.thread?.id;
-		if (threadId === undefined)
-			throw new Error("fixture root message did not create a thread");
-		const rootMessageId = rootResponse.accepted.id;
-
-		await service.send({
-			conversation: { kind: "channel", id: verificationChannel.id },
-			threadId,
-			targetAgentId: "hermes",
-			projectIds: [verificationProject.id],
-			text: "@design-critic Compare the visual hierarchy against the review notes.",
-		});
-		await service.whenIdle();
-
-		const attachmentResponse = await service.send({
-			conversation: { kind: "channel", id: verificationChannel.id },
-			threadId,
-			targetAgentId: "codex",
-			projectIds: [verificationProject.id],
-			text: "Evidence bundle attached for the next checkpoint.",
-			attachments: [
-				{
-					name: "review-pixel.png",
-					mimeType: "image/png",
-					data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-				},
-			],
-			files: [
-				{
-					name: "review-notes.txt",
-					mimeType: "text/plain",
-					data: "c2hhcmVkIHZpc3VhbCByZXZpZXc=",
-				},
-			],
-		});
-		await service.whenIdle();
-
-		await service.send({
-			conversation: { kind: "channel", id: verificationChannel.id },
-			projectIds: [referenceProject.id],
-			text: "A long evidence note keeps the review surface realistic:\n\n- The selected row must remain visible.\n- The composer must not collide with the thread pane.\n- Metadata should wrap intentionally, never clip.\n\n```text\nvisual-review-fixture\n```",
-		});
-		await service.whenIdle();
-
-		await service.send({
-			conversation: { kind: "dm", id: "codex" },
-			projectIds: [verificationProject.id],
-			text: "Show the current project context and the next review step.",
-		});
-		await service.whenIdle();
-
-		await service.send({
-			conversation: { kind: "channel", id: attentionChannel.id },
-			projectIds: [verificationProject.id],
-			text: "Unassigned request that should remain visible as a failed routing state.",
-		});
-		await service.whenIdle();
-
-		const channelMessages =
-			service.snapshot().messages[`channel:${verificationChannel.id}`] ?? [];
-		const agentReplyIds = channelMessages
-			.filter((message) => message.authorType === "agent")
-			.map((message) => message.id);
-		const dmMessages = service.snapshot().messages["dm:codex"] ?? [];
-		const dmReply = dmMessages.find(
-			(message) => message.authorType === "agent",
+		const workspace = await prepareExperienceWorkspace(
+			service,
+			root,
+			referenceRoot,
+			fixtureAgents,
 		);
-		const attachmentId = attachmentResponse.accepted.attachments?.[0]?.id;
-		if (agentReplyIds[0] !== undefined) {
-			await service.mutate({
-				action: "set-inbox-item-unread",
-				messageId: agentReplyIds[0],
-				unread: true,
-			});
-			await service.mutate({
-				action: "set-inbox-item-saved",
-				messageId: agentReplyIds[0],
-				saved: true,
-			});
-		}
-		if (dmReply !== undefined) {
-			await service.mutate({
-				action: "set-inbox-item-unread",
-				messageId: dmReply.id,
-				unread: true,
-			});
-		}
-		await service.addPin({
-			scope: { kind: "thread", id: threadId },
-			kind: "message",
-			messageId: rootMessageId,
-		});
-		if (attachmentId !== undefined) {
-			await service.addPin({
-				scope: { kind: "thread", id: threadId },
-				kind: "attachment",
-				messageId: attachmentResponse.accepted.id,
-				attachmentId,
-			});
-		}
-		const snapshot = service.snapshot();
-		const baseline = {
-			version: "commonspace-visual-baseline-v1",
-			agents: snapshot.agents.map((agent) => agent.displayName),
-			projects: snapshot.projects.map((project) => project.name),
-			channels: snapshot.channels.map((channel) => channel.name),
-			messageCount: Object.values(snapshot.messages).reduce(
-				(total, messages) => total + messages.length,
-				0,
-			),
-			threadCount: snapshot.threads.length,
-			pinCount: snapshot.pins.length,
-			attachmentCount: snapshot.messages
-				? Object.values(snapshot.messages)
-						.flat()
-						.reduce(
-							(total, message) =>
-								total +
-								(message.attachments?.length ?? 0) +
-								(message.files?.length ?? 0),
-							0,
-						)
-				: 0,
-		};
+		const evidence = await seedExperienceMessages(service, workspace);
+		await seedExperienceBookmarks(
+			service,
+			workspace.verificationChannel.id,
+			evidence,
+		);
+		const baseline = experienceBaseline(service.snapshot());
 		await writeFile(
 			join(experienceArtifactDir, "baseline.json"),
 			`${JSON.stringify(baseline, null, 2)}\n`,
 		);
-		await service.close();
 		return baseline;
-	} catch (error) {
+	} finally {
 		await service.close();
-		throw error;
 	}
 }
 
