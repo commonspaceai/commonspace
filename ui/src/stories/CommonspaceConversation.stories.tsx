@@ -191,6 +191,7 @@ export const ChannelConversation: Story = {
 export const ThreadIdentityAndScope: Story = {
 	args: {
 		store: createStoryStore(storyBootstrap, {
+			interactive: true,
 			activeConversation: channel,
 			activeProjectId: primaryProject.id,
 			activeThreadId: "thread-review",
@@ -255,6 +256,17 @@ export const ThreadIdentityAndScope: Story = {
 		await expect(canvas.getByText("#design-review · New Thread")).toBeVisible();
 		await userEvent.keyboard("{F6}");
 		await expect(threadInput).toHaveFocus();
+		await userEvent.keyboard("{Enter}");
+		await userEvent.click(channelInput);
+		await userEvent.keyboard("{Enter}");
+		await userEvent.type(channelInput, "/retry{Enter}");
+		await expect(
+			canvas.getByRole("status", { name: "Command result" }),
+		).toHaveTextContent("Keep this post scoped");
+		await userEvent.type(threadInput, "/retry{Enter}");
+		await expect(
+			canvas.getByRole("status", { name: "Command result" }),
+		).toHaveTextContent("Keep this reply scoped");
 
 		await userEvent.click(
 			thread.getByRole("button", { name: "Open thread context" }),

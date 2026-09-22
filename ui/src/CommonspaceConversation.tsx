@@ -2089,195 +2089,192 @@ export function CommonspaceConversation({
 			return;
 		}
 
-		if (resolved.command.id === "help") {
-			const commands = slashCommandSuggestions("/", conversation.kind);
-			const shortcuts = [
-				"Command/Control+K — Search Commonspace",
-				...(snapshot.activeThreadId === null
-					? []
-					: ["F6 — Switch between Channel and Thread writing"]),
-				"Escape — Close the active panel",
-			];
-			setCommandFeedback({
-				tone: "info",
-				title: "Commonspace commands",
-				body: [
-					...commands.map(
-						(command) => `${command.name} — ${command.description}`,
-					),
-					...shortcuts,
-				].join("\n"),
-			});
-			return;
-		}
-
-		if (resolved.command.id === "stop") {
-			const matchingActivities = (bootstrap.liveActivities ?? []).filter(
-				(activity) =>
-					activity.conversation.kind === conversation.kind &&
-					activity.conversation.id === conversation.id &&
-					activity.threadId === threadId,
+		const previousUserMessage = () =>
+			messages.findLast(
+				(message) =>
+					message.authorType === "user" &&
+					(threadId === undefined
+						? conversation.kind === "dm" ||
+							message.parentMessageId === undefined
+						: message.threadId === threadId),
 			);
-			const targetMessageId =
-				matchingActivities.at(-1)?.sourceMessageId ??
-				[...messages]
-					.reverse()
-					.find(
-						(message) =>
-							message.authorType === "user" &&
-							(threadId === undefined
-								? conversation.kind === "dm" ||
-									message.parentMessageId === undefined
-								: message.threadId === threadId),
-					)?.id;
-			if (targetMessageId === undefined) {
+
+		switch (resolved.command.id) {
+			case "help": {
+				const commands = slashCommandSuggestions("/", conversation.kind);
+				const shortcuts = [
+					"Command/Control+K — Search Commonspace",
+					...(snapshot.activeThreadId === null
+						? []
+						: ["F6 — Switch between Channel and Thread writing"]),
+					"Escape — Close the active panel",
+				];
 				setCommandFeedback({
 					tone: "info",
-					title: "Nothing to stop",
-					body: "No agent is currently working in this conversation.",
+					title: "Commonspace commands",
+					body: [
+						...commands.map(
+							(command) => `${command.name} — ${command.description}`,
+						),
+						...shortcuts,
+					].join("\n"),
 				});
 				return;
 			}
-			try {
-				const stopped = await store.stopAgentRuns(targetMessageId);
-				setCommandFeedback(
-					stopped.length === 0
-						? {
-								tone: "info",
-								title: "Nothing to stop",
-								body: "That agent work has already finished.",
-							}
-						: {
-								tone: "success",
-								title: "Agent work stopped",
-								body: `Stopped ${stopped.length === 1 ? stopped[0] : `${String(stopped.length)} agents`}.`,
-							},
-				);
-			} catch (error) {
-				setCommandFeedback({
-					tone: "error",
-					title: "Could not stop agent work",
-					body: error instanceof Error ? error.message : String(error),
-				});
-			}
-			return;
-		}
 
-		if (resolved.command.id === "status") {
-			if (conversation.kind === "dm") {
-				const agent = bootstrap.agents.find(
-					(candidate) => candidate.id === conversation.id,
+			case "stop": {
+				const activity = bootstrap.liveActivities?.findLast(
+					(activity) =>
+						activity.conversation.kind === conversation.kind &&
+						activity.conversation.id === conversation.id &&
+						activity.threadId === threadId,
 				);
+				const targetMessageId =
+					activity?.sourceMessageId ?? previousUserMessage()?.id;
+				if (targetMessageId === undefined) {
+					setCommandFeedback({
+						tone: "info",
+						title: "Nothing to stop",
+						body: "No agent is currently working in this conversation.",
+					});
+					return;
+				}
+				try {
+					const stopped = await store.stopAgentRuns(targetMessageId);
+					setCommandFeedback(
+						stopped.length === 0
+							? {
+									tone: "info",
+									title: "Nothing to stop",
+									body: "That agent work has already finished.",
+								}
+							: {
+									tone: "success",
+									title: "Agent work stopped",
+									body: `Stopped ${stopped.length === 1 ? stopped[0] : `${String(stopped.length)} agents`}.`,
+								},
+					);
+				} catch (error) {
+					setCommandFeedback({
+						tone: "error",
+						title: "Could not stop agent work",
+						body: error instanceof Error ? error.message : String(error),
+					});
+				}
+				return;
+			}
+
+			case "status": {
 				const project = bootstrap.state.projects.find(
 					(candidate) => candidate.id === snapshot.activeProjectId,
 				);
-				setCommandFeedback({
-					tone: "info",
-					title: "Direct-message status",
-					body: `${agent?.displayName ?? conversation.id} · ${runtimeLabel(agent?.adapter)} · ${agent?.model ?? "default model"} · ${agent?.status ?? "unknown"}${project === undefined ? "" : `\nProject context: ${project.name}`}`,
-				});
-			} else {
-				const channel = bootstrap.state.channels.find(
-					(candidate) => candidate.id === conversation.id,
-				);
-				const project = bootstrap.state.projects.find(
-					(candidate) => candidate.id === snapshot.activeProjectId,
-				);
-				setCommandFeedback({
-					tone: "info",
-					title: "Channel status",
-					body: `${heading.title} · Global Channel · ${String(channel?.agentIds.length ?? 0)} ${(channel?.agentIds.length ?? 0) === 1 ? "agent" : "agents"}${project === undefined ? "" : `\nNext thread project context: ${project.name}`}\nModel and reasoning follow each agent's native setup.`,
-				});
+				if (conversation.kind === "dm") {
+					const agent = bootstrap.agents.find(
+						(candidate) => candidate.id === conversation.id,
+					);
+					setCommandFeedback({
+						tone: "info",
+						title: "Direct-message status",
+						body: `${agent?.displayName ?? conversation.id} · ${runtimeLabel(agent?.adapter)} · ${agent?.model ?? "default model"} · ${agent?.status ?? "unknown"}${project === undefined ? "" : `\nProject context: ${project.name}`}`,
+					});
+				} else {
+					const channel = bootstrap.state.channels.find(
+						(candidate) => candidate.id === conversation.id,
+					);
+					setCommandFeedback({
+						tone: "info",
+						title: "Channel status",
+						body: `${heading.title} · Global Channel · ${String(channel?.agentIds.length ?? 0)} ${(channel?.agentIds.length ?? 0) === 1 ? "agent" : "agents"}${project === undefined ? "" : `\nNext thread project context: ${project.name}`}\nModel and reasoning follow each agent's native setup.`,
+					});
+				}
+				return;
 			}
-			return;
-		}
 
-		if (resolved.command.id === "agents") {
-			setCommandFeedback({
-				tone: "info",
-				title: "Available agents",
-				body:
-					bootstrap.agents.length === 0
-						? "No agents are configured."
-						: bootstrap.agents
-								.map(
-									(agent) =>
-										`${agent.displayName} · ${runtimeLabel(agent.adapter)} · ${agent.model ?? "default model"}`,
-								)
-								.join("\n"),
-			});
-			return;
-		}
-
-		if (resolved.command.id === "retry") {
-			const previous = [...messages]
-				.reverse()
-				.find(
-					(message) =>
-						message.authorType === "user" &&
-						(threadId === undefined
-							? conversation.kind === "dm" ||
-								message.parentMessageId === undefined
-							: message.threadId === threadId),
-				);
-			if (previous === undefined) {
+			case "agents": {
 				setCommandFeedback({
-					tone: "error",
-					title: "Nothing to retry",
-					body: "Send a message first, then use /retry.",
+					tone: "info",
+					title: "Available agents",
+					body:
+						bootstrap.agents.length === 0
+							? "No agents are configured."
+							: bootstrap.agents
+									.map(
+										(agent) =>
+											`${agent.displayName} · ${runtimeLabel(agent.adapter)} · ${agent.model ?? "default model"}`,
+									)
+									.join("\n"),
 				});
 				return;
 			}
-			setCommandFeedback({
-				tone: "info",
-				title: "Retrying message",
-				body: previous.text,
-			});
-			try {
-				const replay = await replayAttachments(previous);
-				const projectIds = referencedProjectIds(previous);
-				if (replay.images.length === 0 && replay.files.length === 0) {
-					if (threadId === undefined)
-						await store.send({ text: previous.text, projectIds });
-					else if (projectIds.length === 0)
-						await store.send({ text: previous.text, threadId });
-					else
+
+			case "retry": {
+				const previous = previousUserMessage();
+				if (previous === undefined) {
+					setCommandFeedback({
+						tone: "error",
+						title: "Nothing to retry",
+						body: "Send a message first, then use /retry.",
+					});
+					return;
+				}
+				setCommandFeedback({
+					tone: "info",
+					title: "Retrying message",
+					body: previous.text,
+				});
+				try {
+					const replay = await replayAttachments(previous);
+					const projectIds = referencedProjectIds(previous);
+					if (replay.images.length === 0 && replay.files.length === 0) {
+						if (threadId === undefined)
+							await store.send({ text: previous.text, projectIds });
+						else if (projectIds.length === 0)
+							await store.send({ text: previous.text, threadId });
+						else
+							await store.send({
+								text: previous.text,
+								threadId,
+								projectIds,
+							});
+					} else {
 						await store.send({
 							text: previous.text,
 							threadId,
+							attachments: replay.images,
 							projectIds,
+							files: replay.files,
 						});
-				} else {
-					await store.send({
-						text: previous.text,
-						threadId,
-						attachments: replay.images,
-						projectIds,
-						files: replay.files,
+					}
+				} catch (error) {
+					setCommandFeedback({
+						tone: "error",
+						title: "Retry failed",
+						body: error instanceof Error ? error.message : String(error),
 					});
 				}
-			} catch (error) {
-				setCommandFeedback({
-					tone: "error",
-					title: "Retry failed",
-					body: error instanceof Error ? error.message : String(error),
-				});
+				return;
 			}
-			return;
-		}
 
-		const skipConfirmation = ["now", "--yes", "-y"].includes(
-			resolved.args.toLocaleLowerCase(),
-		);
-		if (skipConfirmation) {
-			await resetDirectMessage();
-		} else {
-			setCommandFeedback({
-				tone: "info",
-				title: "Start a new chat?",
-				body: "This keeps earlier messages visible and starts a fresh native session for this agent.",
-				action: "reset-dm",
-			});
+			case "new": {
+				const skipConfirmation = ["now", "--yes", "-y"].includes(
+					resolved.args.toLocaleLowerCase(),
+				);
+				if (skipConfirmation) {
+					await resetDirectMessage();
+				} else {
+					setCommandFeedback({
+						tone: "info",
+						title: "Start a new chat?",
+						body: "This keeps earlier messages visible and starts a fresh native session for this agent.",
+						action: "reset-dm",
+					});
+				}
+				return;
+			}
+			default: {
+				const unhandled: never = resolved.command.id;
+				throw new Error(`Unhandled slash command: ${unhandled}`);
+			}
 		}
 	};
 
