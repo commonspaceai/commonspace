@@ -4914,6 +4914,7 @@ esac
 				runAgent: withHarnessUtilities(runAgent),
 			},
 		);
+		services.push(service);
 		await service.initialize();
 		await addTestHarness(service, "hermes", "Frontend");
 		await service.updateRoutingConfiguration({
