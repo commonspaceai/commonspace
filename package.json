@@ -72,6 +72,8 @@
 		"evaluate:classifier": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/evaluate-classifier.ts",
 		"evaluate:routing": "node scripts/run-vitest.mjs COMMONSPACE_ROUTING_EVAL tests/routing-quality.spec.ts --maxWorkers=1",
 		"benchmark:context": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-context.ts",
+		"benchmark:laya": "pnpm --filter commonspace build && node --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-laya.ts",
+		"benchmark:routing-latency": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-routing-latency.ts",
 		"service:install": "node scripts/commonspace-service.mjs install --source .",
 		"service:update": "node scripts/commonspace-service.mjs update",
 		"service:start": "node scripts/commonspace-service.mjs start",
