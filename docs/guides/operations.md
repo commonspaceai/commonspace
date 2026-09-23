@@ -35,6 +35,15 @@ The server reads these variables at startup. They apply to the foreground proces
 | `COMMONSPACE_HOME` | Local state directory; defaults to `~/.commonspace`. Use a separate directory for development or verification. |
 | `COMMONSPACE_UI_ROOT` | Built browser asset directory. The source server serves no UI when unset; npm/service launchers set it. |
 | `COMMONSPACE_LOG_LEVEL` | Server log level; defaults to `info`. |
+| `COMMONSPACE_OTLP_ENDPOINT` | Optional OTLP/HTTP collector origin on loopback, such as `http://127.0.0.1:4318`. Unset by default; remote hosts, paths, credentials, and query strings are rejected. |
+
+### OpenTelemetry
+
+When `COMMONSPACE_OTLP_ENDPOINT` is set, the server exports traces and named exception logs to the local collector's `/v1/traces` and `/v1/logs` endpoints. For example, start a local OTLP/HTTP collector on port `4318`, then run `COMMONSPACE_OTLP_ENDPOINT=http://127.0.0.1:4318 pnpm start`. Shutdown flushes pending records with a bounded timeout. If the collector is unavailable, the server prints a generic warning and still shuts down normally.
+
+The initial operation spans cover sent and edited message acceptance and logical Agent runs, with a child span for each Agent attempt. Span fields include bounded conversation kind, delivery mode, adapter, session reuse, response length, and final outcome. A recovered missing-session attempt emits a `WARN` exception log; terminal failures emit an `ERROR` exception log. Logs produced by the server's Pino logger include trace and span IDs when a span is active. The saved Agent activity trace shown in the workspace is separate from OpenTelemetry.
+
+Exported records omit message and response text, IDs, Project paths, native session IDs, credentials, raw exception messages, and stack traces. Exception records retain bounded error and cause types; their message says details were withheld. The configured resource identifies only `service.name=commonspace`. Keep the collector local and control its retention and forwarding separately.
 
 ### Agent executables
 

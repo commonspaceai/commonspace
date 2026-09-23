@@ -17,6 +17,8 @@ The pnpm workspace has four packages:
 
 The product consists of Projects, Channels, Direct Messages, Agents, messages, Threads, and their shared context. Keep feature logic near its owner and use `packages/shared` as the single source for cross-process types.
 
+The server can optionally export OpenTelemetry operation spans and exception logs to a loopback OTLP collector. This operational telemetry is distinct from persisted Agent activity traces and contains no conversation content. See [Operations](operations.md#opentelemetry) for configuration and field policy.
+
 Two protocols connect agent work to the workspace. Agent Client Protocol (ACP) carries native session requests, responses, activity, and permission choices over local child-process input/output. Model Context Protocol (MCP) exposes scoped Commonspace context and progress tools over authenticated loopback HTTP.
 
 ## Where changes belong

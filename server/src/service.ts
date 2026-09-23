@@ -84,6 +84,8 @@ import {
 	referencedProjectIds,
 	uniqueAgentDisplayName,
 } from "@commonspace/shared";
+import { type Context, context, SpanStatusCode } from "@opentelemetry/api";
+import { SeverityNumber } from "@opentelemetry/api-logs";
 import {
 	AcpAgentProcess,
 	type AcpRunInput,
@@ -186,6 +188,11 @@ import {
 	emptyChannelMemory,
 	emptyRoutingMemory,
 } from "./state.js";
+import {
+	markOperationFailed,
+	recordOperationException,
+	serverTracer,
+} from "./telemetry.js";
 import {
 	buildThreadContextCompactionPrompt,
 	createThreadContext,
@@ -791,6 +798,7 @@ interface PendingFollowup {
 	prepared: PreparedSend;
 	response: SendMessageResponse;
 	delivery: NonNullable<SendMessageRequest["delivery"]>;
+	telemetryContext: Context;
 }
 
 interface PendingFollowupLocation {
@@ -6252,22 +6260,65 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		);
 	}
 
+	private withMessageAcceptanceTelemetry(
+		source: "send" | "edit",
+		conversationKind: SendMessageRequest["conversation"]["kind"],
+		deliveryMode: NonNullable<SendMessageRequest["delivery"]>,
+		operation: () => Promise<SendMessageResponse>,
+	): Promise<SendMessageResponse> {
+		return serverTracer.startActiveSpan(
+			"commonspace.message.accept",
+			{
+				attributes: {
+					"commonspace.conversation.kind": conversationKind,
+					"commonspace.message.source": source,
+					"commonspace.message.delivery_mode": deliveryMode,
+				},
+			},
+			async (span) => {
+				try {
+					const response = await operation();
+					span.setAttribute("commonspace.message.accepted", true);
+					span.setStatus({ code: SpanStatusCode.OK });
+					return response;
+				} catch (error) {
+					const observedError = error instanceof Error ? error : undefined;
+					markOperationFailed(span, observedError, "Message acceptance failed");
+					recordOperationException(observedError, {
+						eventName: "commonspace.message.accept.exception",
+						body: "Message acceptance failed",
+						severity: SeverityNumber.ERROR,
+					});
+					throw error;
+				} finally {
+					span.end();
+				}
+			},
+		);
+	}
+
 	async send(request: SendMessageRequest): Promise<SendMessageResponse> {
-		return this.withAdmission(async () => {
-			if (
-				request.delivery !== undefined &&
-				!["queue", "steer", "stop-and-send"].includes(request.delivery)
-			) {
-				throw new Error("invalid follow-up delivery mode");
-			}
-			const preparationStartedAt = this.performancePhaseStartedAt();
-			const prepared = await this.prepareSend(request);
-			this.recordPerformanceMeasurement(
-				CommonspaceHostPerformancePhase.AcceptanceRequestPreparation,
-				preparationStartedAt,
-			);
-			return this.acceptPreparedSend(prepared);
-		});
+		return this.withMessageAcceptanceTelemetry(
+			"send",
+			request.conversation.kind,
+			request.delivery ?? "queue",
+			() =>
+				this.withAdmission(async () => {
+					if (
+						request.delivery !== undefined &&
+						!["queue", "steer", "stop-and-send"].includes(request.delivery)
+					) {
+						throw new Error("invalid follow-up delivery mode");
+					}
+					const preparationStartedAt = this.performancePhaseStartedAt();
+					const prepared = await this.prepareSend(request);
+					this.recordPerformanceMeasurement(
+						CommonspaceHostPerformancePhase.AcceptanceRequestPreparation,
+						preparationStartedAt,
+					);
+					return this.acceptPreparedSend(prepared);
+				}),
+		);
 	}
 
 	private currentEditableMessage(messageId: string): CommonspaceMessage {
@@ -6329,49 +6380,55 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				action: "reset-dm",
 				agentId: source.conversation.id,
 			});
-		return this.withAdmission(async () => {
-			const currentSource = this.currentEditableMessage(source.id);
-			const editedProjectIds =
-				request.projectIds ??
-				(parseTags(request.text).projects.length > 0
-					? undefined
-					: referencedProjectIds(currentSource));
-			const editedRequest: SendMessageRequest = {
-				conversation: currentSource.conversation,
-				text: request.text,
-			};
-			if (editedProjectIds !== undefined)
-				editedRequest.projectIds = editedProjectIds;
-			const prepared = await this.prepareSend(editedRequest);
-			if (
-				request.projectIds === undefined &&
-				parseTags(request.text).projects.length === 0
-			)
-				prepared.projectScopeExplicit = false;
-			prepared.attachments = await Promise.all(
-				(currentSource.attachments ?? []).map(async (attachment) => {
-					const { data } = await this.readImageAttachment(attachment.id);
-					return {
-						metadata: { ...attachment, id: crypto.randomUUID() },
-						data,
+		return this.withMessageAcceptanceTelemetry(
+			"edit",
+			source.conversation.kind,
+			"queue",
+			() =>
+				this.withAdmission(async () => {
+					const currentSource = this.currentEditableMessage(source.id);
+					const editedProjectIds =
+						request.projectIds ??
+						(parseTags(request.text).projects.length > 0
+							? undefined
+							: referencedProjectIds(currentSource));
+					const editedRequest: SendMessageRequest = {
+						conversation: currentSource.conversation,
+						text: request.text,
 					};
+					if (editedProjectIds !== undefined)
+						editedRequest.projectIds = editedProjectIds;
+					const prepared = await this.prepareSend(editedRequest);
+					if (
+						request.projectIds === undefined &&
+						parseTags(request.text).projects.length === 0
+					)
+						prepared.projectScopeExplicit = false;
+					prepared.attachments = await Promise.all(
+						(currentSource.attachments ?? []).map(async (attachment) => {
+							const { data } = await this.readImageAttachment(attachment.id);
+							return {
+								metadata: { ...attachment, id: crypto.randomUUID() },
+								data,
+							};
+						}),
+					);
+					prepared.files = await Promise.all(
+						(currentSource.files ?? []).map(async (file) => {
+							const { data } = await this.readFileAttachment(file.id);
+							return { metadata: { ...file, id: crypto.randomUUID() }, data };
+						}),
+					);
+					prepared.version = {
+						versionRootMessageId:
+							currentSource.versionRootMessageId ?? currentSource.id,
+						supersedesMessageId: currentSource.id,
+						branchId: crypto.randomUUID(),
+					};
+					this.attachEditedMessageBranch(prepared, currentSource);
+					return this.acceptPreparedSend(prepared);
 				}),
-			);
-			prepared.files = await Promise.all(
-				(currentSource.files ?? []).map(async (file) => {
-					const { data } = await this.readFileAttachment(file.id);
-					return { metadata: { ...file, id: crypto.randomUUID() }, data };
-				}),
-			);
-			prepared.version = {
-				versionRootMessageId:
-					currentSource.versionRootMessageId ?? currentSource.id,
-				supersedesMessageId: currentSource.id,
-				branchId: crypto.randomUUID(),
-			};
-			this.attachEditedMessageBranch(prepared, currentSource);
-			return this.acceptPreparedSend(prepared);
-		});
+		);
 	}
 
 	private prepareMessageDeletion(messageId: string): PreparedMessageDeletion {
@@ -6546,7 +6603,12 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		const delivery = prepared.request.delivery ?? "queue";
 		if (this.activeConversationRuns.has(scopeKey)) {
 			const queue = this.pendingFollowups.get(scopeKey) ?? [];
-			const pending = { prepared, response, delivery };
+			const pending = {
+				prepared,
+				response,
+				delivery,
+				telemetryContext: context.active(),
+			};
 			if (delivery === "steer" || delivery === "stop-and-send")
 				queue.unshift(pending);
 			else queue.push(pending);
@@ -6559,7 +6621,12 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				);
 			}
 		} else {
-			this.startConversationRun(scopeKey, { prepared, response, delivery });
+			this.startConversationRun(scopeKey, {
+				prepared,
+				response,
+				delivery,
+				telemetryContext: context.active(),
+			});
 		}
 		return response;
 	}
@@ -6690,6 +6757,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			prepared: retry.prepared,
 			response,
 			delivery: "queue" as const,
+			telemetryContext: context.active(),
 		};
 		const scopeKey = this.followupScopeKey(
 			retry.source.conversation,
@@ -7951,7 +8019,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		const operation = (async () => {
 			let current: PendingFollowup | undefined = initial;
 			while (current !== undefined && !this.closing) {
-				await this.processReplies(current.prepared, current.response);
+				const followup = current;
+				await context.with(followup.telemetryContext, () =>
+					this.processReplies(followup.prepared, followup.response),
+				);
 				const queue = this.pendingFollowups.get(scopeKey);
 				current = queue?.shift();
 				if (queue?.length === 0) this.pendingFollowups.delete(scopeKey);
@@ -10575,11 +10646,34 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	}
 
 	private async runAgent(input: AgentRunInput): Promise<AgentRunResult> {
-		if (this.overrides.runAgent !== undefined) {
-			const result = await this.overrides.runAgent(input);
-			return typeof result === "string" ? { text: result } : result;
-		}
-		return this.runAcpAgent(input);
+		return serverTracer.startActiveSpan(
+			"commonspace.agent.run_attempt",
+			async (span) => {
+				try {
+					const result =
+						this.overrides.runAgent === undefined
+							? await this.runAcpAgent(input)
+							: await this.overrides.runAgent(input);
+					const response =
+						typeof result === "string" ? { text: result } : result;
+					span.setAttribute(
+						"commonspace.agent.response_chars",
+						Math.min(response.text.length, MAX_AGENT_RESPONSE_CHARS),
+					);
+					span.setStatus({ code: SpanStatusCode.OK });
+					return response;
+				} catch (error) {
+					markOperationFailed(
+						span,
+						error instanceof Error ? error : undefined,
+						"Agent attempt failed",
+					);
+					throw error;
+				} finally {
+					span.end();
+				}
+			},
+		);
 	}
 
 	private beginLiveActivity({
@@ -10946,6 +11040,44 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		input: AgentRunInput,
 		shouldContinue: () => boolean,
 	): Promise<AgentRunResult | null> {
+		return serverTracer.startActiveSpan(
+			"commonspace.agent.run",
+			{
+				attributes: {
+					"commonspace.agent.adapter": input.agent.adapter,
+					"commonspace.agent.session_reused": input.sessionId !== undefined,
+					"commonspace.agent.ephemeral": input.ephemeralSession === true,
+				},
+			},
+			async (span) => {
+				try {
+					const result = await this.runAgentWithRecovery(input, shouldContinue);
+					span.setAttribute(
+						"commonspace.agent.outcome",
+						result === null ? "cancelled" : "completed",
+					);
+					if (result !== null) span.setStatus({ code: SpanStatusCode.OK });
+					return result;
+				} catch (error) {
+					const observedError = error instanceof Error ? error : undefined;
+					markOperationFailed(span, observedError, "Agent run failed");
+					recordOperationException(observedError, {
+						eventName: "commonspace.agent.run.exception",
+						body: "Agent run failed",
+						severity: SeverityNumber.ERROR,
+					});
+					throw error;
+				} finally {
+					span.end();
+				}
+			},
+		);
+	}
+
+	private async runAgentWithRecovery(
+		input: AgentRunInput,
+		shouldContinue: () => boolean,
+	): Promise<AgentRunResult | null> {
 		try {
 			return await this.runAgent(input);
 		} catch (error) {
@@ -10957,13 +11089,22 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				(!silentPersistedHermesSession && !isMissingNativeSession(error))
 			)
 				throw error;
-			if (!shouldContinue()) return null;
-			this.forgetAgentSession(
-				input.agent.id,
-				input.sessionName,
-				input.sessionId,
-			);
-			if (!shouldContinue()) return null;
+			let recover = shouldContinue();
+			if (recover) {
+				this.forgetAgentSession(
+					input.agent.id,
+					input.sessionName,
+					input.sessionId,
+				);
+				recover = shouldContinue();
+			}
+			recordOperationException(error instanceof Error ? error : undefined, {
+				eventName: "commonspace.agent.run_attempt.exception",
+				body: "Agent session was unavailable",
+				severity: SeverityNumber.WARN,
+				recoveryAction: recover ? "replace_session" : "cancel_run",
+			});
+			if (!recover) return null;
 			const processScopeKey = `${input.agent.id}\u0000${input.processScopeName ?? input.sessionName}`;
 			const processClient = this.acpProcesses.get(processScopeKey);
 			if (processClient !== undefined) {
