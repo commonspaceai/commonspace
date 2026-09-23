@@ -142,7 +142,7 @@ pnpm benchmark
 
 `benchmarks/` holds Vitest benchmarks for unified search, Inbox/session projection, Channel and Thread context projection, and workspace state serialization and Project mutation. They reuse the synthetic multi-Channel fixture from `scripts/benchmark-workspace-fixtures.ts` without Project roots, so they measure computation rather than local disk. The CodSpeed workflow runs them under CPU simulation and reports the comparison on the pull request; `pnpm benchmark:workspace` remains the opt-in service-level measurement.
 
-The suite also measures scoped history retrieval on a synthetic 1,000-message DM: cold tree construction, first and warm hybrid queries, warm browsing, and the lexical-only baseline. Hybrid queries use precomputed deterministic 384-dimensional vectors to measure Commonspace's index, cache, and ranking work without claiming to measure embedding-model inference. The opt-in `pnpm benchmark:context` command covers real local-model and scale costs.
+The suite also measures scoped history retrieval on a synthetic 1,000-message DM: cold tree construction, rebuilding after a message edit, first and warm hybrid queries, hybrid refresh after an edit, warm browsing, and common and rare lexical queries. Hybrid queries use precomputed deterministic 384-dimensional vectors to measure Commonspace's index, cache, and ranking work without claiming to measure embedding-model inference. The opt-in `pnpm benchmark:context` command covers real local-model and scale costs.
 
 ## npm packaging
 
