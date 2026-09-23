@@ -138,7 +138,9 @@ test("keeps optimistic admission recoverable without locking the composer", asyn
 	const composer = page.getByRole("textbox", { name: "Message Review Bot" });
 	await expect(composer).toBeEnabled();
 	await expect(page.getByText("Admitting · Queued")).toBeVisible();
-	await expect(composer).toHaveValue("Restore this failed direction.");
+	await expect(composer).toHaveValue(
+		"Restore this failed direction.\n\nNewer direction.",
+	);
 	await expect(
 		page.getByRole("button", { name: "Queue", exact: true }),
 	).toBeEnabled();
