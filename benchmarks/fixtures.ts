@@ -1,5 +1,6 @@
 import type {
 	CommonspaceBootstrap,
+	CommonspaceMessage,
 	CommonspaceState,
 } from "@commonspace/shared";
 import {
@@ -21,6 +22,19 @@ export function benchmarkState(
 	);
 	for (const project of state.projects) project.paths = [];
 	return state;
+}
+
+/** One synthetic DM is the complete authorization scope for history retrieval. */
+export function benchmarkHistoryMessages(): CommonspaceMessage[] {
+	const { state } = createBenchmarkFixture(
+		BenchmarkWorkspaceShape.Dm,
+		BENCHMARK_MESSAGE_COUNT,
+		"/commonspace-benchmark",
+	);
+	const messages = Object.values(state.messages).flat();
+	if (messages.length !== BENCHMARK_MESSAGE_COUNT)
+		throw new Error("Benchmark DM transcript has an unexpected size");
+	return messages;
 }
 
 export function benchmarkBootstrap(
