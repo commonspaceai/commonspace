@@ -5,24 +5,37 @@ evidence within it. Shared summaries compress a representation of that record;
 retrieval selects evidence for a particular request. Neither operation edits a
 harness's native context or discards canonical messages.
 
+This reference covers the [tool contract](#runtime-contract), [scope and freshness](#scope-and-freshness),
+and [runtime costs](#cost-and-cache-behavior). For repeatable experiments and the
+limits of current evidence, use [Evaluating context retrieval](context-retrieval-evaluation.md).
+
 ## Runtime contract
 
 Agents connected through Commonspace's scoped MCP server have two history tools:
 
-- `commonspace_browse_history({})` returns a root with at most eight children.
-  Follow `nodeId` to narrower chronological ranges and finally a source passage.
-- `commonspace_find_history({query, limit})` combines local BM25 keyword retrieval
-  and local embedding similarity to return up to eight passages and tree paths.
-  The default limit is four. Ten candidates from each method are merged using
-  reciprocal rank fusion (constant 60), deduplicated by source node. Search is
-  candidate ranking, not semantic entailment or the quoted-phrase/exclusion syntax
-  of `commonspace_search`.
-  Compound query identifiers also search underscore and hyphen spellings while
-  retaining the literal form (`AUTH_TOKEN_EXPIRED` and `AUTH-TOKEN-EXPIRED`).
-  These are search candidates, not a claim that the identifiers are equivalent.
-  Responses report `method: hybrid` with `semanticStatus: ready`, or
-  `method: lexical` with `semanticStatus: unavailable` when local inference fails.
-  The internal lexical-only baseline uses `semanticStatus: not-requested`.
+| Tool | Use | Result limit |
+| --- | --- | --- |
+| `commonspace_browse_history({})` | Start at the root; follow `nodeId` through narrower chronological ranges to a source passage. | At most eight children per node. |
+| `commonspace_find_history({query, limit})` | Rank passages using local BM25 keyword retrieval and local embedding similarity. Results include tree paths for further reading. | Four passages by default; at most eight. |
+
+### Search ranking and status
+
+Search merges ten candidates from each method using reciprocal rank fusion
+(constant 60), deduplicated by source node. This ranks candidates; it does not
+establish semantic entailment or use the quoted-phrase/exclusion syntax of
+`commonspace_search`.
+
+Compound query identifiers also search underscore and hyphen spellings while
+retaining the literal form (`AUTH_TOKEN_EXPIRED` and `AUTH-TOKEN-EXPIRED`).
+These are search candidates, not a claim that the identifiers are equivalent.
+
+| Search path | `method` | `semanticStatus` |
+| --- | --- | --- |
+| Keyword and local semantic retrieval succeeded | `hybrid` | `ready` |
+| Local inference failed; keyword retrieval remains available | `lexical` | `unavailable` |
+| Internal lexical-only evaluation baseline | `lexical` | `not-requested` |
+
+### Source passages and interpretation
 
 Each leaf contains verbatim text, a message ID, a content revision, the author
 type and name, creation time, Thread ID, total text length, and start/end offsets.
@@ -44,6 +57,8 @@ does not promote it into durable shared memory.
 
 ## Scope and freshness
 
+### Authorization boundaries
+
 Every read revalidates the capability's current Agent, conversation, Thread,
 native-session generation, and Project references before accessing an index.
 Semantic reads revalidate scope and the exact source root after asynchronous
@@ -58,6 +73,8 @@ The tree covers exactly the same conversation history as scoped message reads:
   included; tool traces, native session internals, host files, attachment contents,
   and private metadata are not.
 
+### Node identity and index lifetime
+
 Node IDs are derived from source revisions and child IDs. Unchanged subtrees can
 retain IDs across appends. Edits and deletion invalidate affected IDs: callers
 receive an error and must rediscover the current root. An ID grants no access on
@@ -71,6 +88,8 @@ sessions, or snapshots.
 
 ## Cost and cache behavior
 
+### Model and privacy
+
 There is no remote inference call in either history tool. The server
 uses `@huggingface/transformers` with the q8 CPU model `Xenova/all-MiniLM-L6-v2`,
 pinned to revision `751bff37182d3f1213fa05d7196b954e230abad9`. First semantic use
@@ -79,11 +98,23 @@ downloads public model/tokenizer files from Hugging Face into
 uploaded. The model mainly targets English; similarity is not an answerability
 test and can return irrelevant passages even when the history has no answer.
 
-Tokenization and inference run in one lazy worker per host service with one CPU
-inference thread, batches of eight, at most 32 outstanding batches, a 120-second
-batch deadline including queueing/model startup, and a 60-second retry cooldown
-after worker failure. Shutdown terminates the worker and rejects pending requests.
-Unavailable inference preserves lexical search with explicit response status.
+### Worker limits
+
+Tokenization and inference run in a lazy worker with these limits:
+
+| Setting | Limit |
+| --- | --- |
+| Workers per host service | One |
+| CPU inference threads | One |
+| Texts per batch | Eight |
+| Outstanding batches | At most 32 |
+| Batch deadline | 120 seconds, including queueing and model startup |
+| Retry cooldown after worker failure | 60 seconds |
+
+Shutdown terminates the worker and rejects pending requests. Unavailable inference
+preserves lexical search with explicit response status.
+
+### Vector cache
 
 Vectors are process-local, per authorized scope, keyed by source revision and
 offsets. Unchanged passages reuse their vectors. New/edited passages are embedded
@@ -92,6 +123,8 @@ ranking. This is lazy reconciliation, not background ingestion. Concurrent reade
 of the same source generation share passage indexing. Each index caches up to 32
 query vectors. Restart or scope eviction requires rebuilding vectors; only public
 model weights are retained on disk. There is no vector-data migration.
+
+### Latency and scaling
 
 Measure model startup/download and initial scope indexing separately from a warm
 query. Initial indexing can take substantially longer and consists of multiple
@@ -102,6 +135,8 @@ their scores; BM25 visits matching postings. Following a known leaf path has
 logarithmic depth, but **the complete retrieval workflow is not claimed to be
 O(log n)**. Vector ranking still runs on the server thread; model inference runs
 in the worker.
+
+### Native prompts
 
 Native prompts keep the original request and existing participation metadata.
 History enters a native session only when an agent requests a tool result. This

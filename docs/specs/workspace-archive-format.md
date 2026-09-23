@@ -46,9 +46,18 @@ Each attachment contains `kind` (`image` or `file`), `id`, `name`, `mimeType`, `
 
 ### Size contract
 
-Commonspace produces version-1 archives up to 48 MiB of UTF-8 JSON. Before reading attachment bytes, export projects each exact Base64 length from validated stored metadata and combines it with the complete archive metadata size. It aborts an oversized plan, then verifies the final serialized size after reading exact bytes. Export therefore stops with an actionable error instead of loading every oversized attachment or downloading a backup that the supported HTTP workflow cannot restore.
+All limits below measure UTF-8 JSON size:
 
-The HTTP importer accepts a version-1 archive value up to 64 MiB for compatibility with earlier exports, explicit Project mappings up to 8 MiB, and a complete request envelope up to 80 MiB. The extra envelope capacity covers mappings and JSON framing; it is not additional archive capacity. Oversized request bodies are rejected before archive validation, and oversized archive or mapping values are rejected before attachment or workspace writes.
+| Value | Maximum | Purpose |
+| --- | --- | --- |
+| Generated version-1 archive | 48 MiB | Keeps supported exports within the HTTP restoration workflow. |
+| Imported version-1 archive value | 64 MiB | Accepts earlier exports as well as current ones. |
+| Explicit Project mappings | 8 MiB | Maps archived Projects to local directories. |
+| Complete HTTP import request | 80 MiB | Includes the archive, mappings, and JSON framing. This does not increase the archive limit. |
+
+Before reading attachment bytes, export projects each exact Base64 length from validated stored metadata and combines it with the complete archive metadata size. It aborts an oversized plan, then verifies the final serialized size after reading exact bytes. An oversized export therefore stops with an actionable error before loading every attachment or downloading an archive that the supported HTTP workflow cannot restore.
+
+Import rejects oversized request bodies before archive validation. It rejects oversized archive or mapping values before attachment or workspace writes.
 
 ## Privacy boundary
 

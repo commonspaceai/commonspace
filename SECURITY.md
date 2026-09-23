@@ -27,7 +27,7 @@ Security fixes target `main` and the latest release. Older versions do not have 
 - Commonspace stores references to agent sessions. The agents retain their own credentials and session stores.
 - Project File previews, human file uploads, and agent-generated file imports block known credential-bearing filenames and private-key extensions. This policy checks filenames; it does not inspect file contents for secrets.
 - Commonspace stores only the selected inference Agent ID. Authentication remains in the selected harness and its native credential store.
-- Unsafe agent modes are off by default and require explicit environment variables.
+- Full access is off by default. It can be enabled explicitly in Agent settings or through the [operator override](docs/guides/operations.md#full-access).
 
 These protections do not make Commonspace a secret manager or every Project file safe to share. Agents may read files and contact model services according to their permissions and provider settings. Keep secrets out of messages, screenshots, and files you ask agents to inspect.
 

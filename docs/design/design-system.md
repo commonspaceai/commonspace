@@ -47,10 +47,9 @@ Review the resulting diff, preserve the stable aliases, and inspect every affect
 ## Shared controls
 
 - `CommonspaceLogo` owns the monochrome identity: three uneven, flowing agent shapes form an open C, with two circular eye cutouts per shape. Preserve the organic silhouette and curved gaps. The SVG inherits text color; its eyes show the underlying surface. Use the same geometry for the browser icons and repository logo. The `Design System/CommonspaceLogo/Monochrome` story shows both polarities and sizes from 16px to 32px.
-
 - `NativeSelect` owns compact native pickers, neutral borders, chevron spacing, disabled/error states, and keyboard focus. Pass native select props and children; keep labels at the call site. Folder pickers display the public folder label once, without adding a duplicate Working/Reference prefix.
 - `Button` uses 36px by default, 28px for small actions, 32px for compact text filters, and 44px for large actions. Secondary buttons use neutral colors. Use `variant="tab"` for page views and `variant="filter"` for secondary collection filters, with `size="compact"` and `aria-pressed`.
-- `AgentAvatar` owns configured emoji, softly tinted accent, fallback initials, corner shape, and size across navigation, collections, conversations, activity, and profile editing. Callers may position it; do not override its shape, typography, or color. Runtime status is optional and must represent runtime state, never unread state.
+- `AgentAvatar` owns configured emoji and background color, fallback initials, corner shape, and size across navigation, collections, conversations, activity, and profile editing. Render the chosen background color exactly. Callers may position it; do not override its shape, typography, or color. Runtime status is optional and must represent runtime state, never unread state.
 - `CollectionToolbar` owns collection width, padding, alignment, and wrapping. Supply native labels, groups, and shared controls as children; keep filter state and behavior in the screen.
 - `UnreadCount` owns quiet 18px-high navigation counters, tabular numerals, and the `99+` cap. The parent supplies the accessible unread label.
 - `ConversationRetention` owns its dialog and the choose/review/delete lifecycle. The sidebar supplies conversations and the existing retention API; it does not own dialog form state.
@@ -93,33 +92,19 @@ The same visual treatment should mean the same thing across screens. Selected ro
 | Thread | Keep the root, focused reply, and continuation understandable. |
 | Composer | Keep active context visible and provide slash-command and reference suggestions. |
 
-The conversation checkpoint uses `NavigationSection`, `RoutingReceipt`, and `MessageComposer` as shared pattern owners. Section titles navigate; separate chevrons collapse. Routing opens a single anchored popover with the stored decision, source, timing, assignments, and corrections; delivery history has no nested disclosure. A generic selection receipt is not a rationale. Preserve recovery actions and all stored history. Root and Thread composers share native form/input framing without moving their submission state.
+Conversation screens use three shared pattern owners: `NavigationSection`, `RoutingReceipt`, and `MessageComposer`.
+
+Section titles navigate; separate chevrons collapse. Routing opens a single anchored popover with the stored decision, source, timing, assignments, and corrections; delivery history has no nested disclosure. A generic selection receipt is not a rationale. Preserve recovery actions and all stored history.
+
+Root and Thread composers share native form/input framing without moving their submission state.
 
 Use `Workspace/Conversation` as the connected design workspace. It renders the production app and client store against a disposable mock HTTP service. Shared component edits appear here and in the live app; reload resets the sample data. Focused component stories remain available for individual states.
 
 The desktop shell uses the dimensions in [DESIGN.md](../../DESIGN.md#layout). Screen components should compose those shared rules rather than define alternate shell geometry.
 
-## Accessibility
-
-Every component must support its intended keyboard interaction. Icon-only controls need accessible names, selected items need semantic state, and focus must remain visible. Pickers and suggestions use the appropriate listbox and option semantics. Errors and command outcomes use alert or status roles where appropriate.
-
-Workspace settings leave the sidebar available while the shell marks the covered workspace inert. Focus enters the pane and returns when it closes. Queue changes move focus only when the action's control disappears or becomes disabled; a delayed response must not interrupt focus elsewhere. Search retry preserves inputs, returns focus to the query, and announces progress and result counts. Native browser controls use the resolved theme's `color-scheme`.
-
-Respect `prefers-reduced-motion`. Use text, icons, and semantic state alongside color so that color is never the only way to understand an outcome. Check accessibility in Storybook and the integrated desktop flow.
-
-## Changing the system
-
-1. Identify whether the change belongs to a token, shared primitive, product component, or screen.
-2. Update the smallest owner and preserve existing behavior.
-3. Add or update the Storybook states that demonstrate the change, including affected empty, loading, error, and selected states.
-4. Inspect the rendered result in Light and Dark modes.
-5. Run the appropriate [development checks](../guides/development.md#verification-commands) and complete the [visual review](visual-verification.md).
-
-Keep [DESIGN.md](../../DESIGN.md) current when changing a visual requirement. Product documentation should explain what users can do; token names and implementation details belong here.
-
 ## Reference-aligned workspace
 
-The shell uses a monochrome SVG mark, one navigation group per collection, and the semantic charcoal/white surface hierarchy from the accepted design direction. Conversation text, collapsed details, and composers share the same rhythm. Keep configured agent identity while using its accent as a tint.
+The shell uses a monochrome SVG mark, one navigation group per collection, and the semantic charcoal/white surface hierarchy from the accepted design direction. Conversation text, collapsed details, and composers share the same rhythm. Keep the configured agent identity and render its chosen background color without tinting or remapping it.
 
 `useThreadOverlay` measures available conversation width. Below 960px the Thread overlays the right side; otherwise it docks beside the channel with resizing available. Covered channel controls become inert, while the channel remains visually present. Closing or pressing Escape restores the channel composer; an open Thread context closes first. Review `Screens/Workspace/ThreadRightOverlay` and `ThreadDocked` for these behaviors.
 
@@ -131,4 +116,22 @@ Use spacing and section headings for settings groups. Do not repeat a radio sele
 
 The visual direction is a conversation workspace: the authored work and the right-side reply pane establish the hierarchy. Use the platform system typeface for both content and controls, with 15px message text, 13–14px controls, and 12px supporting metadata. Align labels, content, and form fields to a common left edge. Dark roles use rail `#191a1c`, canvas `#202123`, selection `#292b30`, primary text `#ededf0`, secondary text `#abadb6`, and action blue `#78b5ff`; Light uses the corresponding semantic tokens. Surface differences identify navigation, work, and a foreground reply—not decorative cards.
 
-Disabled optional provider fields stay mounted but hidden until enabled, preserving the unsaved draft. Error notices occupy normal layout space: the workspace footer normally owns the notice, and open Workspace settings owns it below its header. An error must never cover a save or retry control. Use one focus outline rather than stacking a border, ring, and outline.
+Error notices occupy normal layout space: the workspace footer normally owns the notice, and open Workspace settings owns it below its header. An error must never cover a save or retry control. Use one focus outline rather than stacking a border, ring, and outline.
+
+## Accessibility
+
+Every component must support its intended keyboard interaction. Icon-only controls need accessible names, selected items need semantic state, and focus must remain visible. Pickers and suggestions use the appropriate listbox and option semantics. Errors and command outcomes use alert or status roles where appropriate.
+
+Workspace settings leave the sidebar available while the shell marks the covered workspace inert. Focus enters the pane and returns when it closes. Queue changes move focus only when the action's control disappears or becomes disabled; a delayed response must not interrupt focus elsewhere. Search retry preserves inputs, returns focus to the query, and announces progress and result counts. Native browser controls use the resolved theme's `color-scheme`.
+
+Respect `prefers-reduced-motion`. Use text, icons, and semantic state alongside color so that color is never the only way to understand an outcome. Check accessibility in Storybook and the integrated desktop flow.
+
+## Changing the system
+
+1. Use [Storybook MCP](visual-verification.md#storybook-mcp-workflow) to discover existing components and stories. Identify whether the change belongs to a token, shared primitive, product component, or screen.
+2. Update the smallest owner and preserve existing behavior.
+3. Add or update the Storybook states that demonstrate the change, including affected empty, loading, error, and selected states.
+4. Inspect the running canvas through hot reload at 1440 × 960, including hover, focus, and Light/Dark states. Run a focused interaction check when the behavior is settled.
+5. When the change is ready for integration, run the appropriate [development checks](../guides/development.md#verification-commands) and complete the [visual review](visual-verification.md).
+
+Keep [DESIGN.md](../../DESIGN.md) current when changing a visual requirement. Product documentation should explain what users can do; token names and implementation details belong here.

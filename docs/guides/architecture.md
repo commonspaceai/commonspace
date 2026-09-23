@@ -19,10 +19,6 @@ The product consists of Projects, Channels, Direct Messages, Agents, messages, T
 
 Two protocols connect agent work to the workspace. Agent Client Protocol (ACP) carries native session requests, responses, activity, and permission choices over local child-process input/output. Model Context Protocol (MCP) exposes scoped Commonspace context and progress tools over authenticated loopback HTTP.
 
-`server/src/context-history.ts` owns the derived history tree and exact passage provenance. Scoped MCP history tools reuse the local inverted passage index in `routing-retrieval.ts`; `service.ts` revalidates scope before every read and bounds its process-local index cache. Retrieval does not rewrite shared summaries or native prompt history. [Shared history retrieval](../specs/context-retrieval.md) defines freshness, authorization, and cost limits.
-
-`semantic-history.ts` owns scope-local vector reconciliation and keyword/semantic rank fusion. `local-history-embeddings.ts` owns the lazy CPU worker, pinned public model download, bounded inference queue, and shutdown. Conversation text stays local. The host revalidates scope and source revision after inference; unavailable inference returns explicitly marked lexical results.
-
 ## Where changes belong
 
 | Change | Primary owner | Update together |
@@ -38,8 +34,6 @@ Two protocols connect agent work to the workspace. Agent Client Protocol (ACP) c
 | Desktop UI and interaction | `ui/src` and `ui/src/stories` | Storybook states, accessibility checks, and integrated browser flows |
 
 A coordinator can call another feature's capability, but should not duplicate its rules or state.
-
-Native capability browsing uses `GET /api/agents/:agentId/capabilities` for an added agent. The shared `HarnessCapabilityInventory` contract contains only display metadata. Each adapter owns native inventory extraction; the service applies host redaction, and the endpoint is same-origin with `Cache-Control: no-store`. Inspection is lazy and separate from bootstrap, saved agent profiles, and portable exports. Per-category failures do not erase categories that were successfully inspected. The browser owns loading, refresh, and unavailable states; it has no native capability editing controls.
 
 ## Request path
 
@@ -109,6 +103,18 @@ Server-sent events carry durable state revisions, routing configuration invalida
 
 `server/src/app.ts` owns HTTP limits, loopback and same-origin guards, event framing, status codes, health checks, security headers, and optional static UI delivery. `server/src/acp-runtime.ts` owns the ACP client and subprocess lifecycle. `server/src/commonspace-mcp.ts` owns temporary capabilities and scoped tools. `server/src/index.ts` owns configuration, startup, signals, and graceful shutdown.
 
+### Shared history retrieval
+
+`server/src/context-history.ts` owns the derived history tree and exact passage provenance. Scoped MCP history tools reuse the local inverted passage index in `routing-retrieval.ts`; `service.ts` revalidates scope before every read and bounds its process-local index cache. Retrieval does not rewrite shared summaries or native prompt history. [Shared history retrieval](../specs/context-retrieval.md) defines freshness, authorization, and cost limits.
+
+`semantic-history.ts` owns scope-local vector reconciliation and keyword/semantic rank fusion. `local-history-embeddings.ts` owns the lazy CPU worker, pinned public model download, bounded inference queue, and shutdown. Conversation text stays local. The host revalidates scope and source revision after inference; unavailable inference returns explicitly marked lexical results.
+
+### Native capability inventory
+
+Native capability browsing uses `GET /api/agents/:agentId/capabilities` for an added agent. The shared `HarnessCapabilityInventory` contract contains only display metadata. Each adapter owns native inventory extraction; the service applies host redaction, and the endpoint is same-origin with `Cache-Control: no-store`. Inspection is lazy and separate from bootstrap, saved agent profiles, and portable exports.
+
+Per-category failures do not erase categories that were successfully inspected. The browser owns loading, refresh, and unavailable states; it has no native capability editing controls.
+
 ### Package and service lifecycle
 
 `cli/src/index.ts` is the published npm entry point. Its build bundles Commonspace-owned server and shared code, packages the built UI, and leaves external runtime libraries as ordinary npm dependencies.
@@ -129,13 +135,41 @@ Messages and Threads use zero-to-many Project references. A singular compatibili
 
 ## Agent runtimes
 
-Hermes runs through its installed `hermes acp` harness. Discovery reads its existing native profiles; each selected profile has a reusable workspace Agent identity and retains its own native configuration. Codex uses its bridge’s compatible bundled CLI unless explicitly overridden; Claude Code uses its bundled ACP bridge with the installed CLI. Gemini CLI uses native `--acp`; OpenCode uses native `acp`. Gemini compatibility is checked during discovery and launch because later native versions have observed session-resume regressions. Its adapter also rejects native session reloads before saved-session data or prompts are sent, because accepted versions can replay history after the load response. Rejection preserves the session mapping and accepted message; it never substitutes a fresh native session. Adapter discovery, launch, and settings policy live in `server/src/adapters`; the shared catalog drives registration, validation, and UI labels. See [Adding an agent adapter](../adapters/agent-adapters.md). Each Thread or DM generation keeps its own native session. Discovery never creates or rewrites native profiles.
+Adapter discovery, launch, and settings policy live in `server/src/adapters`; the shared catalog drives registration, validation, and UI labels. See [Adding an agent adapter](../adapters/agent-adapters.md). Discovery never creates or rewrites native profiles.
 
-A native Channel turn receives the original newly delivered message, a separate participation metadata block, and ACP resource links for attached files. Shared room context is available through scoped MCP tools on demand instead of being replayed inside every user message. Channel MCP scopes expose current peer IDs through the `commonspace_handoff` schema. A structured handoff records one concrete request during the active run; after that run finishes, the service appends a visible `@agent` handoff and delivers only sender identity plus the request. When a structured handoff starts a planned relay participant, delivery also preserves the original user message and a bounded preceding peer reply. Later inferred relay turns receive a bounded head-and-tail excerpt of the preceding peer response plus the original user message; the full reply remains available through scoped context.
+### Harness integration
 
-Each active Agent native-session scope has one long-lived ACP process. Inference separately reuses three kinds of process lane: Channel routing, Channel context, and Thread context. Thread follow-up routing uses its Channel routing lane; routing-memory and shared Channel compaction use the Channel context lane; each Thread owns its context lane. Every inference judgment still creates a fresh native session, so process reuse never makes private native history authoritative. Commonspace drops ephemeral client-side session bookkeeping after each judgment and periodically rotates a busy lane, bounding both host and native-process lifetime state even though ACP has no session-close method. It also closes processes on reset, removal or retention of their scope, inference-Agent replacement, shutdown, or stale-session recovery. Delayed launches revalidate their lane before entering the process cache. Graceful closure lets the bridge flush and stop its native child before bounded forced termination; an intentional transport close must not trigger the protocol-error kill path. `/new` is a hard context boundary: cancellation and generation checks prevent an old reply from entering the replacement conversation.
+Hermes runs through its installed `hermes acp` harness. Discovery reads its existing native profiles; each selected profile has a reusable workspace Agent identity and retains its own native configuration.
 
-Resumption uses the saved opaque native-session reference through ACP `session/load`. ACP frames and responses are bounded. Activity, reasoning summaries, plans, tool calls, native context-compaction lifecycle, usage, artifact links, and permission requests come from the harness. Commonspace normalizes those updates without synthesizing missing output or permission choices. A pending permission blocks only its own session. Native turn cancellation covers reset, Channel or Agent removal, timeout, and shutdown.
+Codex uses its bridge’s compatible bundled CLI unless explicitly overridden; Claude Code uses its bundled ACP bridge with the installed CLI. Gemini CLI uses native `--acp`; OpenCode uses native `acp`.
+
+Gemini compatibility is checked during discovery and launch because later native versions have observed session-resume regressions. Its adapter also rejects native session reloads before saved-session data or prompts are sent, because accepted versions can replay history after the load response. Rejection preserves the session mapping and accepted message; it never substitutes a fresh native session.
+
+### Turn delivery and shared context
+
+A native Channel turn receives the original newly delivered message, a separate participation metadata block, and ACP resource links for attached files. Shared room context is available through scoped MCP tools on demand instead of being replayed inside every user message.
+
+Channel MCP scopes expose current peer IDs through the `commonspace_handoff` schema. A structured handoff records one concrete request during the active run; after that run finishes, the service appends a visible `@agent` handoff and delivers only sender identity plus the request. When a structured handoff starts a planned relay participant, delivery also preserves the original user message and a bounded preceding peer reply. Later inferred relay turns receive a bounded head-and-tail excerpt of the preceding peer response plus the original user message; the full reply remains available through scoped context.
+
+### Processes and session lifetime
+
+Each Thread or DM generation keeps its own native session. Each active Agent native-session scope has one long-lived ACP process. Inference through a harness reuses separate process lanes:
+
+| Lane | Work |
+| --- | --- |
+| Channel routing | Root and Thread follow-up routing for that Channel |
+| Channel context | Routing-memory and shared Channel compaction |
+| Thread context | Context work for one Thread |
+
+Each inference judgment sent through a harness creates a fresh native session, so reusing a process never makes private native history authoritative.
+
+Commonspace drops ephemeral client-side session bookkeeping after each judgment and periodically rotates a busy lane, bounding both host and native-process lifetime state even though ACP has no session-close method. It also closes processes on reset, removal or retention of their scope, inference-Agent replacement, shutdown, or stale-session recovery. Delayed launches revalidate their lane before entering the process cache.
+
+Graceful closure lets the bridge flush and stop its native child before bounded forced termination; an intentional transport close must not trigger the protocol-error kill path. `/new` is a hard context boundary: cancellation and generation checks prevent an old reply from entering the replacement conversation.
+
+Resumption uses the saved opaque native-session reference through ACP `session/load`. ACP frames and responses are bounded.
+
+Activity, reasoning summaries, plans, tool calls, native context-compaction lifecycle, usage, artifact links, and permission requests come from the harness. Commonspace normalizes those updates without synthesizing missing output or permission choices. A pending permission blocks only its own session. Native turn cancellation covers reset, Channel or Agent removal, timeout, and shutdown.
 
 ## UI
 
@@ -145,7 +179,16 @@ Resumption uses the saved opaque native-session reference through ACP `session/l
 
 Sidebar sort preferences belong to `ui/src/sidebar-preferences.ts` and persist in browser storage. `ui/src/channel-sorting.ts` orders Channels without changing conversation data. Pinned and unpinned Channels remain separate groups when sorting or reordering.
 
-`useCommonspaceTheme` owns the browser-local Light/Dark/System preference and resolves native browser control appearance. Workspace settings remain a sidebar-owned pane; the shell makes the covered working area inert while it is open. `RunDelivery` owns queue preview and keyboard-focus recovery. `CommonspaceSearch` owns request cancellation, query/filter state, and retry; it does not mutate the workspace. Shared search targets include direct Project navigation and exact matching message IDs. These targets are transient API responses and do not change the saved-data version.
+The main interaction owners are:
+
+| Owner | Responsibility |
+| --- | --- |
+| `useCommonspaceTheme` | Browser-local Light/Dark/System preference and native browser control appearance |
+| Sidebar settings pane | Workspace settings; the shell makes the covered working area inert while it is open |
+| `RunDelivery` | Queue preview and keyboard-focus recovery |
+| `CommonspaceSearch` | Request cancellation, query/filter state, and retry; it does not mutate the workspace |
+
+Shared search targets include direct Project navigation and exact matching message IDs. These targets are transient API responses and do not change the saved-data version.
 
 Project scope is inferred unless the user supplies visible `@@project` references. Composers do not have separate Project pickers for roots, Threads, branches, or reroutes. [Design](../../DESIGN.md) describes the current visual treatment.
 
@@ -155,7 +198,12 @@ The current internal state version is 33, defined by `COMMONSPACE_STATE_VERSION`
 
 Persisted state includes the roster, appearance, workspace coordination defaults, host-private native sessions, bounded activity, Inbox read/unread/saved state, notification preferences, attachments, routing decisions and memory, Project references, Channel/Thread context, pins, message versions, deletion markers, permissions, and execution state. Native model and reasoning settings are not Commonspace state.
 
-Migration preserves conversation history while supplying explicit defaults for older shapes. Older routing receives deterministic delivery references. Version 30 migrates prior assignment wording to optional `legacySubRequest`, retaining IDs, scopes, corrections, replies, and private native sessions. Historical wording is never used for delivery and is cleared with deleted content. Older Threads receive an empty inherited snapshot and current memory derived from their transcript, rather than an invented historical snapshot. Workspaces without pin, permission, or notification fields receive empty history and opt-in notification defaults. Loaded pending permissions become interrupted because their native requests do not survive a process restart.
+Migration preserves conversation history while supplying explicit defaults for older shapes:
+
+- Older routing receives deterministic delivery references. Version 30 migrates prior assignment wording to optional `legacySubRequest`, retaining IDs, scopes, corrections, replies, and private native sessions. Historical wording is never used for delivery and is cleared with deleted content.
+- Older Threads receive an empty inherited snapshot and current memory derived from their transcript, rather than an invented historical snapshot.
+- Workspaces without pin, permission, or notification fields receive empty history and opt-in notification defaults.
+- Loaded pending permissions become interrupted because their native requests do not survive a process restart.
 
 ### Durability and privacy
 
@@ -179,18 +227,40 @@ Portable archive version 1 is independent of internal state version 33. Export c
 
 The npm launcher owns the classifier sidecar. `server/src/local-classifier.ts` manages verified model downloads, private JSONL pipes, and worker lifetime; `classifier-worker.ts` and `laya-onnx.ts` perform inference. The worker receives no harness credentials and exposes no socket. `local-routing.ts` attempts supported decisions after message persistence; the host validates local and inference-Agent results through the same boundary. See [classifier operation](operations.md#local-routing-classifier) for supported decisions and runtime limits.
 
+### Participant selection and delivery
+
 Inference classifies each unaddressed Channel message after durable acceptance. It stores `parallel` or `relay`, plus one delivery ID and Project subset per selected harness. Parallel assignments may run concurrently. Relay assignments remain ordered: only the first starts from the human request, then each later Agent receives a bounded excerpt of the preceding peer response plus the original human message. The original human message and complete peer replies remain canonical records available through scoped context.
 
 Messages explicitly naming multiple Agents use the same pending routing and inference path to classify mode and speaker order, with the named set fixed. Validation rejects added, missing, duplicate, or substituted participants and changed Project scopes. Single mentions remain direct and require no inference. Explicit requests retain their `explicit` source; classification failures preserve the accepted message and named IDs for retry. Every named participant receives delivery even when the set exceeds the normal inference selection limit.
 
+### Handoffs
+
 During an active Channel run, `commonspace_handoff` may register one target and request against that run ID. The service validates the target against current Channel membership, waits for the sender to finish, persists a visible handoff, seats the peer in the Thread if needed, then invokes it. Structured handoffs and relay mentions may return to a prior speaker only on a new directed edge. Total turns are bounded by the greater of the visible workspace Agent limit and the explicitly named participant count; repeated edges or excess turns produce one durable system outcome instead of another invocation.
+
+### Project scope and corrections
 
 For a new root without `@@project` tags, inference may select from all configured Projects. The message and Thread retain the union of the selected references. Explicit valid tags constrain the available set, including replacing inherited scope on an edited branch. Explicit `@agent` addressing always remains authoritative.
 
 A correction through `/api/reroute` replaces the Agent of one participant delivery. The target Agent must already belong to the Channel, with an explicitly supplied Project subset. Commonspace retains both attempts, binds replies to their assignment IDs, and does not restart unrelated Agents. `routing-memory.ts` supplies bounded correction examples while their summary is pending or failed, excluding deleted or superseded records. The host uses durable correction history to require inference-Agent routing even when examples do not fit the prompt.
 
+### Receipts and failures
+
 Routing stores its own start time, resolution time, and duration separately from harness execution. Compact conversation receipts show destinations, selection source, and outcomes; expanding a receipt reveals stored assignments, Project references, reasons, timings, and correction history. Resolved assignments offer **Wrong recipient? → Reroute and remember**, preserving the original request and Project scope. A failed decision marks the accepted source failed, creates a durable retryable Inbox item, and exposes controls to retry inference or select a Channel Agent manually without duplicating the original message; it never silently broadcasts the message.
 
-Commonspace selects one added Agent as the workspace inference Agent. That Agent's ACP harness performs participant selection, Project relevance, routing-memory compaction, and shared-context compaction through the runtime's existing authentication. Commonspace does not implement a second provider connection. Project relevance requires requested work on that Project; standalone greetings and social replies do not inherit filesystem scope merely from historical Project mentions. One judgment selects participants, order, mode, and Project scopes for single-owner, parallel, and relay delivery; no assignment-authoring call follows. All selected Agents receive the accepted original request. Channel turns add a separate ACP text block with roster responsibility, selected peers, and mode. Shared instructions, notes, pins, and evidence remain available through scoped MCP context, and later relay turns include a bounded preceding peer reply. Routing output budgets scale within a fixed bound according to the visible Agent fan-out limit. ACP prompts state the budget and enforce a scaled character ceiling. Invalid output may receive one bounded retry. The complete decision is validated before dispatch. Routing roots and Thread follow-ups reuse their Channel's routing process lane, but each attempt uses a fresh native inference session. Channel and Thread compaction likewise reuse only their process lanes; normal Agent execution resumes its exact existing Thread session. There is no deterministic provider mode.
+### Inference Agent and validation
 
-Routing context retrieval lives in `server/src/routing-retrieval.ts`: a per-Channel ephemeral inverted BM25 index reconciles edited and deleted canonical messages and chunks long text. The assembler adds source IDs to bounded passages, scopes follow-ups to their Thread, and includes instructions, context notes, pins, and prior ownership. It never indexes native sessions, host files, or activity traces. `service.ts` tracks and coalesces automatic context refresh outside the delivery queue. Memory locks, source reconciliation, human-edit precedence, idle tracking, and shutdown cancellation preserve context continuity. Private `routing.json` version 3 stores only the selected harness Agent ID. Unsupported files are removed instead of migrated, and setup remains incomplete until a valid added Agent is selected. `routing-configuration.ts` owns validation and persistence. Inference configuration and workspace coordination defaults save independently. State version 32 does not persist model or reasoning controls; adapters leave runtime configuration untouched.
+Commonspace selects one added Agent as the workspace inference Agent. When local classification cannot resolve a routing decision, that Agent's ACP harness selects participants and Project scopes. The same harness compacts routing memory and shared context. These requests use the runtime's existing authentication; Commonspace does not implement a second provider connection.
+
+Project relevance requires requested work on that Project; standalone greetings and social replies do not inherit filesystem scope merely from historical Project mentions. One judgment selects participants, order, mode, and Project scopes for single-owner, parallel, and relay delivery; no assignment-authoring call follows. All selected Agents receive the accepted original request. Channel turns add a separate ACP text block with roster responsibility, selected peers, and mode. Shared instructions, notes, pins, and evidence remain available through scoped MCP context, and later relay turns include a bounded preceding peer reply.
+
+Routing output budgets scale within a fixed bound according to the visible Agent fan-out limit. ACP prompts state the budget and enforce a scaled character ceiling. Invalid output may receive one bounded retry. The complete decision is validated before dispatch.
+
+Routing through a harness reuses one process lane per Channel for roots and Thread follow-ups; each attempt starts a fresh native session. Channel and Thread compaction likewise reuse only their process lanes; normal Agent execution resumes its exact existing Thread session. There is no deterministic provider mode.
+
+### Retrieval and saved configuration
+
+Routing context retrieval lives in `server/src/routing-retrieval.ts`: a per-Channel ephemeral inverted BM25 index reconciles edited and deleted canonical messages and chunks long text. The assembler adds source IDs to bounded passages, scopes follow-ups to their Thread, and includes instructions, context notes, pins, and prior ownership. It never indexes native sessions, host files, or activity traces.
+
+`service.ts` tracks and coalesces automatic context refresh outside the delivery queue. Memory locks, source reconciliation, human-edit precedence, idle tracking, and shutdown cancellation preserve context continuity.
+
+Private `routing.json` version 3 stores only the selected harness Agent ID. Unsupported files are removed instead of migrated, and setup remains incomplete until a valid added Agent is selected. `routing-configuration.ts` owns validation and persistence. Inference configuration and workspace coordination defaults save independently. State version 32 does not persist model or reasoning controls; adapters leave runtime configuration untouched.

@@ -20,6 +20,18 @@ Use visible borders, compact rows, and consistent alignment to establish hierarc
 
 Desktop is the current product target. Do not add mobile layouts or mobile acceptance requirements as part of a desktop design change.
 
+## Page composition
+
+Use one 72px page header, followed by a 56px view toolbar when needed. Shared headers, toolbars, and collection lists use a 32px desktop inset. View navigation uses a quiet underline; secondary filters use neutral selection. Use ordinary sans-serif for dates and metadata, reserving monospace for code, paths, and commands.
+
+Inbox and Thread rows show identity or subject, time, a readable preview, and one metadata line. Avoid repeating the destination or showing negative state such as “not followed” on every row. Empty filtered lists offer a reset; an empty directory offers creation; a caught-up Inbox offers Activity when replies exist.
+
+Workspace settings has six categories: Appearance, Intelligence, Agent runs, Notifications, Diagnostics, and Data. Keep category selection visible, preserve unsaved fields across category switches, and keep each configuration's existing save boundary. Appearance choices include visual previews. Do not combine routing configuration with execution defaults or native notification preferences.
+
+Project views use one compact tab row. Files and Changes share a 280px browser and a flexible detail pane with neutral surfaces. Keep file read-only status in file context rather than across unrelated conversation views. Project conversations use the same flat row language as other collections.
+
+Channel thread filters live in a labeled menu with checked selections and counts. Choosing a filter closes the menu. The active filter stays visible in the trigger. Thread context uses the same field spacing as other settings; it must not collide with reply controls.
+
 ## Navigation and orientation
 
 With no saved destination, Commonspace opens to Inbox. Workspace branding is an identity mark and does not navigate. There is no separate Workspace landing page or Agent-runs dashboard.
@@ -78,9 +90,15 @@ A selected or deep-linked message keeps a quiet highlight card using a neutral s
 
 Agent activity begins collapsed beneath its reply. When expanded, it presents the reasoning summaries, plans, tool calls, and usage that the harness actually emitted. The composer keeps the current context visible and makes slash commands and references discoverable.
 
-Render activity and evidence as quiet disclosure rows without surrounding cards. Replies are the primary action beneath a channel message, on their own row with the replying agents’ avatars. Keep routing in a separate, secondary row; do not flatten replies into routing metadata. Completed outcomes stay in the routing popover; queued, running, cancelled, and failed outcomes remain visible. Open one anchored popover containing the stored decision, selection source, timing, assignments, Project references, and correction history. Do not nest delivery details under another disclosure or invent a rationale from a generic router selection. Failed routing exposes retry and manual agent selection. Inline editing of resolved assignments remains deferred.
+Render activity and evidence as quiet disclosure rows without surrounding cards. Replies are the primary action beneath a channel message, on their own row with the replying agents’ avatars. Keep routing in a separate, secondary row; do not flatten replies into routing metadata.
 
-Thread context is an explicit view within the right-hand pane, with a return to replies. Keep reply drafts mounted while context is open. Navigation section titles open their directories regardless of roster size; a separate chevron controls collapse. Conversation and Thread composers share their form and input framing while submission state stays in the conversation owner.
+Completed outcomes stay in the routing popover; queued, running, cancelled, and failed outcomes remain visible. Open one anchored popover containing the stored decision, selection source, timing, assignments, Project references, and correction history. Do not nest delivery details under another disclosure or invent a rationale from a generic router selection.
+
+Failed routing exposes retry and manual agent selection. Resolved assignments offer **Wrong recipient? → Reroute and remember**, preserving the original request and Project scope. General inline editing of assignments remains deferred.
+
+Thread context is an explicit view within the right-hand pane, with a return to replies. Keep reply drafts mounted while context is open.
+
+Navigation section titles open their directories regardless of roster size; a separate chevron controls collapse. Conversation and Thread composers share their form and input framing while submission state stays in the conversation owner.
 
 Queued follow-ups sit in a compact tray aligned with the composer. Keep previews and delivery status distinct, allow long previews to expand, and keep the composer usable. Reorder and removal controls need accessible names and consistent placement.
 
@@ -109,15 +127,3 @@ Every icon-only control needs an accessible name. Keyboard focus must remain vis
 ## Review
 
 Use [Visual verification](docs/design/visual-verification.md) for browser, Storybook, interaction, and pixel acceptance. The design contract remains the standard for the rendered result.
-
-## Page composition
-
-Use one 72px page header, followed by a 56px view toolbar when needed. Shared headers, toolbars, and collection lists use a 32px desktop inset. View navigation uses a quiet underline; secondary filters use neutral selection. Use ordinary sans-serif for dates and metadata, reserving monospace for code, paths, and commands.
-
-Inbox and Thread rows show identity or subject, time, a readable preview, and one metadata line. Avoid repeating the destination or showing negative state such as “not followed” on every row. Empty filtered lists offer a reset; an empty directory offers creation; a caught-up Inbox offers Activity when replies exist.
-
-Workspace settings has six categories: Appearance, Intelligence, Agent runs, Notifications, Diagnostics, and Data. Keep category selection visible, preserve unsaved fields across category switches, and keep each configuration's existing save boundary. Appearance choices include visual previews. Do not combine routing configuration with execution defaults or native notification preferences.
-
-Project views use one compact tab row. Files and Changes share a 280px browser and a flexible detail pane with neutral surfaces. Keep file read-only status in file context rather than across unrelated conversation views. Project conversations use the same flat row language as other collections.
-
-Channel thread filters live in a labeled menu with checked selections and counts. Choosing a filter closes the menu. The active filter stays visible in the trigger. Thread context uses the same field spacing as other settings; it must not collide with reply controls.

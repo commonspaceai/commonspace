@@ -16,7 +16,9 @@ An adapter connects an installed agent to the workspace. It discovers existing i
 
 The built-in general-purpose harnesses are Codex, Hermes, Claude Code, Gemini CLI, and OpenCode. Pi coding agent is a follow-up: its adapter must pass the same scoped MCP and native-session checks before registration. Setup and verification below define tested versions; the [support matrix](../start/support.md) covers platform support.
 
-Discovery checks installation, not authentication or model access. Diagnostics report those separately as run readiness. Discovery is explicit: startup and bootstrap never launch a discovery command. The Add Agent flow sends both adapter and native ID, so matching IDs across harnesses cannot select a different runtime. Legacy ID-only requests are rejected when ambiguous. Existing roster IDs remain unique. The flow probes only the chosen harness; diagnostics and explicit addition without a cached candidate can probe the registered set.
+Discovery checks installation, not authentication or model access. Diagnostics report those separately as run readiness. Discovery is explicit: startup and bootstrap never launch a discovery command.
+
+The Add Agent flow sends both adapter and native ID, so matching IDs across harnesses cannot select a different runtime. Legacy ID-only requests are rejected when ambiguous. Existing roster IDs remain unique. The flow probes only the chosen harness; diagnostics and explicit addition without a cached candidate can probe the registered set.
 
 ## Ownership and format
 
@@ -34,13 +36,17 @@ The shared catalog contains browser-safe metadata only. The server registry is a
 
 Every configured adapter implements these members:
 
-| Member                              | Responsibility                                                                                                                                                                                                                                                                                                                                                       |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `privatePaths`                      | List configured executable paths and argument paths for the host's redaction boundary. Never send them to the browser.                                                                                                                                                                                                                                               |
-| `discover()`                        | Return existing `CommonspaceAgentProfile` identities. Use bounded commands; do not authenticate, start a model turn, inspect credentials, or mutate native profiles. Throw installation failures; the host logs once and reports no candidates.                                                                                                                      |
-| `inspectCapabilities(agent)`        | Return browser-safe native inventory groups for the selected identity. Use bounded read-only sources; preserve source and scope, distinguish empty inventory from unsupported inspection and failure, and exclude native secrets, paths, endpoints, and memory contents. Never start a model turn or change native configuration.                                    |
-| `launch(agent, fullAccess, signal)` | Return executable, argument array, environment, and any `validateInitialization` compatibility check, synchronously or asynchronously. Honor cancellation during preflight checks and select the exact native identity. The optional check runs against ACP initialization before sending session references or MCP bindings. Never construct shell command strings. |
-| `sessionSettings(input)`            | Map the explicit per-Agent Full access preference to a native ACP permission mode when supported. Leave model and reasoning absent so the runtime/session setup remains authoritative.                                                                                                                                                                                                                 |
+| Member | Responsibility |
+| --- | --- |
+| `privatePaths` | List configured executable and argument paths for host redaction. Never send them to the browser. |
+| `discover()` | Return existing `CommonspaceAgentProfile` identities using bounded commands. Throw installation failures; the host logs once and reports no candidates. |
+| `inspectCapabilities(agent)` | Return browser-safe native inventory groups with their source and scope. Distinguish empty inventory, unsupported inspection, and failure. |
+| `launch(agent, fullAccess, signal)` | Select the exact native identity and return executable, argument array, environment, and optional `validateInitialization` check. May be synchronous or asynchronous. |
+| `sessionSettings(input)` | Map explicit per-Agent Full access to a native ACP permission mode when supported. Leave model and reasoning absent so native setup remains authoritative. |
+
+Discovery and capability inspection must not authenticate, start a model turn, inspect credentials, or mutate native configuration. Capability sources must be bounded and read-only; returned metadata excludes secrets, paths, endpoints, and memory contents.
+
+Launch preflight checks must honor cancellation. `validateInitialization` checks ACP initialization before sending session references or MCP bindings. Invoke executables with argument arrays; never construct shell command strings.
 
 The adapter does not implement its own message queue, subprocess pool, permission UI, transcript parser, or session persistence. `AcpAgentProcess` owns ACP framing, session setup, updates, cancellation, and process disposal. `CommonspaceHostService` owns durable acceptance, per-session serialization, independent concurrency, context scope, private session references, and recovery.
 
@@ -82,6 +88,10 @@ Resource directory scans inspect at most 2,000 entries per category. Gemini exte
 - Full access must be an explicit workspace choice or documented operator setting. Ordinary operation uses the adapter's native permission configuration. Permission requests block only their session. Changing effective access replaces cached processes while retaining native session references; either access change cancels that agent's active work and pending permissions. Queued work reads the current access policy before launch.
 - No shell interpolation, credential copies, global native configuration writes, or native-session paths in bootstrap, activity, errors, or portable archives.
 
+## Codex setup
+
+Codex execution and live checks use the compatible CLI bundled with the pinned ACP bridge by default. Discovery and capability inspection still use the installed `codex` command. `COMMONSPACE_CODEX_PATH` explicitly overrides both; use a complete CLI installation, including its Code Mode companion when enabled, and a version that supports the configured native model.
+
 ## Hermes setup
 
 User installation and authentication live in [Hermes setup](../start/runtimes.md#hermes). The adapter discovers identities with `hermes profile list` and invokes `hermes [-p <profile>] acp`. Executable overrides are `COMMONSPACE_HERMES_PATH` and `COMMONSPACE_HERMES_ACP_PATH`.
@@ -98,21 +108,44 @@ One Claude Code identity is added. Claude subagent definitions, plugins, memory 
 
 ## Gemini CLI and OpenCode setup
 
-[Gemini CLI](https://geminicli.com/docs/cli/acp-mode/) supplies ACP directly through `gemini --acp`. Commonspace's compatibility baseline accepts stable versions `>=0.39.1` and `<0.44.0` and tests `0.43.0`; this covers new and already-loaded sessions. Native reload is blocked because history replay can continue after the load response. Discovery and each process launch recheck the CLI version. ACP initialization also checks the launched runtime's reported version, including when a separate ACP executable is configured. Missing, malformed, prerelease, and unsupported versions fail before session data is sent. Expand the range or remove the reload guard only after exact native continuation passes with short and long histories. The normal mode is `default`; Full access requests `yolo`. Model and reasoning stay with Gemini CLI's native setup.
+See [runtime setup](../start/runtimes.md) for authentication. Each adds one native harness identity. Commonspace does not copy credentials or rewrite native configuration.
 
-[OpenCode](https://opencode.ai/docs/acp/) supplies ACP through `opencode acp`; version `1.18.30` is covered by the real runtime fixture. Its normal permissions come from native configuration. Explicit Full access sets `OPENCODE_PERMISSION` to `{"*":"allow"}` for the child process only. Native `build` and `plan` modes are agent choices, so Commonspace does not treat them as approval modes. Model and effort stay with OpenCode's native setup.
+### Gemini CLI
 
-See [runtime setup](../start/runtimes.md) for authentication. Each adds one native harness identity. Private executable overrides are `COMMONSPACE_GEMINI_PATH` and `COMMONSPACE_OPENCODE_PATH`; optional ACP executable overrides use `COMMONSPACE_GEMINI_ACP_PATH` and `COMMONSPACE_OPENCODE_ACP_PATH`. Commonspace does not copy credentials or rewrite native configuration.
+[Gemini CLI](https://geminicli.com/docs/cli/acp-mode/) supplies ACP directly through `gemini --acp`. Executable overrides are `COMMONSPACE_GEMINI_PATH` and `COMMONSPACE_GEMINI_ACP_PATH`. The normal mode is `default`; Full access requests `yolo`. Model and reasoning stay with Gemini CLI's native setup.
+
+The compatibility baseline accepts stable versions `>=0.39.1` and `<0.44.0` and tests `0.43.0`. This covers new and already-loaded sessions. **Native reload is blocked** because history replay can continue after the load response; see the evidence below.
+
+Discovery and each process launch recheck the CLI version. ACP initialization also checks the launched runtime's reported version, including a separate ACP executable. Missing, malformed, prerelease, and unsupported versions fail before session data is sent. Expand the range or remove the reload guard only after exact native continuation passes with short and long histories.
 
 ### Gemini revalidation evidence
 
-On September 14, 2026, the account-free one-turn fixture passed native restart/resume, fresh context, and scoped context/progress with `@google/gemini-cli` **0.43.0**. A longer-history check exposed a defect: after six native turns, old assistant replies were appended to the new resumed reply. A protocol capture confirmed that `session/load` responded before the remaining history updates. The [shipped `0.43.0` implementation](https://github.com/google-gemini/gemini-cli/blob/v0.43.0/packages/cli/src/acp/acpSessionManager.ts) calls asynchronous `streamHistory` without awaiting it; inspected `0.39.1` source has the same problem. On September 15, main CI reproduced the same corruption after only one turn: the resumed reply contained both the old answer and the new answer. Commonspace now rejects every Gemini `session/load` before sending session data or the accepted prompt. It preserves the exact saved session and marks the accepted message failed with recovery guidance. Already-loaded sessions can continue while their process and MCP binding remain valid; a restart, process replacement, or binding change requires reload and is rejected. `/new` remains an explicit fresh-context boundary. No sleep, output deduplication, or transcript replay substitutes for native continuation.
+Commonspace rejects every Gemini `session/load` before sending session data or the accepted prompt. It preserves the exact saved session and marks the accepted message failed with recovery guidance. Already-loaded sessions can continue while their process and MCP binding remain valid; a restart, process replacement, or binding change requires reload and is rejected. `/new` remains an explicit fresh-context boundary.
 
-Current stable **0.59.0**, temporarily admitted only in the verification branch, passed scoped MCP but failed `session/load` after a service restart with an ACP `Internal error`. The accepted continuation remained failed in the transcript. The temporary admission was removed; the version range has not expanded. Upstream also tracks [history restoration failures](https://github.com/google-gemini/gemini-cli/issues/27913) and [same-minute session reload failures](https://github.com/google-gemini/gemini-cli/issues/28693); those reports do not establish compatibility for a particular release.
+The evidence for this guard is:
 
-For another candidate, install its exact version outside the repository and temporarily admit only that version in a verification branch. Revalidate the native protocol ordering before removing the reload guard. Run `pnpm verify:adapter:gemini` with `COMMONSPACE_TEST_GEMINI_PATH` set to its executable and require exact native-session continuation after both one turn and six turns, with no historical text in the new reply. Keep fresh-context and scoped MCP assertions. Do not use a different claimed CLI version or bypass session loading to obtain a passing result.
+- **September 14, 2026:** the account-free one-turn fixture passed native restart/resume, fresh context, and scoped context/progress with `@google/gemini-cli` **0.43.0**. After six native turns, however, old assistant replies were appended to the new resumed reply. A protocol capture showed `session/load` responding before the remaining history updates.
+- **Source inspection:** the [shipped `0.43.0` implementation](https://github.com/google-gemini/gemini-cli/blob/v0.43.0/packages/cli/src/acp/acpSessionManager.ts) calls asynchronous `streamHistory` without awaiting it. Inspected `0.39.1` source has the same problem.
+- **September 15:** main CI reproduced the same corruption after only one turn: the resumed reply contained both the old answer and the new answer.
+
+No sleep, output deduplication, or transcript replay substitutes for native continuation.
+
+A separate check of **0.59.0**, temporarily admitted only in the verification branch, passed scoped MCP but failed `session/load` after a service restart with an ACP `Internal error`. The accepted continuation remained failed in the transcript. The temporary admission was removed; the version range has not expanded. Upstream also tracks [history restoration failures](https://github.com/google-gemini/gemini-cli/issues/27913) and [same-minute session reload failures](https://github.com/google-gemini/gemini-cli/issues/28693); those reports do not establish compatibility for a particular release.
+
+To revalidate another candidate:
+
+1. Install its exact version outside the repository and temporarily admit only that version in a verification branch.
+2. Revalidate native protocol ordering before removing the reload guard.
+3. Run `pnpm verify:adapter:gemini` with `COMMONSPACE_TEST_GEMINI_PATH` set to its executable. Require exact native-session continuation after both one turn and six turns, with no historical text in the new reply.
+4. Keep fresh-context and scoped MCP assertions. Do not use a different claimed CLI version or bypass session loading to obtain a passing result.
 
 The normal Gemini fixture now runs six turns in the same native session, verifies that a restart continuation fails without a model request or session replacement, and verifies fresh context after reset. The previously opt-in longer-history check is covered by this default regression. These results establish safe rejection, not successful Gemini resume support.
+
+### OpenCode
+
+[OpenCode](https://opencode.ai/docs/acp/) supplies ACP through `opencode acp`; version `1.18.30` is covered by the real runtime fixture. Executable overrides are `COMMONSPACE_OPENCODE_PATH` and `COMMONSPACE_OPENCODE_ACP_PATH`.
+
+Normal permissions come from native configuration. Explicit Full access sets `OPENCODE_PERMISSION` to `{"*":"allow"}` for the child process only. Native `build` and `plan` modes are agent choices, so Commonspace does not treat them as approval modes. Model and effort stay with OpenCode's native setup.
 
 ## Pi integration status
 
@@ -122,7 +155,17 @@ Pi is not registered as a supported adapter. The ACP Registry's published [`pi-a
 
 ## Verification commands
 
-Use [Development](../guides/development.md) for general checks. Adapter-specific checks:
+Use [Development](../guides/development.md) for general checks. Choose the evidence needed:
+
+| Check | Establishes | Does not establish |
+| --- | --- | --- |
+| Synthetic ACP tests | Commonspace protocol handling and policy | Compatibility with a real bridge or runtime |
+| Account-free runtime fixtures | Real bridge/runtime behavior against local model responses | Provider access, remote model quality, or every installed CLI version |
+| Provider-backed harness checks | Native behavior with the recorded runtime, account, and model | Support for untested versions or capabilities |
+
+### Account-free runtime verification
+
+Run all supported fixture checks or choose one harness:
 
 ```bash
 pnpm verify:adapters
@@ -131,7 +174,27 @@ pnpm verify:adapter:gemini
 pnpm verify:adapter:opencode
 ```
 
-Provider-backed harness checks are opt-in and may consume model usage. Run them only with the relevant installed, authenticated runtime. They use a temporary Commonspace workspace:
+These commands run pinned real Claude Code, Gemini CLI, and OpenCode runtimes against loopback Anthropic Messages and Gemini API fixtures. Each child receives an explicit environment, synthetic credentials, and temporary native configuration/session directories. No login, provider key, or separately installed CLI is needed. Gemini CLI and OpenCode are development-only test dependencies; production uses the user's installed executables. These tests also run in `pnpm test` and `pnpm check`.
+
+The fixture replaces only model responses. The real runtime stores native history, calls the real Commonspace MCP endpoint, receives permission choices, and posts progress through the real HTTP service. Tests cover:
+
+- Exact session continuity after service restart for Claude Code and OpenCode.
+- Rejection of unsafe Gemini reload with preserved work; native resume remains unavailable.
+- `/new` context isolation, scoped context without unrelated Channel data, and persisted progress.
+- Real capability inventory sources without a model turn, safe metadata, and preservation of seeded native resources and workspace data.
+- Graceful bridge shutdown so its native child can flush before forced termination.
+
+Codex/Hermes inventory tests remain synthetic/source-based; they do not establish live capability validation for those harnesses.
+
+| Fixture | Pinned version |
+| --- | --- |
+| Claude ACP bridge | `@agentclientprotocol/claude-agent-acp` 0.76.0 with bundled Claude Code 2.1.257 |
+| Gemini CLI | `@google/gemini-cli` 0.43.0 |
+| OpenCode | `opencode-ai` 1.18.30 |
+
+### Provider-backed verification
+
+These checks are opt-in and may consume model usage. Run them only with the relevant installed, authenticated runtime. They use a temporary Commonspace workspace:
 
 ```bash
 pnpm verify:acp:hermes
@@ -140,16 +203,6 @@ pnpm verify:acp:claude-code
 pnpm verify:acp:mcp
 ```
 
-The runtime checks verify native session startup and resumption; Claude Code also checks recall after service restart. The MCP check verifies scoped context and visible progress; use `verify:acp:mcp:claude-code` to focus on Claude. Record the exact CLI/bridge versions and results; a passing synthetic ACP test does not establish real bridge compatibility.
+The runtime checks verify native session startup and resumption; Claude Code also checks recall after service restart. The MCP check verifies scoped context and visible progress; use `verify:acp:mcp:claude-code` to focus on Claude. Record exact CLI/bridge versions and results. A passing synthetic ACP test does not establish real bridge compatibility.
 
-Codex execution and live checks use the compatible CLI bundled with the pinned ACP bridge by default. Discovery and capability inspection still use the installed `codex` command. `COMMONSPACE_CODEX_PATH` explicitly overrides both; use a complete CLI installation, including its Code Mode companion when enabled, and a version that supports the configured native model.
-
-### Account-free runtime verification
-
-`pnpm verify:adapters` runs the pinned real Claude Code, Gemini CLI, and OpenCode runtimes against loopback Anthropic Messages and Gemini API fixtures. Run one harness with `pnpm verify:adapter:claude-code`, `pnpm verify:adapter:gemini`, or `pnpm verify:adapter:opencode`. Each child receives an explicit environment, synthetic credentials, and temporary native configuration/session directories. No login, provider key, or separately installed CLI is needed. Gemini CLI and OpenCode are development-only test dependencies; production uses the user's installed executables. These tests also run in `pnpm test` and `pnpm check`.
-
-The fixture replaces only model responses. The real runtime stores and reloads native history, calls the real Commonspace MCP endpoint, receives permission choices, and posts progress through the real HTTP service. Tests assert exact session continuity after service restart for Claude Code and OpenCode, rejection of unsafe Gemini reload with preserved work, `/new` context isolation, scoped context without unrelated Channel data, and persisted progress. Capability checks exercise the real inventory sources without a model turn, expose only safe metadata, and preserve the seeded native resources and workspace data. Codex/Hermes inventory tests remain synthetic/source-based; these checks do not claim live capability validation for them. A separate shutdown regression verifies that the bridge can flush its native child before forced termination.
-
-Fixture versions: `@agentclientprotocol/claude-agent-acp` 0.76.0 with bundled Claude Code 2.1.257, `@google/gemini-cli` 0.43.0, and `opencode-ai` 1.18.30. Gemini's reload guard above prevents corrupted continuation output while native resume remains unavailable. These checks do not prove remote model quality, account access, or compatibility with every separately installed CLI.
-
-For actual conversations, Claude Code can also use a configured [Anthropic-compatible gateway](https://code.claude.com/docs/en/gateways). A gateway credential can replace subscription login; a functioning model backend is still required. Commonspace leaves that routing and authentication in the native environment.
+For actual conversations, Claude Code can also use a configured [Anthropic-compatible gateway](https://code.claude.com/docs/en/gateways). A gateway credential can replace subscription login; a functioning model backend is still required. Commonspace leaves routing and authentication in the native environment.

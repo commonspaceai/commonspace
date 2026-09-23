@@ -2,9 +2,19 @@
 
 This specification defines Commonspace’s current product requirements and their acceptance conditions. Requirement targets describe scope, not a claim that every check has passed. Use it when designing a change, implementing a feature, or reviewing a release.
 
-Start with the [Product model](product.md) for an introduction to the concepts. The [Product direction](product-direction.md) explains scope, and the [Roadmap](../../ROADMAP.md) identifies release work and later plans.
+Start with the [Product model](product.md) for the concepts and the [Product direction](product-direction.md) for scope. The [Roadmap](../../ROADMAP.md) identifies current work and later plans; [Design](../../DESIGN.md) covers visual design and layout.
 
-For a first read, use the [Product model](product.md). [Functional requirements](#6-functional-requirements) are the normative reference, and [end-to-end acceptance scenarios](#end-to-end-acceptance-scenarios) cover complete user journeys. [Design](../../DESIGN.md) covers visual design and layout.
+Use this specification by topic:
+
+| To understand… | Read |
+| --- | --- |
+| What Commonspace is and who owns each responsibility | [Product definition](#1-product-definition), [goals and exclusions](#2-goals-and-exclusions), and [conceptual model](#4-conceptual-model) |
+| How a complete user flow should behave | [Primary experience](#5-primary-experience) |
+| The normative requirements and stable requirement IDs | [Functional requirements](#6-functional-requirements) |
+| Context authority, summaries, and compaction states | [Context model](#7-context-model) |
+| Delivery decisions, corrections, and routing failures | [Routing model](#8-routing-model) |
+| Run outcomes, privacy, and recovery | [Conversation and execution states](#9-conversation-and-execution-states) and [safety, privacy, and reliability](#10-safety-privacy-and-reliability) |
+| What must pass before the product scope is complete | [Acceptance scenarios](#end-to-end-acceptance-scenarios) and [definition of done](#definition-of-done) |
 
 ## 1. Product definition
 
@@ -33,7 +43,7 @@ The intended user is one technical person who already uses supported local ACP r
 
 ### Core job to be done
 
-> When I have work that may involve one or several local agents, let me state it once in the right conversation, keep the relevant Project and shared context visible, route only the necessary part to each agent, and preserve every continuation and result in one understandable record.
+> When I have work that may involve one or several local agents, let me state it once in the right conversation, keep the relevant Project and shared context visible, give each agent a clear responsibility, and preserve every continuation and result in one understandable record.
 
 ### Product promise
 
@@ -53,7 +63,7 @@ A user can open Commonspace, talk naturally in a Channel or DM, and trust that:
 | --- | --- |
 | G1 | Make one human effective with many reusable local agents. |
 | G2 | Make Channels, DMs, messages, and threads the complete work record. |
-| G3 | Route and decompose requests with visible, correctable inference. |
+| G3 | Route requests and divide responsibilities with visible, correctable inference. |
 | G4 | Preserve exact native-session continuity while exposing safe shared context. |
 | G5 | Let messages and threads reference zero, one, or many Projects. |
 | G6 | Keep agent collaboration peer-to-peer and visible through mentions. |
@@ -121,17 +131,19 @@ flowchart TD
 
 ### Authority boundary
 
-Agent settings provide an on-demand, read-only native capability browser for every supported adapter. Categories cover tools, MCP integrations, skills, plugins, native agents, and memory metadata. Each category identifies its source and reports available inventory, unavailable inspection, or a read failure separately. Empty inventory is distinct from unavailable inspection. Refresh does not run a model turn, change native configuration, or persist inventory in workspace data. Native credentials, launch arguments, server endpoints, host paths, and memory contents are excluded. A profile-level inventory must not imply that every item is enabled in every Project or native session.
-
 | Commonspace owns | The harness owns |
 | --- | --- |
 | Workspace objects and appearance | Actual Agent behavior and identity |
 | Conversation persistence and branches | Models and reasoning modes |
-| Routing, decomposition, and routing memory | Tools and tool behavior |
+| Participant selection, delivery order, and routing memory | Tools and tool behavior |
 | Project references and shared context | Native permission semantics |
 | Native-session mapping | Native session internals and private compaction |
 | Normalized ACP activity presentation | Runtime configuration and credentials |
 | Search, unread state, notifications, export/import | Raw terminal and runtime debugging |
+
+Agent settings provide an on-demand, read-only native capability browser for every supported adapter. Categories cover tools, MCP integrations, skills, plugins, native agents, and memory metadata. Each category identifies its source and distinguishes available inventory, unavailable inspection, and read failure. Empty inventory is distinct from unavailable inspection.
+
+Refresh does not run a model turn, change native configuration, or persist inventory in workspace data. Native credentials, launch arguments, server endpoints, host paths, and memory contents are excluded. A profile-level inventory must not imply that every item is enabled in every Project or native session.
 
 ## 5. Primary experience
 
@@ -161,10 +173,12 @@ Agent settings provide an on-demand, read-only native capability browser for eve
 3. The message creates a Thread.
 4. The inference layer resolves missing Project references, selects the smallest useful set of Agents and classifies delivery as parallel or relay.
 5. A request for independent work uses parallel delivery. A request for Agents to discuss, debate, reconcile, review one another, or reach a shared conclusion uses an ordered relay with at least two assignments.
-6. The service stores the routing mode, selected Agents, ordered participant deliveries, Project references, and routing reason. These records support delivery, associate replies with assignments, and retain diagnostics and corrections. Every routed human message shows a compact receipt naming the destination. Queued, running, cancelled, and failed outcomes remain visible in that receipt; the routine completed outcome stays in its expanded details. Expanding the receipt shows the stored reason, selection source, outcome, and routing duration; a secondary Delivery details disclosure retains participants, Projects, historical requests, and reroutes. A failed routing receipt lets the user retry inference or choose a Channel Agent manually without duplicating the persisted message.
+6. The service stores the routing mode, selected Agents, ordered participant deliveries, Project references, and routing reason. These records associate replies with assignments and retain diagnostics and corrections. A visible receipt shows where the message went.
 7. Parallel assignments run concurrently. In a relay, only the first Agent starts; each later Agent receives a bounded head-and-tail excerpt of the preceding peer response plus the original user message. The complete reply remains available through on-demand context.
 8. Calls to the same native session are serialized.
 9. Replies, activity, results, and attention states appear under the same Thread.
+
+Every routed human message has a compact receipt naming its destination. Queued, running, cancelled, and failed outcomes remain visible; routine completion stays in the expanded details. Opening the receipt's popover shows the stored reason, selection source, outcome, and routing duration. The same popover shows participants, Projects, historical requests, and reroutes without a nested disclosure. If routing fails, the receipt lets the user retry inference or choose a Channel Agent manually without duplicating the persisted message.
 
 ### 5.4 Explicitly addressed Channel message
 
@@ -176,9 +190,6 @@ Agent settings provide an on-demand, read-only native capability browser for eve
 
 ### 5.5 Thread continuation and peer handoff
 
-A structured handoff that starts a planned relay participant includes the original user message, bounded preceding peer reply, and peer request. Standalone peer-directed handoffs retain their sender/request delivery; they are agent coordination rather than router-authored rewrites.
-
-
 1. A human reply continues the exact native sessions already mapped to that Thread.
 2. Project references inherit from the Thread unless the new message supplies visible `@@project` tags; there is no separate Channel/Thread Project picker.
 3. A change affects the new message and future Thread defaults, never the context already delivered in earlier turns.
@@ -186,6 +197,8 @@ A structured handoff that starts a planned relay participant includes the origin
 5. Commonspace writes that request as a visible `@agent` handoff, adds the peer to the Thread if needed, and invokes it after the sending turn with only sender identity and the clean request. A final paragraph beginning with an unquoted `@agent` directive remains a fallback; quoted, incidental, or machine-added sender labels do not route.
 6. Structured handoffs may return to an earlier speaker when the directed edge has not already run and the visible workspace Agent limit has capacity.
 7. Self-handoffs, non-member targets, repeated directed edges, and excess relay turns are rejected or stopped with a visible outcome. This does not require a coordinator or task gate.
+
+A structured handoff that starts a planned relay participant also includes the original user message and bounded preceding peer reply. Standalone peer-directed handoffs retain their sender/request delivery; they are agent coordination rather than router-authored rewrites.
 
 ### 5.6 Direct Message
 
@@ -300,7 +313,7 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | --- | --- | --- | --- |
 | INF-01 | Current | Select one added Agent for workspace routing and shared-context compaction. | Commonspace stores only the Agent ID and invokes its ACP harness with the runtime's existing authentication. The inference Agent chooses participants, mode, order, and Project relevance in one request; code validates the result and dispatches the original user message without an assignment-writing call. Missing or invalid configuration cannot silently select another Agent. |
 | INF-02 | Current | Resolve every unaddressed Channel message after durable acceptance. | Local classification uses the previous compact brief to select a recipient or delivery mode, and can distinguish work from a mere mention for one named Project. Explicit participants and Project scope remain fixed. Saved corrections and unsupported or uncertain decisions use the inference Agent. Receipts identify local decisions; failures never silently broadcast a request. |
-| INF-03 | Current | Treat explicit Agent mentions as authoritative. | Inference may select delivery mode and Project scopes for mentioned Agents but cannot substitute unmentioned Agents or rewrite the request. |
+| INF-03 | Current | Treat explicit Agent mentions as authoritative. | For multiple mentioned Agents, inference may classify delivery mode and speaker order but must retain the named participants and existing Project scope. It cannot substitute unmentioned Agents or rewrite the request. |
 | INF-04 | Current | Select the smallest useful Agent set and delivery mode. | One Agent is preferred when sufficient; independent responsibilities use parallel assignments; explicit peer-conversation intent uses an ordered relay with at least two speakers. |
 | INF-05 | Current | Remove hidden product-wide Agent fan-out caps. | Explicit or inferred requests are not silently limited to two Agents; any safety ceiling is visible and user-controlled. |
 | INF-06 | Current | Deliver the original request to each selected Agent. | A first or parallel native turn contains the original user message unchanged. Separate participation metadata supplies roster responsibility and selected peers. A later relay turn includes the original message and a bounded preceding peer reply; deeper context remains available through scoped tools. |
@@ -311,9 +324,15 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | INF-11 | Current | Target effectively immediate routing. | The routing stage targets sub-second completion where the selected harness permits and reports separately from normal Agent execution time. |
 | INF-12 | Current | Require one added Agent and one valid inference-Agent selection before onboarding completes. | The same Agent may satisfy both requirements; removing or invalidating the selection returns the workspace to setup instead of silently falling back. |
 
+#### Routing inputs and privacy
+
 Routing receives every eligible Agent's current display name, public harness identity, and available responsibility description. Conversational addressing can use a distinctive shortened name or a harness identity when it identifies one recipient; a shared harness name does not establish a default Agent. Native profile references, credentials, and session details are excluded.
 
-Routing retrieves bounded public conversation passages through a local, ephemeral BM25 index. Existing Thread follow-ups retrieve within that Thread; new roots can retrieve within their Channel. Channel instructions, Thread starting context and current notes, pins, prior ownership, and recent messages accompany retrieved evidence. Retrieval excludes native sessions, host files, and private traces. Routing for roots and Thread follow-ups reuses one ACP process lane per Channel, while each attempt uses a fresh native inference session with a bounded response and one validation retry. Ephemeral session bookkeeping is released after the attempt and busy lanes rotate within a fixed bound; invalid or unavailable judgments fail visibly.
+Routing retrieves bounded public conversation passages through a local, ephemeral BM25 index. Existing Thread follow-ups retrieve within that Thread; new roots can retrieve within their Channel. Channel instructions, Thread starting context and current notes, pins, prior ownership, and recent messages accompany retrieved evidence. Retrieval excludes native sessions, host files, and private traces.
+
+#### Routing execution
+
+Routing through a harness reuses one ACP process lane per Channel for roots and Thread follow-ups. Each attempt uses a fresh native inference session with a bounded response and one validation retry. Ephemeral session bookkeeping is released after the attempt and busy lanes rotate within a fixed bound; invalid or unavailable judgments fail visibly.
 
 ### 6.6 Shared context and compaction
 
@@ -330,11 +349,19 @@ Routing retrieves bounded public conversation passages through a local, ephemera
 | CTX-09 | Current | Expose bounded context through scoped tools. | An Agent can read only the conversation and Project scope granted to its current native session. |
 | CTX-10 | Later | Accept Agent-suggested durable context. | No Agent response can silently promote itself into canonical memory. |
 
+#### Brief content and invalidation
+
 Briefs preserve current goals, constraints, accepted decisions, verified progress, and remaining work. They omit greetings and generic capability lists, reconcile superseded decisions, and remove answered or rhetorical questions. Source coverage is tracked separately from semantic content; until inference succeeds, the brief is visibly pending or failed and original messages remain available. Human corrections remain authoritative until an explicit refresh reconciles them with newer conversation.
 
 Changing pinned evidence or the public Agent roster invalidates affected generated briefs, including results still being computed. Human corrections remain visible as stale, and immutable Thread starting snapshots remain unchanged. A failed automatic update retains the last valid brief and retries after the next completed turn.
 
-Automatic Channel and Thread context refresh runs as tracked background work, coalescing repeated refreshes for one Thread. It does not hold the conversation delivery queue while awaiting inference. Channel context and routing-memory compaction reuse one ACP process lane per Channel, and each Thread context uses its own process lane; every compaction judgment starts a fresh native session. Conversation retention closes all affected routing and context lanes before later work may recreate them. Idle and shutdown account for these jobs; newer human edits remain authoritative and newer messages update source coverage. Native session resumption and native compaction remain harness-owned.
+#### Background refresh
+
+Automatic Channel and Thread context refresh runs as tracked background work, coalescing repeated refreshes for one Thread. It does not hold the conversation delivery queue while awaiting inference.
+
+Channel context and routing-memory compaction reuse one ACP process lane per Channel, and each Thread context uses its own process lane; every compaction judgment starts a fresh native session. Conversation retention closes all affected routing and context lanes before later work may recreate them. Idle and shutdown account for these jobs; newer human edits remain authoritative and newer messages update source coverage. Native session resumption and native compaction remain harness-owned.
+
+#### On-demand history retrieval
 
 Agents can navigate an eight-way tree of authorized conversation passages and retrieve ranked keyword and local semantic evidence through `commonspace_browse_history` and `commonspace_find_history`. Leaves preserve exact source text, message IDs, revisions, and offsets; edits and deletions invalidate affected nodes. This is on-demand retrieval, separate from shared summary compaction. It respects the same Thread, edit-branch, and DM-generation boundaries as scoped message reads and never rewrites native context. See [Shared history retrieval](context-retrieval.md) for the contract, cost model, and semantic-search limitations.
 
@@ -512,7 +539,7 @@ Workspace archives are unencrypted private user data. Removing Commonspace-manag
 | ID | Scenario | Required result |
 | --- | --- | --- |
 | E2E-01 | Send a projectless unaddressed Channel message | It is persisted, routed by inference, dispatched to the smallest useful Agent set without Project filesystem access, and recorded in one Thread. |
-| E2E-02 | Ask backend and frontend work spanning two Projects | Inference creates inspectable Original message + participant scope with the correct Project subset; sessions run concurrently and replies share one Thread. |
+| E2E-02 | Ask for backend and frontend work spanning two Projects | Each participant receives the original message with an inspectable scope and the correct Project subset; sessions run concurrently and replies share one Thread. |
 | E2E-03 | Mention an Agent not seated in a Channel | The Agent is added and invoked immediately without replacing explicit routing intent. |
 | E2E-04 | Continue the same Agent in two Threads | Each Thread resumes its own native session and both may run concurrently. |
 | E2E-05 | Use `/new` during an active DM | The old generation is cancelled or isolated, a visible boundary appears, and no late reply crosses into the new session. |

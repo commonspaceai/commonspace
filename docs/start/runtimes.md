@@ -1,12 +1,14 @@
 # Set up an agent runtime
 
-Commonspace connects to agents installed on the same computer. Install and sign in in your terminal, then choose **Add Agent** in Commonspace. Credentials and native sessions stay with each runtime.
+Commonspace connects to agent runtimes installed on the same computer, also called **harnesses**. Start with one runtime you already use. Install and sign in in your terminal, then choose **Add Agent** in Commonspace. Credentials and native sessions stay with each runtime.
+
+Jump to [Codex](#codex), [Claude Code](#claude-code), [Hermes](#hermes), [Gemini CLI](#gemini-cli), or [OpenCode](#opencode). Run the checks below in the same terminal you use to launch Commonspace, so both commands see the same `PATH`.
 
 Discovery checks whether the runtime can be found and is compatible. It does **not** confirm authentication, available credit, or model access. Send the [first DM](first-conversation.md#ask-about-your-code) to check those together.
 
 ## Codex
 
-Follow the [Codex CLI installation and sign-in guide](https://developers.openai.com/codex/cli/). In the same terminal used to launch Commonspace:
+Follow the [Codex CLI installation and sign-in guide](https://developers.openai.com/codex/cli/), then check:
 
 ```bash
 codex --version
@@ -40,19 +42,34 @@ Choose **Add Agent → Hermes** and select an existing profile. To use another H
 
 ## Gemini CLI
 
-Follow the [Gemini authentication guide](https://geminicli.com/docs/get-started/authentication/) and check `gemini --version`. Commonspace currently accepts stable versions **>=0.39.1 and <0.44.0**, with **0.43.0** tested. Newer versions are withheld because of native session reload regressions; installing the latest Gemini release will not necessarily work here.
+Follow the [Gemini authentication guide](https://geminicli.com/docs/get-started/authentication/) and check:
+
+```bash
+gemini --version
+```
+
+Commonspace currently accepts stable versions **>=0.39.1 and <0.44.0**, with **0.43.0** tested. Newer versions are withheld because of native session reload regressions; installing the latest Gemini release will not necessarily work here.
 
 Choose **Add Agent → Gemini CLI**. New and already-loaded sessions work. Continuing a saved session after a Commonspace restart or runtime replacement is blocked to avoid corrupting replies. Continue in Gemini CLI, or send `/new` to start fresh context. Your old conversation stays saved. See the [compatibility evidence](../adapters/agent-adapters.md#gemini-revalidation-evidence).
 
 ## OpenCode
 
-Follow the [OpenCode setup guide](https://opencode.ai/docs/), including connecting a provider and choosing a model. Check `opencode --version`, then choose **Add Agent → OpenCode**. Commonspace uses native `opencode acp`; version **1.18.30** is covered by the runtime fixture.
+Follow the [OpenCode setup guide](https://opencode.ai/docs/), including connecting a provider and choosing a model. Check:
+
+```bash
+opencode --version
+```
+
+Choose **Add Agent → OpenCode**. Commonspace uses native `opencode acp`; version **1.18.30** is covered by the runtime fixture.
 
 ## Runtime not found or no reply
 
-- Run the version command in the terminal that starts Commonspace. Restart Commonspace after installing a CLI or changing `PATH`.
-- If it is already added, open its DM from the sidebar. For a custom installation path, see [runtime configuration](../guides/operations.md#runtime-configuration).
-- If discovery succeeds but a message fails, confirm that the native CLI itself can answer using the intended model. Fix native sign-in, permissions, or model access, then retry in Commonspace.
-- A previous successful reply is evidence from that run, not a guarantee that credentials or service access still work today.
+| Symptom | What to do |
+| --- | --- |
+| The runtime is missing from **Add Agent** | Run its version command in the terminal that starts Commonspace. Restart Commonspace after installing a CLI or changing `PATH`. For a custom executable path, use [runtime configuration](../guides/operations.md#runtime-configuration). |
+| The agent has already been added | Open its DM from the sidebar. You do not need to add it again. |
+| Discovery succeeds but a message fails | Confirm the native CLI can answer using the intended model. Fix its sign-in, permissions, or model access, then retry the saved request in Commonspace. |
+
+A previous successful reply confirms access for that run; credentials and service access can change. After adding your first agent, complete the inference selection in [workspace setup](first-conversation.md#ask-about-your-code).
 
 See [platform support](support.md) for OS coverage. Adapter authors should use the [implementation guide](../adapters/agent-adapters.md).

@@ -27,11 +27,28 @@ Read [Architecture](architecture.md) for package ownership before a change that 
 
 ## Verification commands
 
-Choose checks by the evidence you need:
+### Focused iteration
+
+During visual exploration, use the [Fast UI loop](#fast-ui-loop) below. For behavior changes, run the relevant test file while iterating. Use the change-specific requirements in [Contributing](../../CONTRIBUTING.md#verify) when the change is settled. Examples:
+
+| Change                           | Focused check                                                                      | Evidence limit                                                                  |
+| -------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Server state or shared context   | `pnpm test tests/channel-context.spec.ts`                                          | Synthetic state transitions; use the test file that owns the changed behavior   |
+| Routing contracts or dispatch    | `pnpm test tests/ai-router.spec.ts tests/commonspace-host.spec.ts`                 | Parsing and service mechanics, not live semantic routing quality                |
+| UI component                     | `pnpm test:storybook:watch -- Conversation`                                        | Isolated interactions and accessibility; assembled behavior needs browser flows |
+| ACP lifecycle                    | `pnpm test tests/acp-runtime.spec.ts`                                              | Protocol fixtures, not authenticated harness compatibility                      |
+| Portable scripts or installation | `pnpm test:platform`                                                               | Account-free platform behavior; packaging also needs clean tarball verification |
+| Documentation or templates       | Check relative links, referenced commands, Markdown syntax, and `git diff --check` | No application test run is required for prose-only changes                      |
+
+The Node test workers disable native Web Storage so jsdom owns isolated browser storage. This keeps UI tests consistent across supported Node versions without writing browser-like state to a host storage file.
+
+### Integration gates
+
+Use these when preparing a settled change for handoff or release. They are not part of each visual edit:
 
 | Command               | What it verifies                                                                                                                                                                                           |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm check:fast`     | Formatting, lint, types, unit/integration tests, and representative Storybook browser tests during iteration                                                                                               |
+| `pnpm check:fast`     | Formatting, lint, types, unit/integration tests, and representative Storybook browser tests for a broad code-iteration check                                                                                               |
 | `pnpm check`          | The full local gate, including all Storybook browser tests and production application and Storybook builds                                                                                                 |
 | `pnpm verify:live`    | A fresh production build and the integrated desktop browser flow through both separate development-style servers and the installed single-origin path                                                      |
 | `pnpm check:ui`       | UI types, the complete Storybook browser suite, and the production UI build                                                                                                                                |
@@ -43,36 +60,21 @@ The live verifier uses temporary workspace data and test runtimes. It proves pro
 
 Use [Desktop usage](desktop-usage.md) for assembled flows and [Visual verification](../design/visual-verification.md) for rendered evidence.
 
-### Focused iteration
-
-Run a relevant file while iterating, then use the change-specific requirements in [Contributing](../../CONTRIBUTING.md#verify) before handing off. Examples:
-
-| Change                           | Focused check                                                                      | Evidence limit                                                                  |
-| -------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Server state or shared context   | `pnpm test tests/channel-context.spec.ts`                                          | Synthetic state transitions; use the test file that owns the changed behavior   |
-| Routing contracts or dispatch    | `pnpm test tests/ai-router.spec.ts tests/commonspace-host.spec.ts`                 | Parsing and service mechanics, not live semantic routing quality                |
-| UI component                     | `pnpm test:storybook:watch -- Conversation`                                        | Isolated interactions and accessibility; assembled behavior needs browser flows |
-| ACP lifecycle                    | `pnpm test tests/acp-runtime.spec.ts`                                              | Protocol fixtures, not authenticated harness compatibility                      |
-| Portable scripts or installation | `pnpm test:platform`                                                               | Account-free platform behavior; packaging also needs clean tarball verification |
-| Documentation or templates       | Check relative links, referenced commands, Markdown syntax, and `git diff --check` | No application test run is required for prose-only changes                      |
-
 `check:fast` is a broader iteration gate, not a replacement for `check`. `verify:live` and `test:e2e` exercise assembled behavior; use `verify:live:built` and `test:e2e:built` after a current build to avoid rebuilding the same candidate. Pixel baselines, authenticated runtime checks, routing-quality evaluation, and benchmarks answer separate questions and are not implied by green unit tests.
-
-The Node test workers disable native Web Storage so jsdom owns isolated browser storage. This keeps UI tests consistent across supported Node versions without writing browser-like state to a host storage file.
 
 ## Fast UI loop
 
-Run Storybook while editing components:
+Keep Storybook running while editing components:
 
 ```bash
 pnpm storybook
 ```
 
-Open `http://127.0.0.1:6006`. The development server is loopback-only, and fails instead of silently selecting another port. Stories use local fixtures, so they do not need the Commonspace API. The testing panel can rerun the selected story's interactions and accessibility checks after an edit.
+Open `http://127.0.0.1:6006`. The development server is loopback-only, and fails instead of silently selecting another port. Stories use local fixtures, so they do not need the Commonspace API. Use **Workspace / Conversation** to explore the production app with a disposable mock workspace. Inspect changes through hot reload at 1440 × 960, including hover, focus, and Light/Dark states. Do not rebuild or run broad checks between visual edits.
 
-For agent-assisted UI work, use the installed Storybook MCP addon at `http://127.0.0.1:6006/mcp`. The project connection lives in `.codex/config.toml`. Follow the required [MCP discovery, test, preview, and pixel-review loop](../design/visual-verification.md#storybook-mcp-workflow); terminal tests below remain useful for CI and as an explicit fallback when MCP is unavailable.
+For agent-assisted UI work, use the installed Storybook MCP addon at `http://127.0.0.1:6006/mcp`. The project connection lives in `.codex/config.toml`. Follow the required [MCP discovery, preview, and pixel-review loop](../design/visual-verification.md#storybook-mcp-workflow). Once an interaction is settled, run its focused story check. If MCP fails, follow that guide's recovery steps and record the failure before using a terminal fallback.
 
-For a focused terminal loop, pass a story-file filter:
+For a settled interaction, CI work, or the documented fallback, a terminal watcher accepts a story-file filter:
 
 ```bash
 pnpm test:storybook:watch -- Conversation
@@ -84,14 +86,14 @@ watcher. Browser-file parallelism is bounded by the host, with ceilings of four
 workers locally and two in CI, to avoid making browser checks slower through
 contention.
 
-Use the representative screen suite for a quick check, then the full UI gate before handing off visible work:
+When the change is settled, the representative screen suite provides a quick integration check. `check:ui` adds UI types, the full Storybook suite, and a production UI build:
 
 ```bash
 pnpm test:storybook:smoke
 pnpm check:ui
 ```
 
-Storybook's Vitest suite checks rendering, interactions, and accessibility in a real browser. Pixel comparisons use `pnpm test:visual`.
+These commands do not replace the change-specific handoff requirements in [Contributing](../../CONTRIBUTING.md#verify). Storybook's Vitest suite checks rendering, interactions, and accessibility in a real browser. Pixel comparisons use `pnpm test:visual`; visual acceptance still requires inspecting the images.
 
 Use the Light / Dark toolbar to inspect the actual rendering, including overlays. Follow [Visual verification](../design/visual-verification.md) for Storybook states, screenshot review, and baseline changes. Keep component permutations in Storybook and use `verify:live` for behavior that depends on the assembled application.
 
@@ -107,6 +109,14 @@ CI starts quality/package, unit, Linux browser, macOS visual/messaging, and Wind
 
 CI and local browser checks install/use Playwright's managed Chromium unless `COMMONSPACE_USE_SYSTEM_CHROME=1` is set.
 
+### macOS service and notifications
+
+Normal development does not register a background service. To exercise source-based macOS installation, use `pnpm service:install` with a committed `main` checkout. The service commands and managed paths are documented in [Operations](operations.md#installed-macos-service).
+
+On macOS, `pnpm verify:notifications` checks whether the native notifier accepts a safe test alert. Use **Send test notification** in Workspace settings to check visible delivery and follow any operating-system guidance.
+
+## Workspace benchmarks
+
 Workspace-scale measurements are opt-in and never part of the normal test gate:
 
 ```bash
@@ -121,8 +131,6 @@ The benchmark runs the original long DM and a multi-Channel workspace at equal s
 It discards one warm-up per shape, then runs three measured samples per size by default. The original initialization, acceptance/persistence, bootstrap, broad search, export, and import timings remain separate. Additional timings cover Project-filtered message search and context projection/compaction prompt preparation for the busiest Channel and its longest Thread. Payload/archive serialization contributes reported sizes, outside those operation timings. Workers are synthetic; acceptance uses explicit routing and reply completion is outside its timing. No providers or native sessions are invoked.
 
 JSON includes the base commit and changed-file list, benchmark source hashes, machine/runtime details, seeded/measured/restored counts, raw samples, and min/median/max dispersion. Heap/RSS values are operation deltas, not peaks or retained memory. Run on an otherwise idle machine and retain the raw output with any performance claim. These service-level measurements do not cover browser rendering/reconnect, HTTP transfer, concurrent streaming, large attachments, or separate routing-resolution/reply writes; measure those before making architecture decisions about them.
-
-Normal development does not register a background service. To exercise source-based macOS installation, use `pnpm service:install` with a committed `main` checkout. The service commands and managed paths are documented in [Operations](operations.md#installed-macos-service).
 
 ## npm packaging
 
@@ -154,7 +162,7 @@ The server owns Agent Client Protocol (ACP) integration. ACP connects Commonspac
 
 Keep activity provider-neutral, bounded, and based only on emitted ACP updates. Runtime-specific credentials, configuration, and native transcripts remain owned by each native harness.
 
-Use the [adapter guide](../adapters/agent-adapters.md#verification-commands) for account-free fixtures and authenticated native-session checks. Run the checks relevant to the changed runtime; fixture results do not establish provider-backed compatibility.
+Use the [adapter proposal template](../adapters/agent-adapter-template.md) when adding a harness. The [adapter guide](../adapters/agent-adapters.md#verification-commands) lists account-free fixtures and authenticated native-session checks. Run the checks relevant to the changed runtime; fixture results do not establish provider-backed compatibility.
 
 Parser and service tests establish routing contracts; they do not measure model decomposition quality or harness latency. Evaluate those properties through an added test Agent using synthetic conversation history, record the runtime/model/version and results, and never turn a mocked JSON parser test into a routing-quality claim.
 
@@ -168,7 +176,3 @@ pnpm evaluate:classifier
 ```
 
 The evaluator runs the synthetic corpus sequentially, reports accepted routes, errors, and latency, and fails on an incorrect accepted route or zero accepted routes. It does not invoke the inference Agent. Pass an optional cache directory after `evaluate:classifier` to isolate model files. Validate model or prompt changes with fresh examples as well as the regression corpus.
-
-On macOS, `pnpm verify:notifications` checks whether the native notifier accepts a safe test alert. Use **Send test notification** in Workspace settings to check visible delivery and follow any operating-system guidance.
-
-Use the [adapter proposal template](../adapters/agent-adapter-template.md) when adding a harness.

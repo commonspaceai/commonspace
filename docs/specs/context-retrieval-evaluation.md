@@ -4,7 +4,13 @@ The outcome we want is that an agent continues work correctly using less deliver
 context and acceptable latency. Returning fewer tokens or building a shallow tree
 is not evidence of that outcome by itself.
 
+For the implemented tools, authorization boundaries, and cost model, read
+[Shared history retrieval](context-retrieval.md). This page explains how to run the
+comparison, interpret its output, and evaluate a proposed retrieval change.
+
 ## Repeatable retrieval experiment
+
+### Run the comparison
 
 Run the local comparison without credentials:
 
@@ -26,6 +32,8 @@ receives lexical fallback, so a failed model cannot silently count as a hybrid r
 Initial scope indexing/model loading, new query inference with warm passages, and
 cached-query latency are reported separately. The scale benchmark also measures
 append/edit/delete reconciliation and counts newly embedded texts.
+
+### Corpus and evidence budget
 
 The [corpus](../../scripts/context-evaluation-cases.ts) has sixteen deliberately
 adversarial cases: fourteen answerable and two without an answer. Each answerable
@@ -53,6 +61,8 @@ The [scorer](../../scripts/context-evaluation.ts) verifies that every supplied
 passage matches its canonical source and offset. It requires coverage of the entire
 gold span, merging contiguous or overlapping intervals but never bridging gaps.
 Finding another passage in the same message earns no recall credit.
+
+### Read the report
 
 The JSON report includes:
 
@@ -102,12 +112,17 @@ These fixtures are necessary regression evidence, not proof of general effective
 The local hybrid path is enabled in the scoped history tool with explicit lexical
 fallback. Neither the fixture scores nor timing runs establish native-agent task
 success.
+
+### 1. Evaluate held-out evidence
+
 Collect an independently labeled, sanitized held-out set of real task failures
 before tuning prompts, thresholds, or hierarchy labels against it. Keep development
 and held-out conversations separate. Report per-category regressions, uncertainty,
 and repeated model runs instead of selecting the best run. Require no scope or
 source-fidelity regressions and an improvement in complete evidence under the same
 budget; predeclare a latency and cost budget for the intended usage.
+
+### 2. Test native-agent continuation
 
 Then run paired continuation tasks through Commonspace with the actual Codex and
 Hermes adapters. Give each arm an isolated native session with the same starting
@@ -118,6 +133,8 @@ answers against independently authored facts/citations and code changes against
 behavioral acceptance tests, including deliberately unanswerable tasks. Record
 constraint violations, obsolete-decision use, correct abstention, task completion,
 delivered tokens, elapsed time, and inference usage. Repeat across tasks and runs.
+
+### 3. Measure scale and cache behavior
 
 Finally vary history size and edit rate (for example 100, 1,000, and 10,000 messages)
 to measure construction, append/edit/delete maintenance, memory, warm queries, and

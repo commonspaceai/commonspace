@@ -4,7 +4,7 @@
 
 **The workspace for the agents you already use.**
 
-Commonspace brings local coding agents into shared conversations, Projects, and Threads. The conversation stays the work record; each runtime keeps control of its own tools, credentials, models, and sessions.
+Commonspace brings local coding agents into shared conversations, Projects, and Threads. Your conversations keep the work history; each agent runtime keeps control of its own tools, credentials, models, and sessions.
 
 [Get started](https://github.com/commonspaceai/commonspace/blob/main/docs/start/install.md) · [First conversation](https://github.com/commonspaceai/commonspace/blob/main/docs/start/first-conversation.md) · [Everyday use](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/desktop-usage.md) · [Help](https://github.com/commonspaceai/commonspace/blob/main/docs/start/help.md) · [Contribute](https://github.com/commonspaceai/commonspace/blob/main/CONTRIBUTING.md)
 
@@ -30,22 +30,22 @@ npx --yes commonspace@latest
 
 Open `http://127.0.0.1:3100` in your browser and keep the terminal running.
 
-The launcher also manages the local routing classifier. See [local classifier operation](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/operations.md#local-routing-classifier) for its first-launch download, routing limits, and `--no-classifier` option.
-
 1. [Install and sign in to one runtime](https://github.com/commonspaceai/commonspace/blob/main/docs/start/runtimes.md), then choose **Add Agent**.
-2. Choose one added agent as the workspace inference agent for routing and shared-context compaction.
+2. Select that agent as the **workspace inference agent** and choose **Use selected agent** to finish setup. It also routes Channel messages and summarizes shared context.
 3. Add a **Project** pointing to your repository.
 4. Open the agent’s DM, select the Project with `@@`, and ask:
 
    > Explain this repository’s entry points and how to run it. Don’t change any files.
 
-You’re ready when the agent replies about your code. Commonspace uses the runtime’s existing sign-in and does not ask for a separate inference key. Next, [try a Channel with two agents](https://github.com/commonspaceai/commonspace/blob/main/docs/start/first-conversation.md#work-with-two-agents).
+Your first reply confirms the agent can access its account and model. Commonspace uses the runtime’s existing sign-in and does not ask for a separate inference key. Next, [try a Channel with two agents](https://github.com/commonspaceai/commonspace/blob/main/docs/start/first-conversation.md#work-with-two-agents).
+
+On supported computers, the first launch downloads about 613 MB for an optional local routing classifier. See [local classifier operation](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/operations.md#local-routing-classifier) for platform coverage and the `--no-classifier` option.
 
 Commonspace is free and open source; agent subscriptions and model calls have their own costs. See [pricing and privacy questions](https://github.com/commonspaceai/commonspace/blob/main/docs/start/help.md), [platform support](https://github.com/commonspaceai/commonspace/blob/main/docs/start/support.md), and [reopen/update instructions](https://github.com/commonspaceai/commonspace/blob/main/docs/start/install.md#reopen-and-update).
 
 ## Learn more
 
-See [Product model](https://github.com/commonspaceai/commonspace/blob/main/docs/specs/product.md), [Development](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/development.md), [Operations](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/operations.md), and [Releasing](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/releasing.md).
+Use the [documentation index](https://github.com/commonspaceai/commonspace/blob/main/docs/README.md) to find guides for everyday use, configuration, development, and releases.
 
 ## Contributing
 

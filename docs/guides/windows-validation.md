@@ -1,6 +1,8 @@
 # Windows validation
 
-This guide owns Windows installation and source-validation evidence. Commonspace's Windows path is a foreground Node.js service with a desktop browser. There is no Windows service installer or desktop wrapper.
+Use this guide to validate a Commonspace release or source checkout on Windows. For a first launch, follow [Windows foreground setup](../start/install.md#windows-foreground-setup). Commonspace runs as a foreground Node.js service with a desktop browser; there is no Windows service installer or desktop wrapper.
+
+Choose the evidence you need: [automated source checks](#reproduce-source-checks), [a downloaded package](#verify-a-downloaded-tarball), or [interactive desktop checks](#check-a-real-windows-desktop). Record their results separately.
 
 ## Evidence boundary
 
@@ -23,7 +25,13 @@ The full `pnpm test` suite includes native runtime fixtures and platform-specifi
 
 ## Reproduce source checks
 
-Install Git and Node.js 22 with npm. In PowerShell, select a clean candidate checkout; include a space in the checkout path when validating path handling. Use the exact commit being assessed:
+Install Git and Node.js 22 with npm. Run each command separately in PowerShell and stop on a nonzero exit code (`$LASTEXITCODE`). Replace `<candidate-commit>` with the exact commit being assessed.
+
+The `.cmd` suffix avoids PowerShell's execution-policy handling of npm/pnpm's `.ps1` shims; no execution-policy change is required. Existing Corepack users may use the repository-pinned pnpm instead of installing it globally.
+
+### Prepare a clean checkout
+
+Include a space in the checkout path when validating path handling:
 
 ```powershell
 git clone https://github.com/commonspaceai/commonspace.git "Commonspace validation"
@@ -33,6 +41,13 @@ node --version
 npm.cmd install --global pnpm@10.34.5
 pnpm.cmd --version
 pnpm.cmd install --frozen-lockfile
+```
+
+### Run source and browser checks
+
+From that checkout:
+
+```powershell
 pnpm.cmd typecheck
 pnpm.cmd test:platform
 pnpm.cmd exec playwright install chromium
@@ -40,12 +55,17 @@ pnpm.cmd test:storybook:smoke
 pnpm.cmd build
 pnpm.cmd test:e2e:built
 pnpm.cmd verify:live:built
+```
+
+### Check the locally built package
+
+```powershell
 pnpm.cmd package:npm
 pnpm.cmd verify:npm-package
 git diff --check
 ```
 
-Replace `<candidate-commit>` before running that line. Run each command separately and stop on a nonzero exit code (`$LASTEXITCODE`). The `.cmd` suffix avoids PowerShell's script execution-policy handling of npm/pnpm's `.ps1` shims; no execution-policy change is required. Existing Corepack users may use the repository-pinned pnpm instead of installing it globally.
+### Verify a downloaded tarball
 
 `verify:npm-package` defaults to the archive matching `cli/package.json`. To verify a downloaded release artifact, keep a checkout of the same release commit and pass its absolute tarball path:
 
@@ -66,11 +86,11 @@ pnpm.cmd dev
 
 Open `http://127.0.0.1:5173`. For the installed package, use the same isolated home with the [foreground npm command](../start/install.md#windows-foreground-setup) and open port 3100. Record each result independently:
 
-1. Create a Channel and a Project whose folder includes spaces and non-ASCII characters. Refresh/restart and confirm their state restores. Check nested Git folder resolution, attachments, and export/import with explicit Project remapping.
-2. In source mode, edit a server source file while a synthetic turn is active. Verify the accepted turn finishes before the supervisor restarts, then verify browser reconnection. The focused suite covers the watcher protocol; this step checks the assembled `pnpm dev` process tree.
-3. Press Ctrl+C in the original source/package terminal. Confirm the listener is gone and the terminal returns. Restart using the same home and confirm accepted data remains. Repeat with active agent work only when that runtime is available, checking for orphaned processes.
-4. Use the folder picker to select a directory and cancel it. Exercise **Send test notification** with Windows desktop notifications enabled. Headless CI does not verify either native desktop interaction.
-5. For every claimed supported Windows runtime, record its executable/install method, version, authentication availability, discovery, first reply, exact native-session resume after restart, `/new`, cancellation, and advertised permission/MCP behavior. Use the focused commands in the adapter guide only when the runtime and model access are available. Application smoke supplies no runtime support evidence.
+1. **Saved work and paths:** create a Channel and a Project whose folder includes spaces and non-ASCII characters. Refresh/restart and confirm their state restores. Check nested Git folder resolution, attachments, and export/import with explicit Project remapping.
+2. **Development restart:** in source mode, edit a server source file while a synthetic turn is active. Verify the accepted turn finishes before the supervisor restarts, then verify browser reconnection. The focused suite covers the watcher protocol; this step checks the assembled `pnpm dev` process tree.
+3. **Terminal shutdown:** press Ctrl+C in the original source/package terminal. Confirm the listener is gone and the terminal returns. Restart using the same home and confirm accepted data remains. Repeat with active agent work only when that runtime is available, checking for orphaned processes.
+4. **Native desktop controls:** use the folder picker to select a directory and cancel it. Exercise **Send test notification** with Windows desktop notifications enabled. Headless CI does not verify either native desktop interaction.
+5. **Agent compatibility:** for every claimed supported Windows runtime, record its executable/install method, version, authentication availability, discovery, first reply, exact native-session resume after restart, `/new`, cancellation, and advertised permission/MCP behavior. Use the focused commands in the adapter guide only when the runtime and model access are available. Application smoke supplies no runtime support evidence.
 
 Windows process-directed `SIGINT`/`SIGTERM` forcibly terminate a Node child; terminal Ctrl+C has different behavior. The package smoke therefore disconnects its private parent/child IPC channel to exercise Commonspace's existing graceful close handler. It does not add an HTTP shutdown endpoint. See [Node's signal documentation](https://nodejs.org/docs/latest-v22.x/api/process.html#signal-events).
 

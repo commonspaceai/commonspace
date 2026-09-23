@@ -2,6 +2,8 @@
 
 Use this guide to configure, inspect, update, back up, and recover a local Commonspace instance. [Installation](../start/install.md) covers the first launch. [Development](development.md) covers the source editing workflow.
 
+Jump to [configuration](#runtime-configuration), [workspace inference](#workspace-inference), [macOS service](#installed-macos-service), [local data](#local-data), [troubleshooting](#common-failures), or [backup and rollback](#backup-and-rollback). See the [documentation index](../README.md) for other guides.
+
 ## Runtime
 
 See [Installation](../start/install.md) for the published package and first launch.
@@ -101,42 +103,70 @@ Turning effective Full access on or off:
 
 The conversation records interrupted work. New requests use the updated setting.
 
-A new workspace requires two choices: add at least one Agent from an installed ACP harness, then select one added Agent for workspace inference. The selected Agent performs unaddressed Channel routing and shared-context compaction through its harness's existing sign-in. Commonspace stores no separate inference endpoint, model, or credential.
+## Workspace inference
 
-The **Saved inference agent** label identifies the persisted choice. Saving validates that the Agent belongs to the workspace; it does not test native authentication or model access. A malformed or unsupported `routing.json` is deleted at startup and setup remains incomplete until the user makes a current selection.
+To complete setup, add at least one Agent from an installed ACP harness, then select an added Agent for workspace inference. To change that selection later, open **Workspace settings → Intelligence**.
+
+The selected Agent handles routing and shared-context compaction through its harness's existing sign-in. Commonspace stores no separate inference endpoint, model, or credential. DMs and Channel messages addressed to one Agent bypass routing; that does not remove the initial setup requirement.
+
+The **Saved inference agent** label identifies the persisted choice. Saving validates that the Agent belongs to the workspace; it does not test native authentication or model access. Send a message to verify access for an actual request.
 
 Workspace coordination defaults have their own save operation and can be changed even when inference is unconfigured. They control routing fan-out and shared-context memory only. Models and reasoning remain under each runtime and native session's control; Commonspace reflects reported metadata without converting it into a run setting.
 
-Routing configuration version 3 stores only the selected harness Agent ID. No older routing configuration is migrated. Routing saves are serialized and use an atomic private file write through `PUT /api/routing`; workspace coordination defaults save independently through the `set-defaults` mutation.
+### Saved settings and recovery
+
+`routing.json` version 3 stores only the selected harness Agent ID. Malformed and unsupported versions are deleted at startup; older routing configurations are not migrated. Setup then requires a current selection. This does not delete the conversation record.
+
+Routing saves are serialized and use an atomic private file write through `PUT /api/routing`. Workspace coordination defaults save independently through the `set-defaults` mutation.
 
 ## Local routing classifier
 
-The npm launcher manages one pretrained [Laya weight-only INT8 ONNX](https://huggingface.co/inferenceprince/laya-onnx-int8) classifier in a Node side process. First launch downloads about 613 MB of checksum-verified model files into `COMMONSPACE_HOME/classifier` (normally `~/.commonspace/classifier`). The app starts during setup and uses the inference Agent until the classifier is ready. Later launches reuse the cache. Python and Docker are not required. The pinned native runtime has no Intel Mac binding, so those Macs skip the model download and use the inference Agent.
+The npm launcher runs a pretrained [Laya weight-only INT8 ONNX](https://huggingface.co/inferenceprince/laya-onnx-int8) classifier in a Node side process. Python and Docker are not required.
 
-Each local decision starts fresh with the newest message and the previous compact Channel or Thread brief. Local routing selects a recipient or a delivery mode for explicitly selected participants. For a single named Project, a second decision distinguishes file work from a mere mention. Explicit Project scope remains fixed. Saved corrections, unclear or multiple recipients, unclear Project scope, stale or oversized briefs, and non-Latin text use the inference Agent. The model accepts up to 512 tokens, including a 192-token instruction-and-option budget.
+### First launch and cache
 
-The worker handles one request at a time with a 750 ms deadline. Busy or unavailable workers fall back immediately; a timed-out or invalid worker stays disabled until the next launch. Stopping Commonspace cancels downloads and closes the worker. Use `commonspace --no-classifier` to disable it. To download the model again, stop Commonspace and delete its disposable `classifier` cache.
+- First launch downloads about 613 MB of checksum-verified model files into `COMMONSPACE_HOME/classifier` (normally `~/.commonspace/classifier`).
+- The app starts while the model downloads and uses the inference Agent until the classifier is ready. Later launches reuse the cache.
+- Intel Macs skip the model download and use the inference Agent because the pinned native runtime has no Intel Mac binding.
+
+### Routing and fallback
+
+Each local decision starts fresh with the newest message and the previous compact Channel or Thread brief. Local routing selects a recipient or a delivery mode for explicitly selected participants. For a single named Project, a second decision distinguishes file work from a mere mention. Explicit Project scope remains fixed.
+
+The inference Agent handles saved corrections, unclear or multiple recipients, unclear Project scope, stale or oversized briefs, and non-Latin text. The local model accepts up to 512 tokens, including a 192-token instruction-and-option budget.
+
+The worker handles one request at a time with a 750 ms deadline. Busy or unavailable workers fall back immediately. A worker that times out or returns an invalid result stays disabled until the next launch.
+
+### Disable or reset the classifier
+
+Use `commonspace --no-classifier` to disable it. Stopping Commonspace cancels downloads and closes the worker. To download the model again, stop Commonspace and delete its disposable `classifier` cache.
 
 ## Installed macOS service
 
-The managed service currently installs from committed source. Stop any foreground Commonspace process so port `3100` is free, then run from a source checkout:
+The managed service requires Corepack, Git, the pinned pnpm version, and SSH repository access. It installs committed `main`, not uncommitted checkout edits. Stop any foreground Commonspace process so port `3100` is free, then run from a source checkout:
 
 ```bash
 pnpm service:install
 ```
 
-The installer clones committed source over SSH, installs dependencies, builds a staged release, validates the LaunchAgent property list, atomically activates it, starts the service, and requires `/api/health` to pass. It also checks that the LaunchAgent process owns the loopback listener, so an existing foreground process cannot make a failed installation appear healthy. State remains in `~/.commonspace`. One previous build is retained for recovery. Agent authentication is needed when running an agent, not when installing or opening the application.
+The installer clones source over SSH, installs dependencies, builds a staged release, and validates the LaunchAgent property list. It then atomically activates the release and starts the service. Installation succeeds only when `/api/health` passes and the LaunchAgent process owns the loopback listener; a foreground process cannot make a failed installation appear healthy.
 
-After installation:
+State remains in `~/.commonspace`. One previous build is retained for recovery. Agent authentication is needed when running an agent, not when installing or opening the application.
 
-```bash
-~/.local/bin/commonspace status
-~/.local/bin/commonspace stop
-~/.local/bin/commonspace start
-~/.local/bin/commonspace restart
-~/.local/bin/commonspace update
-~/.local/bin/commonspace rollback
-```
+### Manage the service
+
+Run the command for the action you need:
+
+| Command | Purpose |
+| --- | --- |
+| `~/.local/bin/commonspace status` | Inspect the service status. |
+| `~/.local/bin/commonspace stop` | Stop the service and active work. |
+| `~/.local/bin/commonspace start` | Start the installed release. |
+| `~/.local/bin/commonspace restart` | Stop and restart the installed release. |
+| `~/.local/bin/commonspace update` | Build and activate committed `main`. |
+| `~/.local/bin/commonspace rollback` | Swap the current and previous application releases. Read [Backup and rollback](#backup-and-rollback) first. |
+
+### Managed files
 
 | Managed path | Contents |
 | --- | --- |
@@ -147,11 +177,11 @@ After installation:
 | `~/Library/Logs/Commonspace/service.log` | Standard service log |
 | `~/Library/Logs/Commonspace/service.error.log` | Error log |
 
-An update clones and builds the configured source while the old process continues running. A staging failure leaves the current release in place. A failed activation health check restores and restarts the previous release.
+### Updates and rollback
+
+An update clones `git@github.com:commonspaceai/commonspace.git` over SSH and builds committed `main` while the old process continues running. A staging failure leaves the current release in place. A failed activation health check restores and restarts the previous release.
 
 `rollback` swaps the current and previous application releases. It does not reverse state migrations; read [Backup and rollback](#backup-and-rollback) before downgrading.
-
-This path requires Corepack, Git, the pinned pnpm version, and SSH repository access. It installs committed `main`, not uncommitted checkout edits. `~/.local/bin/commonspace update` clones `git@github.com:commonspaceai/commonspace.git` over SSH and builds `main` again.
 
 The npm package runs in the foreground on Linux. A managed Linux background service is not included.
 
@@ -174,11 +204,18 @@ Agent Client Protocol (ACP) runs over local child-process input/output. Commonsp
 
 ## Export, import, and retention
 
-Open **Workspace data** in Commonspace settings to export `commonspace-export.json`. The archive excludes credentials, native-session references, temporary capabilities, and known absolute paths from Commonspace-managed fields. It keeps conversation text and exact attachment bytes, which may contain sensitive author-supplied content. Treat the unencrypted archive as private data. See [Workspace archive format](../specs/workspace-archive-format.md) for the contract.
+Use export/import to transfer conversations into a clean workspace. Use a [full local backup](#backup-and-rollback) before a version downgrade; portable exports do not transfer native sessions.
+
+### Export
+
+Open **Workspace data** in Commonspace settings to export `commonspace-export.json`.
+
+- The archive excludes credentials, native-session references, temporary capabilities, and known absolute paths from Commonspace-managed fields.
+- It keeps conversation text and exact attachment bytes, which may contain sensitive author-supplied content. Treat the unencrypted archive as private data.
 
 Export and import enforce the limits in the [workspace archive format](../specs/workspace-archive-format.md) before downloading or writing data.
 
-To import:
+### Import
 
 1. Start with a new, empty workspace.
 2. Choose the archive.
@@ -187,7 +224,13 @@ To import:
 
 Commonspace validates the entire archive before activating it. Native harness sessions are not transferred; the next agent turn starts new native continuity.
 
-Retention removes data from one Channel or Direct Message. Preview the affected messages, Threads, attachments, pins, and permissions before confirming. A state change after preview requires a new preview. Active work must finish or be stopped first. Commonspace never expires conversation data in the background.
+### Retention and attachment cleanup
+
+Retention removes data from one Channel or Direct Message. Commonspace never expires conversation data in the background.
+
+1. Finish or stop active work in that conversation.
+2. Preview the affected messages, Threads, attachments, pins, and permissions.
+3. Confirm the removal. If state changed after the preview, preview again first.
 
 Message deletion and retention save private attachment cleanup IDs atomically with the conversation change. If physical cleanup fails, the conversation change remains committed and the error reports that cleanup is pending. Retry the deletion or retention, or restart Commonspace after restoring storage access; startup retries saved cleanup without blocking access to retained conversations. Pending IDs stay out of browser state and portable exports.
 
@@ -233,7 +276,11 @@ Authenticate through the affected native runtime installation and retry. Commons
 
 The Channel message is persisted before inference. If routing fails, the accepted message remains visible with a failed state and a durable Inbox item; Commonspace does not broadcast it to every agent.
 
-Choose a working added Agent under **Workspace settings → Intelligence** and confirm that its native runtime is signed in. Invalid output, an unavailable harness, or an incompatible relay order leaves the request retryable. Open the affected conversation or Thread from Inbox, expand the failed routing receipt, then choose **Retry agent routing** or select a Channel Agent and choose **Route**. Recovery reuses the persisted message instead of adding a duplicate.
+1. Choose a working added Agent under **Workspace settings → Intelligence** and confirm that its native runtime is signed in.
+2. Open the affected conversation or Thread from Inbox and expand the failed routing receipt.
+3. Choose **Retry agent routing**, or select a Channel Agent and choose **Route**.
+
+Invalid output, an unavailable harness, or an incompatible relay order leaves the request retryable. Recovery reuses the persisted message instead of adding a duplicate.
 
 ### A Project file is marked sensitive
 
@@ -265,15 +312,34 @@ Closing the browser leaves an installed LaunchAgent and its turns running. `comm
 
 ## Backup and rollback
 
-Back up the whole Commonspace data directory before testing a version downgrade or changing state compatibility. Stop the service first, or use Ctrl+C for a foreground instance. Choose a new backup directory so an earlier backup is not overwritten:
+### Make a full local backup
+
+Back up the whole Commonspace data directory before testing a version downgrade or changing state compatibility. Stop a foreground instance with Ctrl+C. For the installed macOS service, use:
 
 ```bash
 ~/.local/bin/commonspace stop
+```
+
+Then copy the data directory to a new backup location:
+
+```bash
 cp -R ~/.commonspace ~/commonspace-backup-YYYYMMDD
 ```
 
-Replace `YYYYMMDD` with your backup date, and adjust the source if using `COMMONSPACE_HOME`. The copy includes routing configuration and attachments; keep it private. Native harness stores remain separate and are not included.
+Replace `YYYYMMDD` with your backup date, and adjust the source if using `COMMONSPACE_HOME`. Choose a destination that does not already exist. The copy includes routing configuration and attachments; keep it private. Native harness stores remain separate and are not included.
 
-The current internal state version is 33 and migrates versions 1–32 on startup. Version 33 adds private pending attachment cleanup IDs; older workspaces retain their conversations and native-session mappings without creating cleanup work. Each write retains the previous valid primary as `state.backup.json`. If the primary is invalid and the backup is valid, startup preserves the primary as `state.corrupt.json` and recovers the backup. If both are invalid, startup stops without replacing them.
+### Automatic state recovery
+
+The current internal state version is 33 and migrates versions 1–32 on startup. Version 33 adds private pending attachment cleanup IDs; older workspaces retain their conversations and native-session mappings without creating cleanup work.
+
+Each write retains the previous valid primary as `state.backup.json`. On startup:
+
+| State files | Result |
+| --- | --- |
+| Primary is valid | Load the primary. |
+| Primary is invalid; backup is valid | Preserve the primary as `state.corrupt.json` and recover the backup. |
+| Both are invalid | Stop without replacing either file. |
+
+### Downgrade an application release
 
 The automatic state backup protects against an invalid write; it is not a complete archive of earlier releases. Application rollback does not reverse migrations. Before starting an older build, restore a data backup compatible with that build, and keep a separate copy of the current data so the recovery attempt remains reversible.

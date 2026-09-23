@@ -1,5 +1,7 @@
 # Help and common questions
 
+For setup problems, start with [the page will not open](#the-page-will-not-open), [an agent cannot answer](#my-agent-was-found-but-cannot-answer), or [Channel routing fails](#dms-work-but-channel-routing-fails). For initial setup, follow [Installation](install.md).
+
 ## Is Commonspace free?
 
 Commonspace is open source under the MIT license. Agent subscriptions and model calls have their own pricing. Installing Commonspace does not include model access or credits.
@@ -26,7 +28,13 @@ Discovery is an installation check. Follow the [runtime setup steps](runtimes.md
 
 ## DMs work but Channel routing fails
 
-Open Workspace settings and choose one of the added agents as the inference agent. Confirm that agent can answer through its native runtime, then retry. Configuration status does not prove model access; an actual routed Channel reply does. Use manual member selection on the failed request while repairing the harness.
+Workspace setup requires an inference agent, but DMs send directly to their chosen agent. A successful DM does not prove that inference can return a valid routing decision.
+
+1. Open **Workspace settings** and check which added agent is selected for inference.
+2. Confirm that agent can answer through its native runtime, then retry the saved Channel request.
+3. If routing still fails, use manual member selection on the failed request to continue while repairing the runtime.
+
+Configuration status confirms the selection is saved. An actual routed Channel reply checks that routing works.
 
 ## How do I restart without losing work?
 

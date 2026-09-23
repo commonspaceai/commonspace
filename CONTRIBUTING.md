@@ -4,7 +4,7 @@ You can help by reporting a problem, improving a guide, or sending a focused fix
 
 ## Choose a starting point
 
-- **Improve the docs:** open the relevant Markdown page on GitHub and choose **Edit this file** to propose a correction. Explain what was confusing and check its links and commands. You do not need to run the app build for a docs-only change.
+- **Improve the docs:** find the page in the [documentation index](docs/README.md), then choose **Edit this file** on GitHub to propose a correction. Explain what was confusing and check its links and commands. You do not need to run the app build for a docs-only change.
 - **Report a bug:** [search existing issues](https://github.com/commonspaceai/commonspace/issues), then [file a report](https://github.com/commonspaceai/commonspace/issues/new?template=bug_report.yml) with steps to reproduce, expected behavior, and your version and OS.
 - **Change code:** check [issues](https://github.com/commonspaceai/commonspace/issues) and [pull requests](https://github.com/commonspaceai/commonspace/pulls) for related work. Agree on the problem and approach before starting a larger feature. Keep one logical change per pull request.
 
@@ -26,13 +26,7 @@ Preserve local serving, request validation, private session data, exact native-s
 
 ## Verify
 
-Use the smallest check that proves the change. Replace the example test with the relevant file:
-
-```bash
-pnpm test tests/channel-context.spec.ts
-pnpm check
-git diff --check
-```
+Choose checks based on what changed:
 
 | Change                                            | Required evidence                                                          |
 | ------------------------------------------------- | -------------------------------------------------------------------------- |
@@ -41,7 +35,17 @@ git diff --check
 | Packaging, installation, dependencies, or release | Focused checks and the complete macOS `pnpm verify:release` candidate gate |
 | Documentation or templates only                   | Links, commands, Markdown syntax, and `git diff --check`                   |
 
-Use [Visual verification](docs/design/visual-verification.md) for rendered UI review and [Releasing](docs/guides/releasing.md) for candidate checks. Real-agent and real-service checks are additional; record what ran and what did not.
+For a code change, start with the relevant focused test. Once the change is settled, run its required integration checks. For example:
+
+```bash
+pnpm test tests/channel-context.spec.ts
+pnpm check
+git diff --check
+```
+
+Replace the example test with the relevant file and add `pnpm verify:live` for shared, server, saved-data, or security changes. Docs-only changes use the last table row; they do not require this code-check sequence.
+
+Use [Visual verification](docs/design/visual-verification.md) while iterating on UI and [Releasing](docs/guides/releasing.md) for candidate checks. Real-agent and real-service checks are additional; record what ran and what did not.
 
 ## Pull requests
 

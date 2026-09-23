@@ -16,45 +16,20 @@ A UI change needs evidence for three different questions:
 
 A screenshot path, DOM snapshot, or passing behavior test alone does not satisfy the appearance check. If the pixels could not be reviewed, record that check as unavailable.
 
-## What the live verifier captures
-
-Run the production browser check from the repository root:
-
-```bash
-pnpm verify:live
-```
-
-The verifier starts temporary production server/UI processes and uses a desktop viewport of `1180 × 820`. Its output includes `experienceAudit.artifactDir`, which points to an evidence directory under:
-
-```text
-artifacts/experience-audit/<run>/
-```
-
-| File | Contents |
-| --- | --- |
-| `audit.json` | Ordered actions, captured states, and check status |
-| State PNG files | Before-and-after screenshots |
-| State JSON files | Screenshot path, accessible structure, focus target, overlay bounds, viewport, overflow observations, and hovered element |
-| `trace.zip` | Playwright screenshots, DOM snapshots, and action trace |
-| Failure evidence | The state and screenshot reached when an expected action fails |
-
-The current captured journey includes search hover/focus/open/query/keyboard states, Channel menus and navigation, composer focus and Project suggestions, Workspace settings, Light/Dark transitions, and the installed-server mount. This is a useful starting set, not complete coverage of every product state.
-
 ## Storybook visual lab
 
 The connected workshop is **Workspace / Conversation** (`?path=/story/workspace--conversation`). It renders `CommonspaceApp` and `CommonspaceClientStore`, exactly as the live app does. `workspace-mock-api.ts` supplies disposable MSW responses; navigation, sends, unread/saved state, creation forms, and settings use the real components. Edit those shared components and inspect hot reload. Reload the story to reset the mock workspace. Unsupported native operations return a visible preview error instead of reaching a local service. There is no separate prototype UI to port or maintain.
 
+Choose a Storybook command for the current stage:
 
-Use Storybook for isolated component and screen states:
+| Stage | Command |
+| --- | --- |
+| Explore and inspect through hot reload | `pnpm storybook` |
+| Check settled interactions and accessibility | `pnpm test:storybook` or a focused story-file filter |
+| Verify the static Storybook build | `pnpm build-storybook` |
+| Compare reviewed pixel baselines | `pnpm test:visual` |
 
-```bash
-pnpm storybook
-pnpm test:storybook
-pnpm build-storybook
-pnpm test:visual
-```
-
-Run these as separate steps according to the check you need. The Storybook development server opens at `http://127.0.0.1:6006`. The visual test command builds Storybook and serves that exact static output on an isolated loopback server.
+Keep the development server running at `http://127.0.0.1:6006` during visual exploration. Use hot reload between edits; full suites and builds belong to integration checks. The visual test command builds Storybook and serves that exact static output on an isolated loopback server.
 
 Stories under `ui/src/stories` use production tokens with local fixture stores and fetchers. They do not require the Commonspace API. Storybook `play` functions test interactions and accessibility in Chromium. The separate `tests/storybook-visual.spec.ts` suite compares selected canvases with approved PNG baselines under `tests/storybook-visual.spec.ts-snapshots`.
 
@@ -93,6 +68,30 @@ Open the images and record concrete findings using the protocol below. Check the
 Dedicated stories cover primitives, workspace startup, routing, sorting, follow-up delivery, search, permissions, and runtime activity. Use Storybook for isolated states; use the live verifier for assembled UI/API behavior.
 
 For desktop recovery changes, include `CommonspaceSearch/RetryPreservesSearch`, `RunDelivery/KeyboardQueueUpdates`, and the assembled settings/theme checks in `tests/e2e/workspace.spec.ts`. Verify that settings exclude covered controls from keyboard navigation, Escape closes the nearest overlay, queue mutation recovers focus, and System reacts to a live color-scheme change after reload. These automated checks complement inspection of Light and Dark screenshots; they do not establish screen-reader or additional-browser acceptance without that review.
+
+## What the live verifier captures
+
+Run the production browser check from the repository root:
+
+```bash
+pnpm verify:live
+```
+
+The verifier starts temporary production server/UI processes and uses a desktop viewport of `1180 × 820`. Its output includes `experienceAudit.artifactDir`, which points to an evidence directory under:
+
+```text
+artifacts/experience-audit/<run>/
+```
+
+| File | Contents |
+| --- | --- |
+| `audit.json` | Ordered actions, captured states, and check status |
+| State PNG files | Before-and-after screenshots |
+| State JSON files | Screenshot path, accessible structure, focus target, overlay bounds, viewport, overflow observations, and hovered element |
+| `trace.zip` | Playwright screenshots, DOM snapshots, and action trace |
+| Failure evidence | The state and screenshot reached when an expected action fails |
+
+The current captured journey includes search hover/focus/open/query/keyboard states, Channel menus and navigation, composer focus and Project suggestions, Workspace settings, Light/Dark transitions, and the installed-server mount. This is a useful starting set, not complete coverage of every product state.
 
 ## Visual review protocol
 
@@ -160,6 +159,8 @@ The live verifier covers only part of this matrix. Record missing coverage expli
 
 ## Iteration loop
 
-For each finding, keep its evidence, fix the smallest owning component, rerun the focused journey, and inspect the changed state with adjacent states again. Before accepting a server or visible end-to-end change, run `pnpm check` and `pnpm verify:live` as described in [Development](../guides/development.md#verification-commands).
+For each finding, keep its evidence, fix the smallest owning component, and inspect the changed state with adjacent states through hot reload. Rerun a focused interaction check when the fix changes behavior or the interaction is settled.
+
+Once the change is ready for integration, run the change-specific checks in [Contributing](../../CONTRIBUTING.md#verify). A server or visible end-to-end change needs `pnpm check` and `pnpm verify:live`; see [Development](../guides/development.md#verification-commands). Do not repeat broad gates or agent reviews between visual edits.
 
 A baseline is useful only after review. Do not approve a changed image simply because it matches the current implementation.
