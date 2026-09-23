@@ -214,6 +214,14 @@ const MAX_IMAGE_ATTACHMENTS = 4;
 const MAX_IMAGE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_IMAGE_ATTACHMENTS_BYTES = 16 * 1024 * 1024;
 const MAX_AGENT_RESPONSE_CHARS = 64_000;
+
+function agentTimeoutReason(signal: AbortSignal): Error | undefined {
+	if (!signal.aborted) return undefined;
+	const reason: unknown = signal.reason;
+	return reason instanceof Error && reason.name === "TimeoutError"
+		? reason
+		: undefined;
+}
 const MAX_MCP_CONTEXT_CHARS = 64_000;
 
 const MAX_MCP_CONTEXT_MESSAGES = 30;
@@ -6260,14 +6268,14 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		);
 	}
 
-	private withMessageAcceptanceTelemetry(
+	private withMessageSubmissionTelemetry(
 		source: "send" | "edit",
 		conversationKind: SendMessageRequest["conversation"]["kind"],
 		deliveryMode: NonNullable<SendMessageRequest["delivery"]>,
-		operation: () => Promise<SendMessageResponse>,
+		operation: (markAccepted: () => void) => Promise<SendMessageResponse>,
 	): Promise<SendMessageResponse> {
 		return serverTracer.startActiveSpan(
-			"commonspace.message.accept",
+			"commonspace.message.submit",
 			{
 				attributes: {
 					"commonspace.conversation.kind": conversationKind,
@@ -6276,17 +6284,26 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				},
 			},
 			async (span) => {
-				try {
-					const response = await operation();
+				let accepted = false;
+				const markAccepted = () => {
+					accepted = true;
 					span.setAttribute("commonspace.message.accepted", true);
+				};
+				try {
+					const response = await operation(markAccepted);
 					span.setStatus({ code: SpanStatusCode.OK });
 					return response;
 				} catch (error) {
 					const observedError = error instanceof Error ? error : undefined;
-					markOperationFailed(span, observedError, "Message acceptance failed");
+					const description = accepted
+						? "Message follow-up activation failed"
+						: "Message acceptance failed";
+					markOperationFailed(span, observedError, description);
 					recordOperationException(observedError, {
-						eventName: "commonspace.message.accept.exception",
-						body: "Message acceptance failed",
+						eventName: accepted
+							? "commonspace.message.followup.exception"
+							: "commonspace.message.accept.exception",
+						body: description,
 						severity: SeverityNumber.ERROR,
 					});
 					throw error;
@@ -6298,11 +6315,11 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	}
 
 	async send(request: SendMessageRequest): Promise<SendMessageResponse> {
-		return this.withMessageAcceptanceTelemetry(
+		return this.withMessageSubmissionTelemetry(
 			"send",
 			request.conversation.kind,
 			request.delivery ?? "queue",
-			() =>
+			(markAccepted) =>
 				this.withAdmission(async () => {
 					if (
 						request.delivery !== undefined &&
@@ -6316,7 +6333,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 						CommonspaceHostPerformancePhase.AcceptanceRequestPreparation,
 						preparationStartedAt,
 					);
-					return this.acceptPreparedSend(prepared);
+					return this.acceptPreparedSend(prepared, markAccepted);
 				}),
 		);
 	}
@@ -6375,17 +6392,17 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			throw new Error("only human messages can be edited");
 		if (source.deletedAt !== undefined)
 			throw new Error("deleted messages cannot be edited");
-		if (source.conversation.kind === "dm")
-			await this.mutate({
-				action: "reset-dm",
-				agentId: source.conversation.id,
-			});
-		return this.withMessageAcceptanceTelemetry(
+		return this.withMessageSubmissionTelemetry(
 			"edit",
 			source.conversation.kind,
 			"queue",
-			() =>
-				this.withAdmission(async () => {
+			async (markAccepted) => {
+				if (source.conversation.kind === "dm")
+					await this.mutate({
+						action: "reset-dm",
+						agentId: source.conversation.id,
+					});
+				return this.withAdmission(async () => {
 					const currentSource = this.currentEditableMessage(source.id);
 					const editedProjectIds =
 						request.projectIds ??
@@ -6426,8 +6443,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 						branchId: crypto.randomUUID(),
 					};
 					this.attachEditedMessageBranch(prepared, currentSource);
-					return this.acceptPreparedSend(prepared);
-				}),
+					return this.acceptPreparedSend(prepared, markAccepted);
+				});
+			},
 		);
 	}
 
@@ -6593,9 +6611,11 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 
 	private async acceptPreparedSend(
 		prepared: PreparedSend,
+		markAccepted: () => void,
 	): Promise<SendMessageResponse> {
 		await this.overrides.beforeAcceptSend?.(prepared);
 		const response = await this.acceptSend(prepared);
+		markAccepted();
 		const scopeKey = this.followupScopeKey(
 			prepared.request.conversation,
 			response.thread?.id,
@@ -10656,18 +10676,33 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 							: await this.overrides.runAgent(input);
 					const response =
 						typeof result === "string" ? { text: result } : result;
-					span.setAttribute(
-						"commonspace.agent.response_chars",
-						Math.min(response.text.length, MAX_AGENT_RESPONSE_CHARS),
-					);
-					span.setStatus({ code: SpanStatusCode.OK });
+					const timeout = agentTimeoutReason(input.signal);
+					if (timeout !== undefined) {
+						span.setAttribute("commonspace.agent.outcome", "timeout");
+						markOperationFailed(span, timeout, "Agent attempt timed out");
+					} else if (input.signal.aborted) {
+						span.setAttribute("commonspace.agent.outcome", "cancelled");
+					} else {
+						span.setAttribute(
+							"commonspace.agent.response_chars",
+							Math.min(response.text.length, MAX_AGENT_RESPONSE_CHARS),
+						);
+						span.setStatus({ code: SpanStatusCode.OK });
+					}
 					return response;
 				} catch (error) {
-					markOperationFailed(
-						span,
-						error instanceof Error ? error : undefined,
-						"Agent attempt failed",
-					);
+					const timeout = agentTimeoutReason(input.signal);
+					if (timeout !== undefined) {
+						span.setAttribute("commonspace.agent.outcome", "timeout");
+						markOperationFailed(span, timeout, "Agent attempt timed out");
+					} else if (input.signal.aborted)
+						span.setAttribute("commonspace.agent.outcome", "cancelled");
+					else
+						markOperationFailed(
+							span,
+							error instanceof Error ? error : undefined,
+							"Agent attempt failed",
+						);
 					throw error;
 				} finally {
 					span.end();
@@ -11050,22 +11085,42 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				},
 			},
 			async (span) => {
-				try {
-					const result = await this.runAgentWithRecovery(input, shouldContinue);
-					span.setAttribute(
-						"commonspace.agent.outcome",
-						result === null ? "cancelled" : "completed",
-					);
-					if (result !== null) span.setStatus({ code: SpanStatusCode.OK });
-					return result;
-				} catch (error) {
-					const observedError = error instanceof Error ? error : undefined;
-					markOperationFailed(span, observedError, "Agent run failed");
-					recordOperationException(observedError, {
+				const recordTimeout = (reason: Error) => {
+					span.setAttribute("commonspace.agent.outcome", "timeout");
+					markOperationFailed(span, reason, "Agent run timed out");
+					recordOperationException(reason, {
 						eventName: "commonspace.agent.run.exception",
-						body: "Agent run failed",
+						body: "Agent run timed out",
 						severity: SeverityNumber.ERROR,
 					});
+				};
+				try {
+					const result = await this.runAgentWithRecovery(input, shouldContinue);
+					const timeout = agentTimeoutReason(input.signal);
+					if (timeout !== undefined) recordTimeout(timeout);
+					else {
+						const completed = result !== null && shouldContinue();
+						span.setAttribute(
+							"commonspace.agent.outcome",
+							completed ? "completed" : "cancelled",
+						);
+						if (completed) span.setStatus({ code: SpanStatusCode.OK });
+					}
+					return result;
+				} catch (error) {
+					const timeout = agentTimeoutReason(input.signal);
+					if (timeout !== undefined) recordTimeout(timeout);
+					else if (!shouldContinue()) {
+						span.setAttribute("commonspace.agent.outcome", "cancelled");
+					} else {
+						const observedError = error instanceof Error ? error : undefined;
+						markOperationFailed(span, observedError, "Agent run failed");
+						recordOperationException(observedError, {
+							eventName: "commonspace.agent.run.exception",
+							body: "Agent run failed",
+							severity: SeverityNumber.ERROR,
+						});
+					}
 					throw error;
 				} finally {
 					span.end();

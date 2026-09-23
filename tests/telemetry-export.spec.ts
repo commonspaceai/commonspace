@@ -53,6 +53,9 @@ it("exports only bounded records to the configured loopback collector", async ()
 			requests.every((request) => !request.body.includes("PRIVATE_CONTENT")),
 		).toBe(true);
 		expect(
+			requests.every((request) => !request.body.includes("exception.message")),
+		).toBe(true);
+		expect(
 			requests.every((request) => !request.body.includes("process.")),
 		).toBe(true);
 	} finally {

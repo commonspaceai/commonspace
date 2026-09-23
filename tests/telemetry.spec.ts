@@ -19,19 +19,15 @@ import { CommonspaceHostService } from "../server/src/service.ts";
 import { configuredTelemetryEndpoint } from "../server/src/telemetry.ts";
 import { addTestHarness, discoverTestHarnesses } from "./test-harnesses.ts";
 
-it("records bounded acceptance and agent outcomes with one correlated exception", async () => {
+it("records bounded acceptance, agent failures, and intentional cancellation", async () => {
 	const root = await mkdtemp(join(tmpdir(), "commonspace-telemetry-"));
 	const privateDetail = `secret in ${root}`;
 	const spans = new InMemorySpanExporter();
 	const logExporter = new InMemoryLogRecordExporter();
-	let signalFirstRun!: () => void;
-	let releaseFirstRun!: () => void;
-	const firstRunStarted = new Promise<void>((resolve) => {
-		signalFirstRun = resolve;
-	});
-	const firstRunFinished = new Promise<void>((resolve) => {
-		releaseFirstRun = resolve;
-	});
+	const firstRunStarted = Promise.withResolvers<void>();
+	const firstRunFinished = Promise.withResolvers<void>();
+	const cancelledRunStarted = Promise.withResolvers<void>();
+	const lateRunStarted = Promise.withResolvers<void>();
 	let runCount = 0;
 	const resource = resourceFromAttributes({
 		"service.name": "commonspace-test",
@@ -51,11 +47,34 @@ it("records bounded acceptance and agent outcomes with one correlated exception"
 		{ root },
 		{
 			discoverAgents: discoverTestHarnesses,
-			runAgent: async () => {
+			runAgent: async (input) => {
+				if (input.message === "Old direction") {
+					cancelledRunStarted.resolve();
+					return new Promise<never>((_resolve, reject) => {
+						input.signal.addEventListener(
+							"abort",
+							() => reject(input.signal.reason),
+							{ once: true },
+						);
+					});
+				}
+				if (input.message === "New direction")
+					return { text: "Replacement complete" };
+				if (input.message === "Late result") {
+					lateRunStarted.resolve();
+					return new Promise<{ text: string }>((resolve) => {
+						input.signal.addEventListener(
+							"abort",
+							() => resolve({ text: "Ignored late result" }),
+							{ once: true },
+						);
+					});
+				}
+				if (input.message === "After late") return { text: "Next result" };
 				runCount += 1;
 				if (runCount === 1) {
-					signalFirstRun();
-					await firstRunFinished;
+					firstRunStarted.resolve();
+					await firstRunFinished.promise;
 					return { text: "Done." };
 				}
 				throw new Error(privateDetail, { cause: new TypeError(privateDetail) });
@@ -69,12 +88,12 @@ it("records bounded acceptance and agent outcomes with one correlated exception"
 			conversation: { kind: "dm", id: "codex" },
 			text: privateDetail,
 		});
-		await firstRunStarted;
+		await firstRunStarted.promise;
 		await service.send({
 			conversation: { kind: "dm", id: "codex" },
 			text: privateDetail,
 		});
-		releaseFirstRun();
+		firstRunFinished.resolve();
 		await service.whenIdle();
 		await service.editMessage({
 			messageId: first.accepted.id,
@@ -91,7 +110,7 @@ it("records bounded acceptance and agent outcomes with one correlated exception"
 		const records = spans.getFinishedSpans();
 		const acceptances = records.filter(
 			(span) =>
-				span.name === "commonspace.message.accept" &&
+				span.name === "commonspace.message.submit" &&
 				span.status.code === SpanStatusCode.OK,
 		);
 		const agentRuns = records.filter(
@@ -141,6 +160,7 @@ it("records bounded acceptance and agent outcomes with one correlated exception"
 		);
 		expect(agentException?.severityNumber).toBe(SeverityNumber.ERROR);
 		expect(agentException?.attributes["exception.type"]).toBe("Error");
+		expect(agentException?.attributes["exception.message"]).toBeUndefined();
 		expect(agentException?.attributes["commonspace.error.cause_types"]).toEqual(
 			["TypeError"],
 		);
@@ -163,7 +183,80 @@ it("records bounded acceptance and agent outcomes with one correlated exception"
 				})),
 			),
 		).not.toContain(privateDetail);
+
+		await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "Old direction",
+		});
+		await cancelledRunStarted.promise;
+		await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "New direction",
+			delivery: "stop-and-send",
+		});
+		await service.whenIdle();
+		const completedSpans = spans.getFinishedSpans();
+		const acceptedSpans = completedSpans.filter(
+			(span) => span.name === "commonspace.message.submit",
+		);
+		const oldAcceptance = acceptedSpans.at(-2);
+		if (oldAcceptance === undefined)
+			throw new Error("cancelled run lacks an acceptance span");
+		const oldTraceId = oldAcceptance.spanContext().traceId;
+		const oldRun = completedSpans.find(
+			(span) =>
+				span.name === "commonspace.agent.run" &&
+				span.spanContext().traceId === oldTraceId,
+		);
+		const oldAttempt = completedSpans.find(
+			(span) =>
+				span.name === "commonspace.agent.run_attempt" &&
+				span.spanContext().traceId === oldTraceId,
+		);
+		expect(oldRun?.attributes["commonspace.agent.outcome"]).toBe("cancelled");
+		expect(oldRun?.status.code).toBe(SpanStatusCode.UNSET);
+		expect(oldAttempt?.attributes["commonspace.agent.outcome"]).toBe(
+			"cancelled",
+		);
+		expect(oldAttempt?.status.code).toBe(SpanStatusCode.UNSET);
+		expect(
+			logExporter
+				.getFinishedLogRecords()
+				.some(
+					(record) =>
+						record.eventName === "commonspace.agent.run.exception" &&
+						record.spanContext?.traceId === oldTraceId,
+				),
+		).toBe(false);
+
+		await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "Late result",
+		});
+		await lateRunStarted.promise;
+		await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "After late",
+			delivery: "stop-and-send",
+		});
+		await service.whenIdle();
+		const lateAccepted = spans
+			.getFinishedSpans()
+			.filter((span) => span.name === "commonspace.message.submit")
+			.at(-2);
+		if (lateAccepted === undefined)
+			throw new Error("late run lacks an acceptance span");
+		const lateRun = spans
+			.getFinishedSpans()
+			.find(
+				(span) =>
+					span.name === "commonspace.agent.run" &&
+					span.spanContext().traceId === lateAccepted.spanContext().traceId,
+			);
+		expect(lateRun?.attributes["commonspace.agent.outcome"]).toBe("cancelled");
+		expect(lateRun?.status.code).toBe(SpanStatusCode.UNSET);
 	} finally {
+		firstRunFinished.resolve();
 		await service.close();
 		await loggerProvider.shutdown();
 		await tracerProvider.shutdown();

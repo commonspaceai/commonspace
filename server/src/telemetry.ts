@@ -2,7 +2,6 @@ import { type Span, SpanStatusCode, trace } from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
 import {
 	ATTR_ERROR_TYPE,
-	ATTR_EXCEPTION_MESSAGE,
 	ATTR_EXCEPTION_TYPE,
 	ATTR_SERVICE_NAME,
 } from "@opentelemetry/semantic-conventions";
@@ -44,9 +43,7 @@ export function recordOperationException(
 	},
 ): void {
 	const types = errorTypes(error);
-	const attributes: Record<string, string | string[]> = {
-		[ATTR_EXCEPTION_MESSAGE]: "Details withheld to protect workspace data",
-	};
+	const attributes: Record<string, string | string[]> = {};
 	if (types[0] !== undefined) attributes[ATTR_EXCEPTION_TYPE] = types[0];
 	if (types.length > 1)
 		attributes["commonspace.error.cause_types"] = types.slice(1);
