@@ -276,8 +276,7 @@ function completedReplyStatus(text: string): "complete" | "silent" {
 export interface CommonspaceHostConfig extends AgentAdapterConfig {
 	root?: string;
 	defaultCwd?: string;
-	hermesYolo?: boolean;
-	externalAgentYolo?: boolean;
+	agentYolo?: boolean | AgentAdapterKind;
 	runBudgetSeconds?: number;
 }
 
@@ -285,15 +284,6 @@ export interface CommonspaceHostEnvironment {
 	logger?: {
 		warn(cause: unknown): void;
 	};
-}
-
-export function unsafeModeForAdapter(
-	config: CommonspaceHostConfig,
-	adapter: AgentAdapterKind,
-): boolean {
-	return adapter === "hermes"
-		? config.hermesYolo === true
-		: config.externalAgentYolo === true;
 }
 
 export interface AgentRunInput {
@@ -3917,8 +3907,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		{ fingerprint: string; scope: CommonspaceMcpScope; token: string }
 	>();
 	private readonly adapters: Record<AgentAdapterKind, NativeAgentAdapter>;
-	private readonly hermesYolo: boolean;
-	private readonly externalAgentYolo: boolean;
+	private readonly agentYolo: boolean | AgentAdapterKind;
 	private readonly runBudgetSeconds: number | undefined;
 	private readonly managedDefaultCwd: boolean;
 	private readonly notifyDesktop: (
@@ -3947,8 +3936,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		this.managedDefaultCwd = config.defaultCwd === undefined;
 		this.defaultCwd = config.defaultCwd ?? join(this.root, "workspace");
 		this.adapters = createAgentAdapters(config);
-		this.hermesYolo = unsafeModeForAdapter(config, "hermes");
-		this.externalAgentYolo = unsafeModeForAdapter(config, "codex");
+		this.agentYolo = config.agentYolo ?? false;
 		this.runBudgetSeconds =
 			config.runBudgetSeconds === undefined
 				? undefined
@@ -10422,13 +10410,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		agent: CommonspaceAgentDefinition,
 	): NonNullable<CommonspaceAgentProfile["permissionPolicy"]> {
 		return {
-			source: (
-				agent.adapter === "hermes"
-					? this.hermesYolo
-					: this.externalAgentYolo
-			)
-				? "server"
-				: "agent",
+			source: this.unsafeModeForAdapter(agent.adapter) ? "server" : "agent",
 			fullAccess: this.agentFullAccess(agent),
 		};
 	}
@@ -10616,12 +10598,15 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		this.broadcastLiveActivities();
 	}
 
+	private unsafeModeForAdapter(adapter: AgentAdapterKind): boolean {
+		return this.agentYolo === true || this.agentYolo === adapter;
+	}
+
 	private agentFullAccess(
 		agent: Pick<CommonspaceAgentProfile, "adapter" | "fullAccess">,
 	): boolean {
 		return (
-			agent.fullAccess === true ||
-			(agent.adapter === "hermes" ? this.hermesYolo : this.externalAgentYolo)
+			agent.fullAccess === true || this.unsafeModeForAdapter(agent.adapter)
 		);
 	}
 

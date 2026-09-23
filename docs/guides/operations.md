@@ -25,28 +25,81 @@ Open the preview URL printed by Vite. The source server binds to `127.0.0.1:3100
 
 The server reads these variables at startup. They apply to the foreground process in which they are set. The installed macOS service uses the environment written into its LaunchAgent and does not automatically inherit later shell changes.
 
+### Server settings
+
 | Variable | Default or behavior |
 | --- | --- |
 | `COMMONSPACE_PORT` | API port; defaults to `3100`. Accepts `0` for an operating-system-assigned port. |
 | `COMMONSPACE_HOME` | Local state directory; defaults to `~/.commonspace`. Use a separate directory for development or verification. |
 | `COMMONSPACE_UI_ROOT` | Built browser asset directory. The source server serves no UI when unset; npm/service launchers set it. |
 | `COMMONSPACE_LOG_LEVEL` | Server log level; defaults to `info`. |
-| `COMMONSPACE_HERMES_PATH` | Hermes discovery executable and default Hermes ACP executable; defaults to `hermes`. |
+
+### Agent executables
+
+Each harness's executable and ACP override are listed together. For installation and sign-in, see [runtime setup](../start/runtimes.md).
+
+#### Codex
+
+| Variable | Default or behavior |
+| --- | --- |
 | `COMMONSPACE_CODEX_PATH` | Explicit Codex execution override; the ACP bridge uses its bundled compatible CLI by default. Discovery and capability inspection use `codex` unless overridden. |
-| `COMMONSPACE_HERMES_ACP_PATH` | Overrides the Hermes ACP executable; otherwise uses `COMMONSPACE_HERMES_PATH`. |
 | `COMMONSPACE_CODEX_ACP_PATH` | Overrides the Codex ACP bridge executable; the bundled bridge is used by default. |
+
+#### Claude Code
+
+| Variable | Default or behavior |
+| --- | --- |
 | `COMMONSPACE_CLAUDE_CODE_PATH` | Claude Code executable for discovery and the ACP bridge; defaults to `claude`. |
 | `COMMONSPACE_CLAUDE_CODE_ACP_PATH` | Overrides the Claude ACP bridge executable; the bundled bridge is used by default. |
-| `COMMONSPACE_GEMINI_PATH` | Gemini CLI executable; defaults to `gemini`. Baseline accepts stable `>=0.39.1` and `<0.44.0` and tests `0.43.0`; [longer-history replay remains blocked](../adapters/agent-adapters.md#gemini-revalidation-evidence). |
+
+#### Hermes
+
+| Variable | Default or behavior |
+| --- | --- |
+| `COMMONSPACE_HERMES_PATH` | Hermes discovery executable and default Hermes ACP executable; defaults to `hermes`. |
+| `COMMONSPACE_HERMES_ACP_PATH` | Overrides the Hermes ACP executable; otherwise uses `COMMONSPACE_HERMES_PATH`. |
+
+#### Gemini CLI
+
+| Variable | Default or behavior |
+| --- | --- |
+| `COMMONSPACE_GEMINI_PATH` | Gemini CLI executable; defaults to `gemini`. |
 | `COMMONSPACE_GEMINI_ACP_PATH` | Overrides the executable used with `--acp`; defaults to the Gemini CLI executable. Its ACP-reported version must also pass the supported-version check. |
-| `COMMONSPACE_OPENCODE_PATH` | OpenCode executable; defaults to `opencode`. Native fixture verifies `1.18.30`. |
+
+The compatibility baseline accepts stable `>=0.39.1` and `<0.44.0` and tests `0.43.0`; [longer-history replay remains blocked](../adapters/agent-adapters.md#gemini-revalidation-evidence).
+
+#### OpenCode
+
+| Variable | Default or behavior |
+| --- | --- |
+| `COMMONSPACE_OPENCODE_PATH` | OpenCode executable; defaults to `opencode`. |
 | `COMMONSPACE_OPENCODE_ACP_PATH` | Overrides the executable used with `acp`; defaults to the OpenCode executable. |
-| `COMMONSPACE_HERMES_YOLO=1` | Explicitly enables Hermes unsafe mode. |
-| `COMMONSPACE_AGENT_YOLO=1` | Explicitly enables Full access for Codex, Claude Code, Gemini CLI, and OpenCode. |
+
+The native fixture verifies OpenCode `1.18.30`.
+
+### Full access
+
+Use `COMMONSPACE_AGENT_YOLO` to override the Agent's Full access preference at server startup:
+
+| Value | Behavior |
+| --- | --- |
+| `1` | Enable Full access for all harnesses, including Hermes. |
+| `codex`, `claude-code`, `hermes`, `gemini`, or `opencode` | Enable Full access only for agents using that harness. Choose one exact name. |
+| Unset, empty, or `0` | Use each Agent's saved Full access preference. |
+
+For example, `COMMONSPACE_AGENT_YOLO=hermes` overrides only Hermes agents. Other agents keep their saved preference. Unknown values stop startup with a configuration error. Replace the removed `COMMONSPACE_HERMES_YOLO=1` setting with `COMMONSPACE_AGENT_YOLO=hermes`.
 
 Unsafe modes change harness permission behavior. They do not authenticate a harness or repair routing configuration.
 
-Agent Full access changes replace cached ACP processes while keeping native session references. Either effective access change also stops that agent's active work and cancels its pending permissions; queued work uses the latest setting. An operator-level unsafe environment flag takes precedence over the Agent preference. Agent settings show that effective policy and disable the control while the server override applies. Saving agent settings does not verify credentials or native model access.
+The server override takes precedence over the Agent preference. Agent settings show the effective policy and disable the Full access control while the override applies. Saving settings does not verify credentials or native model access.
+
+Turning effective Full access on or off:
+
+- stops active work and interrupts already queued work for that agent;
+- interrupts its pending permissions;
+- closes cached ACP processes while keeping native session references.
+
+The conversation records interrupted work. New requests use the updated setting.
 
 A new workspace requires two choices: add at least one Agent from an installed ACP harness, then select one added Agent for workspace inference. The selected Agent performs unaddressed Channel routing and shared-context compaction through its harness's existing sign-in. Commonspace stores no separate inference endpoint, model, or credential.
 

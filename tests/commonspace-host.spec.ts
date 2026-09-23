@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+	type AgentAdapterKind,
 	COMMONSPACE_STATE_VERSION,
 	CommonspaceRoutingProvider,
 	deriveCommonspaceInboxItems,
@@ -22,11 +23,11 @@ import { z } from "zod";
 import { requestIsLoopback, requestIsSameOrigin } from "../server/src/app.ts";
 import {
 	type AgentRunInput,
+	type CommonspaceHostConfig,
 	type CommonspaceHostDependencies,
 	CommonspaceHostService,
 	type CommonspaceRouteInput,
 	type CommonspaceRouteResult,
-	unsafeModeForAdapter,
 } from "../server/src/service.ts";
 import { addTestHarness, discoverTestHarnesses } from "./test-harnesses.ts";
 import { mustExist } from "./test-helpers.ts";
@@ -325,13 +326,61 @@ describe("Commonspace host authority", () => {
 		).toBe(false);
 	});
 
-	it("keeps Hermes and Codex safety modes independent", () => {
-		expect(unsafeModeForAdapter({ hermesYolo: true }, "hermes")).toBe(true);
-		expect(unsafeModeForAdapter({ hermesYolo: true }, "codex")).toBe(false);
-		expect(unsafeModeForAdapter({ externalAgentYolo: true }, "codex")).toBe(
-			true,
-		);
-	});
+	it.each<{
+		agentYolo: boolean | AgentAdapterKind | undefined;
+		serverAdapters: AgentAdapterKind[];
+	}>([
+		{ agentYolo: undefined, serverAdapters: [] },
+		{ agentYolo: false, serverAdapters: [] },
+		{
+			agentYolo: true,
+			serverAdapters: ["hermes", "codex", "claude-code", "gemini", "opencode"],
+		},
+		{ agentYolo: "hermes", serverAdapters: ["hermes"] },
+		{ agentYolo: "codex", serverAdapters: ["codex"] },
+		{ agentYolo: "claude-code", serverAdapters: ["claude-code"] },
+		{ agentYolo: "gemini", serverAdapters: ["gemini"] },
+		{ agentYolo: "opencode", serverAdapters: ["opencode"] },
+	])(
+		"applies agentYolo=$agentYolo only to the selected harness permission policies",
+		async ({ agentYolo, serverAdapters }) => {
+			const root = await mkdtemp(
+				join(tmpdir(), "commonspace-permission-policy-"),
+			);
+			roots.push(root);
+			const config: CommonspaceHostConfig = { root };
+			if (agentYolo !== undefined) config.agentYolo = agentYolo;
+			const service = new CommonspaceHostService({}, config, {
+				discoverAgents: discoverTestHarnesses,
+			});
+			services.push(service);
+			await service.initialize();
+			for (const adapter of [
+				"hermes",
+				"codex",
+				"claude-code",
+				"gemini",
+				"opencode",
+			] as const) {
+				await service.discoverAgents(adapter);
+				await service.mutate({
+					action: "add-discovered-agent",
+					agentId: adapter,
+					fullAccess: adapter === "opencode",
+				});
+			}
+
+			const agents = (await service.bootstrap()).agents;
+			expect(agents).toHaveLength(5);
+			for (const agent of agents) {
+				const serverOverride = serverAdapters.includes(agent.adapter);
+				expect(agent.permissionPolicy).toEqual({
+					source: serverOverride ? "server" : "agent",
+					fullAccess: serverOverride || agent.adapter === "opencode",
+				});
+			}
+		},
+	);
 
 	it("uses the configured default cwd for an unprojected direct message", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-default-cwd-"));

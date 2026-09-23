@@ -824,49 +824,64 @@ describe("Commonspace ACP host path", () => {
 		);
 	});
 
-	it("uses full-access ACP mode for an agent configured with full access", async () => {
-		const root = await mkdtemp(join(tmpdir(), "commonspace-acp-full-access-"));
-		roots.push(root);
-		const logPath = join(root, "frames.ndjson");
-		vi.stubEnv("FAKE_ACP_LOG", logPath);
-		vi.stubEnv("FAKE_ACP_HERMES_SETTINGS", "1");
-		vi.stubEnv("FAKE_ACP_CAPTURE_ENV", "1");
-		const service = new CommonspaceHostService(
-			{},
-			{
+	it.each<{
+		agentYolo: CommonspaceHostConfig["agentYolo"];
+		fullAccess: boolean;
+		expectedFullAccess: boolean;
+	}>([
+		{ agentYolo: undefined, fullAccess: true, expectedFullAccess: true },
+		{ agentYolo: true, fullAccess: false, expectedFullAccess: true },
+		{ agentYolo: "hermes", fullAccess: false, expectedFullAccess: true },
+		{ agentYolo: "codex", fullAccess: false, expectedFullAccess: false },
+		{ agentYolo: "codex", fullAccess: true, expectedFullAccess: true },
+	])(
+		"uses the effective Hermes full-access policy with agentYolo=$agentYolo and fullAccess=$fullAccess",
+		async ({ agentYolo, fullAccess, expectedFullAccess }) => {
+			const root = await mkdtemp(
+				join(tmpdir(), "commonspace-acp-full-access-"),
+			);
+			roots.push(root);
+			const logPath = join(root, "frames.ndjson");
+			vi.stubEnv("FAKE_ACP_LOG", logPath);
+			vi.stubEnv("FAKE_ACP_HERMES_SETTINGS", "1");
+			vi.stubEnv("FAKE_ACP_CAPTURE_ENV", "1");
+			const config: CommonspaceHostConfig = {
 				root,
 				hermesAcpCommand: process.execPath,
 				hermesAcpArgs: [fixturePath],
-			},
-			{ discoverAgents: discoverTestHarnesses },
-		);
-		await service.initialize();
-		await service.discoverAgents("hermes");
-		await service.mutate({
-			action: "add-discovered-agent",
-			agentId: "hermes",
-			fullAccess: true,
-		});
+			};
+			if (agentYolo !== undefined) config.agentYolo = agentYolo;
+			const service = new CommonspaceHostService({}, config, {
+				discoverAgents: discoverTestHarnesses,
+			});
+			await service.initialize();
+			await service.discoverAgents("hermes");
+			await service.mutate({
+				action: "add-discovered-agent",
+				agentId: "hermes",
+				fullAccess,
+			});
 
-		await service.send({
-			conversation: { kind: "dm", id: "hermes" },
-			text: "Use full access.",
-		});
-		await service.whenIdle();
-		await service.close();
+			await service.send({
+				conversation: { kind: "dm", id: "hermes" },
+				text: "Use full access.",
+			});
+			await service.whenIdle();
+			await service.close();
 
-		const frames = (await readFile(logPath, "utf8"))
-			.trim()
-			.split("\n")
-			.map((line) => JSON.parse(line));
-		expect(frames.find((frame) => frame.event === "environment")?.argv).toEqual(
-			["acp", "--accept-hooks"],
-		);
-		expect(
-			frames.find((frame) => frame.method === "session/set_mode")?.params
-				.modeId,
-		).toBe("dont_ask");
-	});
+			const frames = (await readFile(logPath, "utf8"))
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line));
+			expect(
+				frames.find((frame) => frame.event === "environment")?.argv,
+			).toEqual(expectedFullAccess ? ["acp", "--accept-hooks"] : ["acp"]);
+			expect(
+				frames.find((frame) => frame.method === "session/set_mode")?.params
+					.modeId,
+			).toBe(expectedFullAccess ? "dont_ask" : undefined);
+		},
+	);
 
 	it("isolates concurrent harness inference across Channels", async () => {
 		const root = await mkdtemp(

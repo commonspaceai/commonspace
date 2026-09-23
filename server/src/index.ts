@@ -1,5 +1,10 @@
 import type { Serializable } from "node:child_process";
 import { createServer, type Server } from "node:http";
+import {
+	AGENT_ADAPTER_KINDS,
+	type AgentAdapterKind,
+	isAgentAdapterKind,
+} from "@commonspace/shared";
 import pino from "pino";
 import { createCommonspaceApp } from "./app.js";
 import { CommonspaceMcpGateway } from "./commonspace-mcp.js";
@@ -141,11 +146,21 @@ function configuredPort(value: string | undefined): number {
 	return port;
 }
 
+function configuredAgentYolo(
+	value: string | undefined,
+): boolean | AgentAdapterKind {
+	if (value === undefined || value === "" || value === "0") return false;
+	if (value === "1") return true;
+	if (isAgentAdapterKind(value)) return value;
+	throw new Error(
+		`COMMONSPACE_AGENT_YOLO must be 0, 1, or one harness name: ${AGENT_ADAPTER_KINDS.join(", ")}`,
+	);
+}
+
 function cliServerOptions(): StartCommonspaceServerOptions {
 	const serverOptions: StartCommonspaceServerOptions = {
 		port: configuredPort(process.env.COMMONSPACE_PORT),
-		hermesYolo: process.env.COMMONSPACE_HERMES_YOLO === "1",
-		externalAgentYolo: process.env.COMMONSPACE_AGENT_YOLO === "1",
+		agentYolo: configuredAgentYolo(process.env.COMMONSPACE_AGENT_YOLO),
 	};
 	if (process.env.COMMONSPACE_HOME !== undefined)
 		serverOptions.root = process.env.COMMONSPACE_HOME;
