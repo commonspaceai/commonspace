@@ -242,6 +242,8 @@ describe("local routing host integration", () => {
 		"multiple",
 		"corrected",
 		"corrected-long-message",
+		"corrected-greeting",
+		"corrected-greeting-all",
 		"context",
 		"stale",
 		"greeting",
@@ -265,8 +267,7 @@ describe("local routing host integration", () => {
 						: outcome.startsWith("greeting")
 							? greetingText
 							: "Fix the login screen CSS.";
-			const corrected =
-				outcome === "corrected" || outcome === "corrected-long-message";
+			const corrected = outcome.startsWith("corrected");
 			const brief = "Frontend owns the login layout; the API is complete.";
 			const agents = [
 				{
@@ -414,7 +415,7 @@ describe("local routing host integration", () => {
 							(message) => message.id === sent.accepted.id,
 						)?.routing?.assignments?.[0],
 				);
-				await service.rerouteAssignment({
+				const rerouted = await service.rerouteAssignment({
 					sourceMessageId: sent.accepted.id,
 					assignmentId: assignment.id,
 					agentId: "backend",
@@ -429,11 +430,25 @@ describe("local routing host integration", () => {
 				classifyRouting.mockClear();
 				routeAgents.mockClear();
 				runAgent.mockClear();
+				if (greeting) text = greetingText;
 				sent = await service.send({
 					conversation: { kind: "channel", id: channel.id },
 					text,
 				});
 				await service.whenIdle();
+				expect(
+					service
+						.snapshot()
+						.messages[`channel:${channel.id}`]?.find(
+							(message) => message.id === correctedSourceId,
+						)?.routing?.corrections,
+				).toContainEqual(rerouted.correction);
+				expect(
+					service.snapshot().channels[0]?.routingMemory.correctionCount,
+				).toBe(1);
+				expect(await readFile(join(root, "state.json"), "utf8")).toContain(
+					rerouted.correction.id,
+				);
 			}
 			const message = mustExist(
 				service
@@ -448,7 +463,7 @@ describe("local routing host integration", () => {
 				? ["frontend", "backend"]
 				: outcome === "multiple"
 					? ["frontend", "backend", "operations"]
-					: [corrected ? "backend" : "frontend"];
+					: [corrected && !greeting ? "backend" : "frontend"];
 			expect(routeAgents).toHaveBeenCalledTimes(local ? 0 : 1);
 			if (outcome === "corrected") {
 				expect(routeAgents.mock.calls[0]?.[0].routingMemory).toContain(

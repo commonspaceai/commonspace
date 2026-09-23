@@ -1495,9 +1495,19 @@ const greetingRoster: AiRouteInput["candidates"] = [
 		matchedTerms: [],
 	},
 ];
-for (const [text, recipients] of [
-	["hi agentops", ["agentops"]],
-	["say hello all", ["default", "codex", "agentops"]],
+for (const [text, recipients, routingMemory] of [
+	["hi agentops", ["agentops"], ""],
+	["say hello all", ["default", "codex", "agentops"], ""],
+	[
+		"hello al",
+		["default", "codex", "agentops"],
+		"Earlier unaddressed greetings were redirected to Codex.",
+	],
+	[
+		"hi agent ops",
+		["agentops"],
+		"Earlier unaddressed greetings were redirected to Codex.",
+	],
 ] as const) {
 	classifierEvaluationCases.push({
 		input: {
@@ -1505,7 +1515,7 @@ for (const [text, recipients] of [
 			context: [
 				"The agents previously discussed implementation work in the Website Project.",
 			],
-			routingMemory: "",
+			routingMemory,
 			candidates: greetingRoster,
 			projects: [
 				{ id: "website", name: "Website" },
@@ -1600,7 +1610,10 @@ const conversationalCases: {
 	{ text: "Thanks, Rowan, excellent work on Cedar!", recipients: ["rowan"] },
 	{
 		text: "Good morning, Mira Vale.",
-		recipients: null,
+		// Current direct addressing supersedes historical corrections. This oracle
+		// previously required abstention whenever routing memory was present.
+		recipients: ["mira"],
+		requiredLocal: true,
 		input: {
 			routingMemory:
 				"Confirmed correction: requests addressing Mira go to Tess in this channel.",
@@ -1615,6 +1628,63 @@ const conversationalCases: {
 	{ text: "hello Rowan", recipients: ["rowan"], requiredLocal: true },
 	{ text: "hey Tess Reed", recipients: ["tess"], requiredLocal: true },
 	{ text: "good morning Mira", recipients: ["mira"], requiredLocal: true },
+	...[
+		"hello alll",
+		"hey evveryone",
+		"thanks everrybody",
+		"good morning all agents",
+	].map((text) => ({
+		text,
+		recipients: ["mira", "rowan", "tess"],
+		requiredLocal: true,
+	})),
+	{ text: "hello Row an", recipients: ["rowan"], requiredLocal: true },
+	{ text: "hi MiraVale", recipients: ["mira"], requiredLocal: true },
+	...[
+		"hello pal",
+		"hello Hall",
+		"hello stranger",
+		"hello al, fix the failing build",
+		"hello al except Rowan",
+		"hi Mira and Rowan",
+	].map((text) => ({ text, recipients: null })),
+	{
+		text: "hello al",
+		recipients: null,
+		input: {
+			candidates: conversationalRoster.map((agent) => {
+				if (agent.id === "mira") return { ...agent, displayName: "Al Foster" };
+				if (agent.id === "rowan") return { ...agent, displayName: "Al Reeves" };
+				return agent;
+			}),
+		},
+	},
+	{
+		text: "hello al",
+		recipients: null,
+		input: {
+			candidates: conversationalRoster.map((agent) => ({
+				...agent,
+				displayName: agent.id === "mira" ? "All" : agent.displayName,
+			})),
+		},
+	},
+	{
+		text: "hi Row an",
+		recipients: null,
+		input: {
+			candidates: conversationalRoster.map((agent) => {
+				if (agent.id === "mira") return { ...agent, displayName: "Row An" };
+				if (agent.id === "rowan") return { ...agent, displayName: "Rowan" };
+				return agent;
+			}),
+		},
+	},
+	{
+		text: "hello alll",
+		recipients: null,
+		input: { maxAgents: 2 },
+	},
 ];
 for (const item of conversationalCases) {
 	const input: AiRouteInput = {

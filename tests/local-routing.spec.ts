@@ -33,6 +33,8 @@ const input: AiRouteInput = {
 describe("local routing", () => {
 	it.each([
 		["hi agentops", ["ops"]],
+		["hi agent ops", ["ops"]],
+		["hello al", ["front", "ops"]],
 		["say hello all", ["front", "ops"]],
 	] as const)(
 		"routes the standalone greeting %s without inferred Project access",
@@ -41,7 +43,7 @@ describe("local routing", () => {
 				.fn<RunningClassifier["classify"]>()
 				.mockResolvedValue([
 					{
-						id: text === "hi agentops" ? "greeting-agent:1" : "everyone",
+						id: recipients.length === 1 ? "greeting-agent:1" : "everyone",
 						score: 0.9,
 					},
 					{ id: "other", score: 0.1 },
@@ -95,6 +97,9 @@ describe("local routing", () => {
 		"hello all what is your status",
 		"hello everyone except Frontend",
 		"hello everyone but Frontend",
+		"hello al then fix Website",
+		"hi front end fix the API",
+		"hello pal",
 		"hi unknown",
 	])("does not turn %s into a projectless greeting", async (text) => {
 		const classify = vi.fn<RunningClassifier["classify"]>().mockResolvedValue([
@@ -125,6 +130,35 @@ describe("local routing", () => {
 		).toBeNull();
 		expect(classify).not.toHaveBeenCalled();
 	});
+
+	it.each([
+		["hello evveryone", "Every One"],
+		["hello alll", "A ll"],
+		["hello al agents", "Allagents"],
+	])(
+		"does not broadcast %s when a normalized Agent name collides",
+		async (text, displayName) => {
+			const classify = vi
+				.fn<RunningClassifier["classify"]>()
+				.mockResolvedValue([
+					{ id: "everyone", score: 0.99 },
+					{ id: "unclear", score: 0.01 },
+				]);
+			expect(
+				await routeLocally(
+					{
+						...input,
+						text,
+						candidates: input.candidates.map((candidate, index) =>
+							index === 0 ? { ...candidate, displayName } : candidate,
+						),
+					},
+					classify,
+				),
+			).toBeNull();
+			expect(classify).not.toHaveBeenCalled();
+		},
+	);
 
 	it("abstains when a shortened greeting names two candidates", async () => {
 		const classify = vi.fn<RunningClassifier["classify"]>();

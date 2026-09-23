@@ -79,7 +79,7 @@ A thread starts with a snapshot of the Channel's current context. It then develo
 
 ### Commonspace inference
 
-Commonspace inference chooses participants, delivery mode, speaker order, and Project references. Local classification handles bounded routing decisions when confidence is sufficient. Routing uses the selected workspace Agent when a decision is uncertain, unsupported locally, or involves saved corrections. That Agent also summarizes shared context and routing corrections through its existing harness and authentication.
+Commonspace inference chooses participants, delivery mode, speaker order, and Project references. Local classification handles bounded routing decisions when confidence is sufficient. Routing uses the selected workspace Agent when a decision is uncertain, unsupported locally, or involves saved corrections outside an unambiguous standalone greeting. Current greeting addresses take precedence over historical examples. That Agent also summarizes shared context and routing corrections through its existing harness and authentication.
 
 Routing should feel immediate. The service stores each delivery mode, decision, and participant delivery reference so it can deliver the request, associate replies with it, and retain correction history. Conversation receipts show destinations, selection source, and outcomes; expanded receipts expose assignments, Project references, reasons, timing, and correction history. Failed routing can be retried without duplicating the accepted request.
 

@@ -7886,8 +7886,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					!send.projectScopeExplicit &&
 					!send.inferProjects &&
 					prepared.input.projects.length > 0
-				) &&
-				correctionCountAtPreparation === 0
+				)
 			) {
 				let local: CommonspaceRouteResult | null = null;
 				try {
@@ -7895,7 +7894,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 						{
 							...prepared.input,
 							context:
-								brief?.status === "current" || brief?.status === "empty"
+								correctionCountAtPreparation === 0 &&
+								(brief?.status === "current" || brief?.status === "empty")
 									? brief.summary === ""
 										? []
 										: [brief.summary]
@@ -7912,7 +7912,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				}
 				if (
 					local !== null &&
-					activeRoutingCorrectionCount(this.state, prepared.channelId) === 0
+					activeRoutingCorrectionCount(this.state, prepared.channelId) ===
+						correctionCountAtPreparation
 				)
 					return this.validateChannelRouteResult(local, prepared);
 			}

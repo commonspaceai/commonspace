@@ -6,7 +6,7 @@ import type {
 
 type LocalRoute = AiRouteResult & { source: "local" };
 interface LocalRouteInput extends Omit<AiRouteInput, "context"> {
-	// A stale brief cannot establish ownership for a context-dependent request.
+	// Null means context-dependent decisions require the inference Agent.
 	context: string[] | null;
 }
 function confidentChoice(
@@ -34,9 +34,6 @@ export async function routeLocally(
 		input.text.trim() === "" ||
 		input.candidates.length === 0 ||
 		input.candidates.length > 8 ||
-		// The selected checkpoint can confidently ignore corrections or infer
-		// Project access from praise. Corrected decisions need the inference Agent.
-		input.routingMemory !== "" ||
 		(input.fixedAgentIds !== undefined && input.inferProjects)
 	)
 		return null;
@@ -51,7 +48,9 @@ export async function routeLocally(
 		if (addressee !== undefined)
 			return routeGreetingLocally(input, addressee, classify, signal);
 	}
-	if (input.context === null) return null;
+	// Current direct addressing in a standalone greeting supersedes past examples.
+	// Other decisions still need inference when context or corrections apply.
+	if (input.context === null || input.routingMemory !== "") return null;
 	if (input.fixedAgentIds !== undefined) {
 		const state = [
 			input.context.length === 0
@@ -128,16 +127,34 @@ async function routeGreetingLocally(
 	classify: RunningClassifier["classify"],
 	signal?: AbortSignal,
 ): Promise<LocalRoute | null> {
+	const compactAddressee = addressee.replace(/\s+/gu, "");
 	const named = input.candidates.filter((candidate) => {
 		const name = candidate.displayName.normalize("NFKC").toLowerCase();
-		return name === addressee || name.split(/\s+/u).includes(addressee);
+		return (
+			name.replace(/\s+/gu, "") === compactAddressee ||
+			name.split(/\s+/u).includes(compactAddressee)
+		);
 	});
-	const everyone = ["all", "everyone", "everybody", "all agents"].includes(
-		addressee,
+	// Tolerate omitted/repeated letters in collective words, not arbitrary typos.
+	const collective = addressee.replace(/([a-z])\1+/gu, "$1");
+	const everyone = ["al", "everyone", "everybody", "al agents"].includes(
+		collective,
 	);
+	const collectiveNames =
+		everyone &&
+		input.candidates.some((candidate) => {
+			const name = candidate.displayName.normalize("NFKC").toLowerCase();
+			return [name, ...name.split(/\s+/u)].some(
+				(part) =>
+					part.replace(/\s+/gu, "").replace(/([a-z])\1+/gu, "$1") ===
+					collective.replace(/\s+/gu, ""),
+			);
+		});
 	if (
 		(everyone &&
-			(named.length > 0 || input.candidates.length > input.maxAgents)) ||
+			(named.length > 0 ||
+				collectiveNames ||
+				input.candidates.length > input.maxAgents)) ||
 		(!everyone && named.length !== 1)
 	)
 		return null;
