@@ -31,8 +31,8 @@ export function benchmarkHistoryMessages(): CommonspaceMessage[] {
 		BENCHMARK_MESSAGE_COUNT,
 		"/commonspace-benchmark",
 	);
-	const messages = Object.values(state.messages).flat();
-	if (messages.length !== BENCHMARK_MESSAGE_COUNT)
+	const messages = state.messages["dm:codex"];
+	if (messages === undefined || messages.length !== BENCHMARK_MESSAGE_COUNT)
 		throw new Error("Benchmark DM transcript has an unexpected size");
 	return messages;
 }
