@@ -22,6 +22,8 @@ npx --yes commonspace@latest
 
 Open `http://127.0.0.1:3100` in your desktop browser. Keep the terminal open while using the app. Press Ctrl+C to stop Commonspace and its active agent work.
 
+On supported computers, the first launch downloads about 613 MB for the local classifier in the background. Intel Macs use the inference Agent without downloading the classifier. Add `--no-classifier` to skip it elsewhere; see [classifier operation](../guides/operations.md#local-routing-classifier) for cache and fallback behavior.
+
 Pin an exact release when needed:
 
 ```bash

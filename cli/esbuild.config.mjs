@@ -1,4 +1,4 @@
-import { chmod, mkdir, rm } from "node:fs/promises";
+import { chmod, cp, mkdir, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -24,3 +24,21 @@ await build({
 	sourcemap: true,
 });
 await chmod(output, 0o755);
+
+await mkdir(resolve(cliRoot, "dist/classifier"), { recursive: true });
+await build({
+	entryPoints: [resolve(repoRoot, "server/src/classifier-worker.ts")],
+	outfile: resolve(cliRoot, "dist/classifier/worker.js"),
+	bundle: true,
+	platform: "node",
+	target: "node22",
+	format: "esm",
+	packages: "external",
+	sourcemap: true,
+});
+for (const name of ["model.json", "LICENSE", "NOTICE"]) {
+	await cp(
+		resolve(cliRoot, "classifier", name),
+		resolve(cliRoot, "dist/classifier", name),
+	);
+}

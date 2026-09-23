@@ -4,6 +4,7 @@ import pino from "pino";
 import { createCommonspaceApp } from "./app.js";
 import { CommonspaceMcpGateway } from "./commonspace-mcp.js";
 import { developmentServerMessages } from "./dev-supervisor.js";
+import type { RunningClassifier } from "./local-classifier.js";
 import {
 	type CommonspaceHostConfig,
 	type CommonspaceHostDependencies,
@@ -140,7 +141,7 @@ function configuredPort(value: string | undefined): number {
 	return port;
 }
 
-export async function runCommonspaceCli(): Promise<void> {
+function cliServerOptions(): StartCommonspaceServerOptions {
 	const serverOptions: StartCommonspaceServerOptions = {
 		port: configuredPort(process.env.COMMONSPACE_PORT),
 		hermesYolo: process.env.COMMONSPACE_HERMES_YOLO === "1",
@@ -174,11 +175,35 @@ export async function runCommonspaceCli(): Promise<void> {
 			process.env.COMMONSPACE_OPENCODE_ACP_PATH;
 	if (process.env.COMMONSPACE_UI_ROOT !== undefined)
 		serverOptions.uiRoot = process.env.COMMONSPACE_UI_ROOT;
+	return serverOptions;
+}
+
+export async function runCommonspaceCli(
+	options: { classifier?: RunningClassifier; signal?: AbortSignal } = {},
+): Promise<void> {
+	const serverOptions = cliServerOptions();
+	if (options.classifier !== undefined) {
+		const classifier = options.classifier;
+		serverOptions.dependencies = {
+			classifyRouting: (request, signal) =>
+				classifier.classify(request, signal),
+		};
+	}
+	options.signal?.throwIfAborted();
 	const running = await startCommonspaceServer(serverOptions);
+	if (options.signal?.aborted === true) {
+		try {
+			await running.close();
+		} finally {
+			await options.classifier?.close();
+		}
+		options.signal.throwIfAborted();
+	}
 	process.stdout.write(`Commonspace is running at ${running.url}\n`);
 	let finalized = false;
 	const finalize = (operation: Promise<void>) => {
 		void operation
+			.finally(() => options.classifier?.close())
 			.then(() => {
 				if (finalized) return;
 				finalized = true;

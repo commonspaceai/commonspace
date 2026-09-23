@@ -1,9 +1,12 @@
 import type {
 	CommonspaceBootstrap,
 	CommonspaceMessage,
+	CommonspaceRoutingAssignment,
+	RerouteAssignmentRequest,
 } from "@commonspace/shared";
+import { conversationKey } from "@commonspace/shared";
 import { ChevronDownIcon, GitBranchIcon, XIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import {
@@ -264,10 +267,155 @@ interface RoutingReceiptProps {
 	message: CommonspaceMessage;
 	quotedSource?: boolean;
 	bootstrap: CommonspaceBootstrap | null | undefined;
+	onCorrectRouting?: (request: RerouteAssignmentRequest) => Promise<void>;
 	onRetryRouting?: (
 		message: CommonspaceMessage,
 		choice: { mode: "ai" } | { mode: "manual"; agentId: string },
 	) => Promise<void>;
+}
+
+function RoutingCorrectionForm({
+	assignment,
+	messageId,
+	agents,
+	assignedAgentIds,
+	onCorrectRouting,
+}: {
+	assignment: CommonspaceRoutingAssignment;
+	messageId: string;
+	agents: readonly RoutingAgent[];
+	assignedAgentIds: readonly string[];
+	onCorrectRouting: NonNullable<RoutingReceiptProps["onCorrectRouting"]>;
+}) {
+	const [agentId, setAgentId] = useState(() =>
+		agents.some((agent) => agent.id === assignment.agentId)
+			? assignment.agentId
+			: "",
+	);
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const alreadyAssignedElsewhere =
+		agentId !== assignment.agentId && assignedAgentIds.includes(agentId);
+	return (
+		<form
+			onSubmit={async (event) => {
+				event.preventDefault();
+				if (saving || agentId === "" || agentId === assignment.agentId) return;
+				setSaving(true);
+				setError(null);
+				try {
+					await onCorrectRouting({
+						sourceMessageId: messageId,
+						assignmentId: assignment.id,
+						agentId,
+						projectIds: assignment.projectIds,
+					});
+				} catch {
+					setError("Could not save the correction. Try again.");
+				} finally {
+					setSaving(false);
+				}
+			}}
+		>
+			<fieldset disabled={saving} className="grid gap-2">
+				<legend className="mb-2 font-medium text-foreground">
+					Correct recipient
+				</legend>
+				<NativeSelect
+					aria-label="Correct routing agent"
+					value={agentId}
+					onChange={(event) => setAgentId(event.target.value)}
+				>
+					<option value="" disabled>
+						Choose recipient…
+					</option>
+					{agents.map((agent) => (
+						<option key={agent.id} value={agent.id}>
+							{agent.displayName}
+						</option>
+					))}
+				</NativeSelect>
+				<p className="text-muted-foreground">
+					{alreadyAssignedElsewhere
+						? "This agent already received the message. Your correction guides future routing in this Channel."
+						: "Sends the original message to this agent with the same Projects. Your correction guides future routing in this Channel."}
+				</p>
+				{error === null ? null : (
+					<p role="alert" className="text-destructive">
+						{error}
+					</p>
+				)}
+				<Button
+					type="submit"
+					size="sm"
+					disabled={agentId === "" || agentId === assignment.agentId}
+				>
+					{saving
+						? "Saving…"
+						: alreadyAssignedElsewhere
+							? "Remember correction"
+							: "Reroute and remember"}
+				</Button>
+			</fieldset>
+		</form>
+	);
+}
+
+function RoutingCorrectionControls({
+	message,
+	view,
+	onCorrectRouting,
+}: {
+	message: CommonspaceMessage;
+	view: RoutingReceiptView;
+	onCorrectRouting: RoutingReceiptProps["onCorrectRouting"];
+}) {
+	const summaryRef = useRef<HTMLElement>(null);
+	const assignments = useMemo(() => {
+		const superseded = new Set(
+			message.routing?.corrections.map(
+				(correction) => correction.fromAssignmentId,
+			),
+		);
+		return (
+			message.routing?.assignments.filter(
+				(assignment) => !superseded.has(assignment.id),
+			) ?? []
+		);
+	}, [message.routing]);
+	if (
+		onCorrectRouting === undefined ||
+		message.deletedAt !== undefined ||
+		view.routingStatus !== "resolved" ||
+		view.channelAgents.length < 2 ||
+		assignments.length === 0
+	)
+		return null;
+	return (
+		<details className="mt-3 border-t pt-3">
+			<summary
+				ref={summaryRef}
+				className="cursor-pointer font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			>
+				Wrong recipient?
+			</summary>
+			<div className="mt-3 grid gap-4">
+				{assignments.map((assignment) => (
+					<RoutingCorrectionForm
+						key={assignment.id}
+						assignment={assignment}
+						messageId={message.id}
+						agents={view.channelAgents}
+						assignedAgentIds={assignments.map((item) => item.agentId)}
+						onCorrectRouting={async (request) => {
+							await onCorrectRouting(request);
+							summaryRef.current?.focus();
+						}}
+					/>
+				))}
+			</div>
+		</details>
+	);
 }
 
 function RoutingSummary({ view }: { view: RoutingReceiptView }) {
@@ -412,6 +560,7 @@ function RoutingDetails({
 	onManualAgentIdChange,
 	onRetryingChange,
 	onRetryRouting,
+	onCorrectRouting,
 	retrying,
 	view,
 }: {
@@ -420,6 +569,7 @@ function RoutingDetails({
 	onManualAgentIdChange: (agentId: string) => void;
 	onRetryingChange: (mode: RoutingRetryMode | null) => void;
 	onRetryRouting: RoutingReceiptProps["onRetryRouting"];
+	onCorrectRouting: RoutingReceiptProps["onCorrectRouting"];
 	retrying: RoutingRetryMode | null;
 	view: RoutingReceiptView;
 }) {
@@ -473,6 +623,11 @@ function RoutingDetails({
 				retrying={retrying}
 				view={view}
 			/>
+			<RoutingCorrectionControls
+				message={message}
+				view={view}
+				onCorrectRouting={onCorrectRouting}
+			/>
 		</PopoverContent>
 	);
 }
@@ -481,6 +636,7 @@ export function RoutingReceipt({
 	message,
 	bootstrap,
 	onRetryRouting,
+	onCorrectRouting,
 }: RoutingReceiptProps) {
 	const [manualAgentId, setManualAgentId] = useState("");
 	const [retrying, setRetrying] = useState<RoutingRetryMode | null>(null);
@@ -488,6 +644,9 @@ export function RoutingReceipt({
 		() => deriveRoutingReceipt(message, bootstrap),
 		[bootstrap, message],
 	);
+	const hasNewerVersion = (
+		bootstrap?.state.messages[conversationKey(message.conversation)] ?? []
+	).some((candidate) => candidate.supersedesMessageId === message.id);
 	if (view === null) return null;
 	return (
 		<Popover>
@@ -498,6 +657,7 @@ export function RoutingReceipt({
 				onManualAgentIdChange={setManualAgentId}
 				onRetryingChange={setRetrying}
 				onRetryRouting={onRetryRouting}
+				onCorrectRouting={hasNewerVersion ? undefined : onCorrectRouting}
 				retrying={retrying}
 				view={view}
 			/>

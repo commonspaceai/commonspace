@@ -363,6 +363,40 @@ describe("routing correction", () => {
 		expect(
 			state.threads.find((thread) => thread.id === sent.thread?.id)?.agentIds,
 		).toEqual(["backend", "frontend", "reviewer"]);
+
+		const backendAssignment = mustExist(
+			source.routing?.assignments.find(
+				(assignment) => assignment.agentId === "backend",
+			),
+		);
+		await expect(
+			service.rerouteAssignment({
+				sourceMessageId: sent.accepted.id,
+				assignmentId: backendAssignment.id,
+				agentId: "backend",
+				projectIds: [first.id],
+			}),
+		).rejects.toThrow("reroute agent already owns this assignment");
+		const remembered = await service.rerouteAssignment({
+			sourceMessageId: sent.accepted.id,
+			assignmentId: backendAssignment.id,
+			agentId: "reviewer",
+			projectIds: [first.id],
+		});
+		await service.whenIdle();
+		expect(remembered.assignment.id).toBe(replacement?.id);
+		expect(remembered.correction).toMatchObject({
+			fromAssignmentId: backendAssignment.id,
+			toAssignmentId: replacement?.id,
+		});
+		expect(
+			service
+				.snapshot()
+				.messages[`channel:${channel.id}`]?.find(
+					(message) => message.id === sent.accepted.id,
+				)?.routing?.assignments,
+		).toHaveLength(3);
+		expect(runAgent).toHaveBeenCalledTimes(3);
 	});
 
 	it("compacts explicit corrections into routing knowledge used by later decisions", async () => {

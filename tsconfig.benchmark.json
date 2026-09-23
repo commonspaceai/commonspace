@@ -13,6 +13,7 @@
 		"tests/benchmark-workspace*.spec.ts",
 		"scripts/context-evaluation*.ts",
 		"scripts/evaluate-context.ts",
+		"scripts/evaluate-classifier.ts",
 		"scripts/benchmark-context.ts",
 		"tests/context-evaluation.spec.ts",
 		"scripts/benchmark-session-isolation.ts",

@@ -30,6 +30,8 @@ npx --yes commonspace@latest
 
 Open `http://127.0.0.1:3100` in your browser and keep the terminal running.
 
+The launcher also manages the local routing classifier. See [local classifier operation](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/operations.md#local-routing-classifier) for its first-launch download, routing limits, and `--no-classifier` option.
+
 1. [Install and sign in to one runtime](https://github.com/commonspaceai/commonspace/blob/main/docs/start/runtimes.md), then choose **Add Agent**.
 2. Choose one added agent as the workspace inference agent for routing and shared-context compaction.
 3. Add a **Project** pointing to your repository.

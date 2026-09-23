@@ -165,6 +165,10 @@ describe("npm release package", () => {
 		const source = join(root, "source");
 		const target = join(root, "package");
 		const files = {
+			"cli/dist/classifier/worker.js": "classifier worker",
+			"cli/dist/classifier/model.json": "pinned model manifest",
+			".commonspace/classifier/model.onnx.data":
+				"downloaded model must stay out of npm",
 			"cli/dist/index.js": "#!/usr/bin/env node\n",
 			"ui/dist/index.html": "<html>Commonspace</html>",
 			"ui/dist/assets/client.js": "client",
@@ -194,6 +198,13 @@ describe("npm release package", () => {
 		expect(
 			await readFile(join(target, "ui-dist/assets/client.js"), "utf8"),
 		).toBe("client");
+		expect(
+			await readFile(join(target, "dist/classifier/worker.js"), "utf8"),
+		).toBe("classifier worker");
+		expect((await readdir(join(target, "dist/classifier"))).sort()).toEqual([
+			"model.json",
+			"worker.js",
+		]);
 		expect(
 			JSON.parse(await readFile(join(target, "package.json"), "utf8")),
 		).toEqual(manifest);

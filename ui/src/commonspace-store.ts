@@ -777,6 +777,7 @@ export class CommonspaceClientStore {
 			});
 		} catch (error) {
 			this.recordRequestFailure(error);
+			throw error;
 		}
 	}
 

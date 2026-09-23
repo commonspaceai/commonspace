@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { COMMONSPACE_STATE_VERSION } from "@commonspace/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { CommonspaceHostService } from "../server/src/service.ts";
+import { applyMutation, createInitialState } from "../server/src/state.ts";
 
 const roots: string[] = [];
 
@@ -15,6 +16,87 @@ afterEach(async () => {
 });
 
 describe("routing state migration", () => {
+	it("drops saved routing knowledge whose corrected source was superseded", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-retired-routing-"));
+		roots.push(root);
+		let state = createInitialState();
+		state.agents.push({
+			id: "agent-1",
+			displayName: "Backend",
+			adapter: "hermes",
+			model: null,
+			createdAt: "2026-08-30T00:00:00.000Z",
+		});
+		state = applyMutation(state, {
+			action: "create-channel",
+			name: "engineering",
+			agentIds: ["agent-1"],
+		});
+		const channel = state.channels[0];
+		if (channel === undefined) throw new Error("missing test channel");
+		channel.routingMemory = {
+			summary: "Route this old request to Backend.",
+			status: "current",
+			correctionCount: 1,
+			compactedThroughCorrectionId: "correction-1",
+			updatedAt: "2026-08-30T00:00:02.000Z",
+		};
+		state.messages[`channel:${channel.id}`] = [
+			{
+				id: "source",
+				conversation: { kind: "channel", id: channel.id },
+				authorType: "user",
+				authorId: "user",
+				authorName: "Human",
+				text: "Fix the old request.",
+				createdAt: "2026-08-30T00:00:00.000Z",
+				routing: {
+					source: "ai",
+					agentIds: ["agent-1"],
+					assignments: [
+						{ id: "from", agentId: "agent-1", projectIds: [] },
+						{ id: "to", agentId: "agent-1", projectIds: [] },
+					],
+					corrections: [
+						{
+							id: "correction-1",
+							fromAssignmentId: "from",
+							toAssignmentId: "to",
+							createdAt: "2026-08-30T00:00:01.000Z",
+						},
+					],
+					inferredProjectIds: [],
+					reason: "Initial route",
+				},
+			},
+			{
+				id: "replacement",
+				conversation: { kind: "channel", id: channel.id },
+				authorType: "user",
+				authorId: "user",
+				authorName: "Human",
+				text: "Do something else.",
+				createdAt: "2026-08-30T00:00:03.000Z",
+				supersedesMessageId: "source",
+			},
+		];
+		await writeFile(join(root, "state.json"), JSON.stringify(state));
+		const service = new CommonspaceHostService(
+			{},
+			{ root },
+			{ discoverAgents: async () => [] },
+		);
+		await service.initialize();
+		expect(service.snapshot().channels[0]?.routingMemory).toEqual({
+			summary: "",
+			status: "empty",
+			correctionCount: 0,
+			compactedThroughCorrectionId: null,
+			updatedAt: null,
+		});
+		await service.close();
+	});
+
 	it("adds participant metadata to legacy resolved routing decisions", async () => {
 		const root = await mkdtemp(
 			join(tmpdir(), "commonspace-routing-migration-"),

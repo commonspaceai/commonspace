@@ -68,6 +68,7 @@
 		"benchmark:browser-refresh": "pnpm build && node --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-browser-refresh.ts",
 		"benchmark:session-isolation": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-session-isolation.ts",
 		"evaluate:context": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/evaluate-context.ts",
+		"evaluate:classifier": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/evaluate-classifier.ts",
 		"benchmark:context": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-context.ts",
 		"service:install": "node scripts/commonspace-service.mjs install --source .",
 		"service:update": "node scripts/commonspace-service.mjs update",

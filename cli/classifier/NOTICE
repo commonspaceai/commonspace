@@ -1,0 +1,9 @@
+Laya model and input format: Convai Innovations and Nandakishor M.
+Original model: https://huggingface.co/convaiinnovations/laya
+Weight-only INT8 ONNX conversion: inferenceprince.
+Selected export: https://huggingface.co/inferenceprince/laya-onnx-int8
+
+The model is licensed under Apache-2.0; see LICENSE in this directory.
+Commonspace downloads the pinned model separately. The model weights are not
+included in the npm package. Tokenization and sequence construction follow the
+Laya input format. The Commonspace host and integration retain their own license.

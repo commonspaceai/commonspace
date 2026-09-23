@@ -14,6 +14,8 @@ The `commonspace` npm package requires Node.js 22 or newer. npm installs externa
 
 The release workflow installs one npm tarball in a clean Linux prefix, then validates that exact tarball on Windows before publication. It exercises the npm command, API, UI assets, saved-state restart, and graceful shutdown. Windows uses private IPC disconnect for automated shutdown; terminal Ctrl+C needs separate acceptance. macOS service behavior remains a separate source-based check. See workflow results and release notes for evidence about a particular version.
 
+The optional local routing classifier uses the pinned ONNX native runtime on Apple Silicon, Linux, and Windows. That runtime has no Intel Mac binding; Intel Macs continue to use the configured inference Agent for routing.
+
 Commonspace does not currently ship a desktop app wrapper. Follow [Installation](install.md) to run it in your browser.
 
 ## Development environments

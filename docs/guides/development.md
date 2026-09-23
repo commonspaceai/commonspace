@@ -158,6 +158,17 @@ Use the [adapter guide](../adapters/agent-adapters.md#verification-commands) for
 
 Parser and service tests establish routing contracts; they do not measure model decomposition quality or harness latency. Evaluate those properties through an added test Agent using synthetic conversation history, record the runtime/model/version and results, and never turn a mocked JSON parser test into a routing-quality claim.
 
+### Local classifier evaluation
+
+Build the worker and evaluate routing with the local model:
+
+```bash
+pnpm --filter commonspace build
+pnpm evaluate:classifier
+```
+
+The evaluator runs the synthetic corpus sequentially, reports accepted routes, errors, and latency, and fails on an incorrect accepted route or zero accepted routes. It does not invoke the inference Agent. Pass an optional cache directory after `evaluate:classifier` to isolate model files. Validate model or prompt changes with fresh examples as well as the regression corpus.
+
 On macOS, `pnpm verify:notifications` checks whether the native notifier accepts a safe test alert. Use **Send test notification** in Workspace settings to check visible delivery and follow any operating-system guidance.
 
 Use the [adapter proposal template](../adapters/agent-adapter-template.md) when adding a harness.

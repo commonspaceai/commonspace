@@ -189,6 +189,82 @@ export const AgentProfileDiscoveryRetry: Story = {
 	},
 };
 
+export const RoutingCorrection: Story = {
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		const receipts = await page.findAllByRole("button", {
+			name: /^Routing details:/u,
+		});
+		const receipt = receipts[0];
+		if (receipt === undefined) throw new Error("Routing receipt is missing.");
+		await userEvent.click(receipt);
+		await userEvent.click(await page.findByText("Wrong recipient?"));
+		const select = page.getByRole("combobox", {
+			name: "Correct routing agent",
+		});
+		await expect(
+			page.getByRole("button", { name: "Reroute and remember" }),
+		).toBeDisabled();
+		await userEvent.selectOptions(select, "agent-codex");
+		await userEvent.click(
+			page.getByRole("button", { name: "Reroute and remember" }),
+		);
+		await expect(
+			await page.findByText("Rerouted Agentops → Codex"),
+		).toBeVisible();
+		await expect(
+			page.getByRole("combobox", { name: "Correct routing agent" }),
+		).toHaveValue("agent-codex");
+		await expect(
+			page.getByRole("button", { name: "Reroute and remember" }),
+		).toBeDisabled();
+	},
+};
+export const RoutingCorrectionFailure: Story = {
+	beforeEach: ({ msw }) => {
+		msw.use(
+			http.post(
+				"/api/reroute",
+				() =>
+					HttpResponse.json(
+						{ error: "Unable to save correction." },
+						{ status: 503 },
+					),
+				{ once: true },
+			),
+		);
+	},
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		const [receipt] = await page.findAllByRole("button", {
+			name: /^Routing details:/u,
+		});
+		if (receipt === undefined) throw new Error("Routing receipt is missing.");
+		await userEvent.click(receipt);
+		await userEvent.click(await page.findByText("Wrong recipient?"));
+		const select = page.getByRole("combobox", {
+			name: "Correct routing agent",
+		});
+		await userEvent.selectOptions(select, "agent-codex");
+		await userEvent.click(
+			page.getByRole("button", { name: "Reroute and remember" }),
+		);
+		await expect(
+			await page.findByText("Could not save the correction. Try again."),
+		).toBeVisible();
+		await expect(select).toHaveValue("agent-codex");
+		await expect(
+			page.getByRole("button", { name: "Reroute and remember" }),
+		).toBeEnabled();
+		await userEvent.click(
+			page.getByRole("button", { name: "Reroute and remember" }),
+		);
+		await expect(
+			await page.findByText("Rerouted Agentops → Codex"),
+		).toBeVisible();
+		await expect(page.getByText("Wrong recipient?")).toHaveFocus();
+	},
+};
 export const SearchWithProvenance: Story = {
 	play: async ({ canvasElement }) => {
 		const page = within(canvasElement.ownerDocument.body);

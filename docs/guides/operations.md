@@ -56,6 +56,14 @@ Workspace coordination defaults have their own save operation and can be changed
 
 Routing configuration version 3 stores only the selected harness Agent ID. No older routing configuration is migrated. Routing saves are serialized and use an atomic private file write through `PUT /api/routing`; workspace coordination defaults save independently through the `set-defaults` mutation.
 
+## Local routing classifier
+
+The npm launcher manages one pretrained [Laya weight-only INT8 ONNX](https://huggingface.co/inferenceprince/laya-onnx-int8) classifier in a Node side process. First launch downloads about 613 MB of checksum-verified model files into `COMMONSPACE_HOME/classifier` (normally `~/.commonspace/classifier`). The app starts during setup and uses the inference Agent until the classifier is ready. Later launches reuse the cache. Python and Docker are not required. The pinned native runtime has no Intel Mac binding, so those Macs skip the model download and use the inference Agent.
+
+Each local decision starts fresh with the newest message and the previous compact Channel or Thread brief. Local routing selects a recipient or a delivery mode for explicitly selected participants. For a single named Project, a second decision distinguishes file work from a mere mention. Explicit Project scope remains fixed. Saved corrections, unclear or multiple recipients, unclear Project scope, stale or oversized briefs, and non-Latin text use the inference Agent. The model accepts up to 512 tokens, including a 192-token instruction-and-option budget.
+
+The worker handles one request at a time with a 750 ms deadline. Busy or unavailable workers fall back immediately; a timed-out or invalid worker stays disabled until the next launch. Stopping Commonspace cancels downloads and closes the worker. Use `commonspace --no-classifier` to disable it. To download the model again, stop Commonspace and delete its disposable `classifier` cache.
+
 ## Installed macOS service
 
 The managed service currently installs from committed source. Stop any foreground Commonspace process so port `3100` is free, then run from a source checkout:
@@ -102,6 +110,7 @@ The npm package runs in the foreground on Linux. A managed Linux background serv
 | `~/.commonspace/state.backup.json` | Previous valid state |
 | `~/.commonspace/state.corrupt.json` | Last invalid primary retained during automatic recovery |
 | `~/.commonspace/routing.json` | Selected workspace inference Agent ID |
+| `~/.commonspace/classifier` | Disposable pinned ONNX classifier model cache |
 | `~/.commonspace/workspace` | Managed directory for projectless work |
 | `~/.commonspace/attachments` | Private image and general-file bytes |
 | Harness-owned locations | Native credentials and transcripts |

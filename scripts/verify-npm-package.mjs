@@ -93,7 +93,7 @@ async function verifyRuntime({
 		env: isolatedRuntimeEnv(home),
 	});
 	assert.equal(reported.stdout.trim(), version);
-	const child = spawn(process.execPath, [entry], {
+	const child = spawn(process.execPath, [entry, "--no-classifier"], {
 		cwd: root,
 		env: {
 			...isolatedRuntimeEnv(home),

@@ -1,0 +1,11 @@
+{
+	"repository": "inferenceprince/laya-onnx-int8",
+	"revision": "24e078dd26307a67ab2d6aaf79210f014c8ff46d",
+	"files": {
+		"model.onnx": "ec1f61700829a73ea9f46e2401f79d654266472dedc33119d2781ca86085e71e",
+		"model.onnx.data": "5a310b324a18bd517ba96192bfa6c061c23e0f047a28c7f157a22730fc94b85e",
+		"rl_agent_config.json": "ae287b56bbcf5f8c4f4541ae9dfd00c914c4c48b940b8398c3058af37ba92bbd",
+		"tokenizer/tokenizer.json": "6c8aaa9a542084f2457eab775d4eeb51f92a70c0fd9de28d5edb0ddec3c08d30",
+		"tokenizer/tokenizer_config.json": "50044de60daaa73df97d262e15a40d4faf0160e7d742df64b377877a1320dd12"
+	}
+}

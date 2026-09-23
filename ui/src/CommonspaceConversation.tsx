@@ -11,6 +11,7 @@ import {
 	type ConversationRef,
 	deriveCommonspaceInboxItems,
 	deriveCommonspaceSessions,
+	type RerouteAssignmentRequest,
 	referencedProjectIds,
 	type SendFileAttachment,
 	type SendImageAttachment,
@@ -547,6 +548,7 @@ function MessageRow({
 	onMarkUnread,
 	onCopyLink,
 	onRetryRouting,
+	onCorrectRouting,
 }: {
 	message: CommonspaceMessage;
 	elementId?: string;
@@ -569,6 +571,7 @@ function MessageRow({
 	) => Promise<void>;
 	onMarkUnread?: (message: CommonspaceMessage) => Promise<void>;
 	onCopyLink?: (message: CommonspaceMessage) => void;
+	onCorrectRouting?: (request: RerouteAssignmentRequest) => Promise<void>;
 	onRetryRouting?: (
 		message: CommonspaceMessage,
 		choice: { mode: "ai" } | { mode: "manual"; agentId: string },
@@ -667,6 +670,7 @@ function MessageRow({
 							message={message}
 							bootstrap={bootstrap}
 							{...(onRetryRouting === undefined ? {} : { onRetryRouting })}
+							{...(onCorrectRouting === undefined ? {} : { onCorrectRouting })}
 						/>
 						{message.authorType === "agent" && message.trace !== undefined && (
 							<AgentTrace
@@ -2566,6 +2570,10 @@ export function CommonspaceConversation({
 		);
 	};
 
+	const correctRouting = async (request: RerouteAssignmentRequest) => {
+		await store.rerouteAssignment(request);
+	};
+
 	const deleteDeliveredMessage = async (message: CommonspaceMessage) => {
 		await store.deleteMessage(message.id);
 	};
@@ -2891,6 +2899,7 @@ export function CommonspaceConversation({
 															onMarkUnread={markMessageUnread}
 															onCopyLink={copyMessageLink}
 															onRetryRouting={retryFailedRouting}
+															onCorrectRouting={correctRouting}
 															{...(thread === undefined
 																? {}
 																: {
@@ -2920,6 +2929,7 @@ export function CommonspaceConversation({
 											onMarkUnread={markMessageUnread}
 											onCopyLink={copyMessageLink}
 											onRetryRouting={retryFailedRouting}
+											onCorrectRouting={correctRouting}
 										/>
 									))}
 							{directMessagePhase !== null && (
@@ -3556,6 +3566,7 @@ export function CommonspaceConversation({
 											onMarkUnread={markMessageUnread}
 											onCopyLink={copyMessageLink}
 											onRetryRouting={retryFailedRouting}
+											onCorrectRouting={correctRouting}
 										/>
 									)}
 									<div className="my-4 flex items-center gap-2">
@@ -3587,6 +3598,7 @@ export function CommonspaceConversation({
 											onMarkUnread={markMessageUnread}
 											onCopyLink={copyMessageLink}
 											onRetryRouting={retryFailedRouting}
+											onCorrectRouting={correctRouting}
 										/>
 									))}
 									{activeThreadActivities.length > 0 && (
