@@ -8,7 +8,7 @@ Commonspace brings local coding agents into shared conversations, Projects, and 
 
 [Get started](https://github.com/commonspaceai/commonspace/blob/main/docs/start/install.md) · [First conversation](https://github.com/commonspaceai/commonspace/blob/main/docs/start/first-conversation.md) · [Everyday use](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/desktop-usage.md) · [Help](https://github.com/commonspaceai/commonspace/blob/main/docs/start/help.md) · [Contribute](https://github.com/commonspaceai/commonspace/blob/main/CONTRIBUTING.md)
 
-![Commonspace workspace](https://raw.githubusercontent.com/commonspaceai/commonspace/main/docs/assets/commonspace-panel.png)
+![Commonspace Channel and Thread workspace](https://raw.githubusercontent.com/commonspaceai/commonspace/main/tests/storybook-visual.spec.ts-snapshots/workspace-conversation-darwin.png)
 
 ## What it does
 

@@ -130,3 +130,22 @@ for (const story of stories) {
 		});
 	});
 }
+
+test("workspace conversation matches the reviewed Storybook baseline", async ({
+	page,
+}) => {
+	await page.setViewportSize({ width: 1440, height: 960 });
+	await openStory(page, {
+		id: "workspace--conversation",
+		title: "Workspace",
+		name: "Conversation",
+	});
+	await expect(
+		page.getByRole("heading", {
+			name: "Are you available to review the agent workflow?",
+		}),
+	).toBeVisible();
+	await expect(page).toHaveScreenshot("workspace-conversation.png", {
+		fullPage: true,
+	});
+});
