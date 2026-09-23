@@ -132,6 +132,16 @@ It discards one warm-up per shape, then runs three measured samples per size by 
 
 JSON includes the base commit and changed-file list, benchmark source hashes, machine/runtime details, seeded/measured/restored counts, raw samples, and min/median/max dispersion. Heap/RSS values are operation deltas, not peaks or retained memory. Run on an otherwise idle machine and retain the raw output with any performance claim. These service-level measurements do not cover browser rendering/reconnect, HTTP transfer, concurrent streaming, large attachments, or separate routing-resolution/reply writes; measure those before making architecture decisions about them.
 
+### Continuous benchmarks
+
+CodSpeed tracks a smaller set of CPU-bound benchmarks on every pull request:
+
+```bash
+pnpm benchmark
+```
+
+`benchmarks/` holds Vitest benchmarks for unified search, Inbox/session projection, Channel and Thread context projection, and workspace state serialization and Project mutation. They reuse the synthetic multi-Channel fixture from `scripts/benchmark-workspace-fixtures.ts` without Project roots, so they measure computation rather than local disk. The CodSpeed workflow runs them under CPU simulation and reports the comparison on the pull request; `pnpm benchmark:workspace` remains the opt-in service-level measurement.
+
 ## npm packaging
 
 Build and verify the same npm tarball used by the release workflow:
