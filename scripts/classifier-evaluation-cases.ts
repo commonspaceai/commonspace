@@ -2,7 +2,10 @@ import type { AiRouteInput, AiRouteResult } from "../server/src/ai-router.ts";
 
 export interface ClassifierEvaluationCase {
 	input: AiRouteInput;
+	// Null requires abstention; a concrete route is the only safe accepted result.
 	expected: Pick<AiRouteResult, "mode" | "assignments"> | null;
+	// Supported local paths must not silently fall back to the inference harness.
+	requiredLocal?: boolean;
 }
 
 const rosters: Record<string, AiRouteInput["candidates"]> = {
@@ -1422,6 +1425,18 @@ for (const [text, mode] of [
 	};
 }
 
+// Fixed participants still require inference when their work must run in order.
+for (const text of [
+	"Oren, add the endpoint first. Then Nika, build the form using Oren's result.",
+	"Nika, design the form first. Then Oren, implement the API using Nika's design.",
+	"Oren must finish the migration before Nika starts updating the settings screen.",
+]) {
+	addAdditionalCase(text, null, {
+		fixedAgentIds: ["api-agent", "ui-agent"],
+		candidates: additionalRoster.slice(0, 2),
+	});
+}
+
 for (const text of [
 	"Nice work on Cairn!",
 	"I appreciate your work on Aster.",
@@ -1451,3 +1466,184 @@ const mixedProjectMention = addAdditionalCase(
 	},
 );
 mixedProjectMention.expected = null;
+
+// Regression: configured Projects must not force standalone greetings through a harness.
+const greetingRoster: AiRouteInput["candidates"] = [
+	{
+		id: "default",
+		displayName: "Default",
+		adapter: "hermes",
+		description: "General coding assistance and workspace maintenance.",
+		routingScore: 0,
+		matchedTerms: [],
+	},
+	{
+		id: "codex",
+		displayName: "Codex",
+		adapter: "codex",
+		description: "Installed Codex harness.",
+		routingScore: 0,
+		matchedTerms: [],
+	},
+	{
+		id: "agentops",
+		displayName: "Gatdamgames Agentops",
+		adapter: "hermes",
+		description:
+			"Agent runtimes, gateways, observability and workflow infrastructure.",
+		routingScore: 0,
+		matchedTerms: [],
+	},
+];
+for (const [text, recipients] of [
+	["hi agentops", ["agentops"]],
+	["say hello all", ["default", "codex", "agentops"]],
+] as const) {
+	classifierEvaluationCases.push({
+		input: {
+			text,
+			context: [
+				"The agents previously discussed implementation work in the Website Project.",
+			],
+			routingMemory: "",
+			candidates: greetingRoster,
+			projects: [
+				{ id: "website", name: "Website" },
+				{ id: "cairn", name: "Cairn" },
+			],
+			inferProjects: true,
+			maxAgents: 3,
+		},
+		expected: {
+			mode: "parallel",
+			assignments: recipients.map((agentId) => ({ agentId, projectIds: [] })),
+		},
+		requiredLocal: true,
+	});
+}
+
+// Independently labeled before testing the conversational prompt. Straightforward
+// addressing is mandatory; unsupported phrasing may abstain but may never misroute.
+const conversationalRoster: AiRouteInput["candidates"] = [
+	{
+		id: "mira",
+		displayName: "Mira Vale",
+		adapter: "codex",
+		description: "React components and browser accessibility",
+		routingScore: 0,
+		matchedTerms: [],
+	},
+	{
+		id: "rowan",
+		displayName: "Rowan Ops",
+		adapter: "claude-code",
+		description: "HTTP APIs and database persistence",
+		routingScore: 0,
+		matchedTerms: [],
+	},
+	{
+		id: "tess",
+		displayName: "Tess Reed",
+		adapter: "codex",
+		description: "Documentation and tutorials",
+		routingScore: 0,
+		matchedTerms: [],
+	},
+];
+const conversationalCases: {
+	text: string;
+	recipients: string[] | null;
+	requiredLocal?: boolean;
+	input?: Partial<AiRouteInput>;
+}[] = [
+	{ text: "Hey Mira Vale, good morning!", recipients: ["mira"] },
+	{ text: "Thanks, Rowan!", recipients: ["rowan"], requiredLocal: true },
+	{ text: "Codex, hello there.", recipients: null },
+	{ text: "Good evening, Claude.", recipients: ["rowan"] },
+	{
+		text: "Good morning, everyone!",
+		recipients: ["mira", "rowan", "tess"],
+		requiredLocal: true,
+	},
+	{
+		text: "Could all of you say hello?",
+		recipients: ["mira", "rowan", "tess"],
+	},
+	{ text: "Hello!", recipients: null },
+	{
+		text: "Thanks for that.",
+		recipients: null,
+		input: { context: ["Tess Reed: The guide is ready."] },
+	},
+	{
+		text: "Hello Mira, build the upload screen and have Rowan implement its API.",
+		recipients: null,
+	},
+	{ text: "Hi everyone, please fix the failing build.", recipients: null },
+	{ text: "Do not greet Tess.", recipients: null },
+	{ text: "Hello everyone except Rowan.", recipients: null },
+	{
+		text: '"Hello Mira" is an example string in the README.',
+		recipients: null,
+	},
+	{ text: "Tell Mira that I said hello.", recipients: null },
+	{ text: "Good morning, you two.", recipients: null },
+	{
+		text: "Hello, Tess Reed!",
+		recipients: ["tess"],
+		requiredLocal: true,
+		input: {
+			inferProjects: false,
+			projects: [{ id: "cedar", name: "Cedar" }],
+		},
+	},
+	{ text: "Thanks, Rowan, excellent work on Cedar!", recipients: ["rowan"] },
+	{
+		text: "Good morning, Mira Vale.",
+		recipients: null,
+		input: {
+			routingMemory:
+				"Confirmed correction: requests addressing Mira go to Tess in this channel.",
+		},
+	},
+	{ text: "No, Rowan should get that.", recipients: null },
+	{
+		text: "Mira and Rowan, say hello to each other and introduce yourselves back and forth.",
+		recipients: null,
+	},
+	{ text: "hi Mira Vale", recipients: ["mira"], requiredLocal: true },
+	{ text: "hello Rowan", recipients: ["rowan"], requiredLocal: true },
+	{ text: "hey Tess Reed", recipients: ["tess"], requiredLocal: true },
+	{ text: "good morning Mira", recipients: ["mira"], requiredLocal: true },
+];
+for (const item of conversationalCases) {
+	const input: AiRouteInput = {
+		text: item.text,
+		context: [],
+		routingMemory: "",
+		candidates: conversationalRoster,
+		projects: [
+			{ id: "cedar", name: "Cedar" },
+			{ id: "larch", name: "Larch" },
+		],
+		inferProjects: true,
+		maxAgents: 3,
+		...item.input,
+	};
+	classifierEvaluationCases.push({
+		input,
+		requiredLocal: item.requiredLocal === true,
+		expected:
+			item.recipients === null
+				? null
+				: {
+						mode: "parallel",
+						assignments: item.recipients.map((agentId) => ({
+							agentId,
+							projectIds: input.inferProjects
+								? []
+								: input.projects.map((project) => project.id),
+						})),
+					},
+	});
+}

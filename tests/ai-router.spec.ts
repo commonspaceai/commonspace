@@ -85,13 +85,18 @@ describe("Commonspace AI router", () => {
 
 	it("builds a bounded classifier prompt with candidate responsibilities", () => {
 		const prompt = buildRoutingPrompt(input);
-		expect(prompt).toContain("Select one owner by default");
+		expect(prompt).toContain("Select the complete recipient set");
+		expect(prompt).toContain("Multiple recipients may share a domain");
+		expect(prompt).not.toContain("Select one owner by default");
 		expect(prompt).toContain('"id":"frontend"');
 		expect(prompt).toContain('"harness":"Hermes"');
 		expect(prompt).toContain('"routingScore":1');
 		expect(prompt).toContain('"matchedTerms":["css"]');
 		expect(prompt).toContain('"id":"web"');
 		expect(prompt).toContain("original user message unchanged");
+		expect(prompt).toContain("collective greetings or check-ins");
+		expect(prompt).toContain("each eligible addressee");
+		expect(prompt).toContain("Do not substitute one operations specialist");
 		expect(prompt).toContain("useful evidence");
 		expect(prompt).toContain("Fix the login screen CSS.");
 	});
@@ -103,7 +108,7 @@ describe("Commonspace AI router", () => {
 		});
 
 		expect(prompt).toContain('Use mode "relay"');
-		expect(prompt).toContain("first assignment starts the conversation");
+		expect(prompt).toContain("first assignment starts the work");
 		expect(prompt).toContain('"mode":"parallel"');
 		expect(prompt).toContain(
 			"Talk to each other and agree on the ownership boundary.",

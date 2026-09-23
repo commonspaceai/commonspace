@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { SendMessageRequest } from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type RunningCommonspaceServer,
@@ -27,6 +28,122 @@ afterEach(async () => {
 });
 
 describe("Commonspace ACP session context", () => {
+	it.each(["channel", "dm"] as const)(
+		"keeps one visible reply when a %s turn posts its final text as progress",
+		async (kind) => {
+			const root = await mkdtemp(join(tmpdir(), "commonspace-progress-reply-"));
+			roots.push(root);
+			const postedIds: string[] = [];
+			const resumedSessions: (string | undefined)[] = [];
+			const running = await startCommonspaceServer({
+				root,
+				port: 0,
+				dependencies: {
+					discoverAgents: discoverTestHarnesses,
+					runAgent: async (input) => {
+						const scope = mustExist(input.commonspaceScope);
+						resumedSessions.push(input.sessionId);
+						if (resumedSessions.length === 1) {
+							await running.service.postProgress(
+								scope,
+								"Checking the request.",
+							);
+							const posted = await running.service.postProgress(
+								scope,
+								"Hello all!",
+							);
+							postedIds.push(posted.messageId);
+							return {
+								text: "  Hello all!\n",
+								sessionId: "native-progress-session",
+								trace: {
+									adapter: "codex",
+									startedAt: "2026-09-23T01:00:00.000Z",
+									completedAt: "2026-09-23T01:00:01.000Z",
+									entries: [],
+								},
+							};
+						}
+						await running.service.postProgress(scope, "Checking again.");
+						return { text: "Hello all!", sessionId: "native-progress-session" };
+					},
+				},
+				logger: { info: () => undefined, warn: () => undefined },
+			});
+			runningServers.push(running);
+			await addTestHarness(running.service, "codex", "Review Bot");
+			const channel = mustExist(
+				(
+					await running.service.mutate({
+						action: "create-channel",
+						name: "engineering",
+						agentIds: ["codex"],
+					})
+				).channels[0],
+			);
+			const conversation = {
+				kind,
+				id: kind === "channel" ? channel.id : "codex",
+			};
+			const sent = await running.service.send({
+				conversation,
+				text: "@Review-Bot say hello all",
+			});
+			await running.service.whenIdle();
+			const key = `${kind}:${conversation.id}`;
+			const firstReplies = (
+				running.service.snapshot().messages[key] ?? []
+			).filter((message) => message.authorType === "agent");
+			expect(firstReplies.map((message) => message.text.trim())).toEqual([
+				"Checking the request.",
+				"Hello all!",
+			]);
+			const reply = mustExist(firstReplies[1]);
+			expect(reply).toMatchObject({
+				id: postedIds[0],
+				sourceMessageId: sent.accepted.id,
+				trace: { adapter: "codex" },
+			});
+			if (sent.thread !== undefined) {
+				expect(reply).toMatchObject({
+					threadId: sent.thread.id,
+					parentMessageId: sent.thread.rootMessageId,
+					routingAssignmentId: sent.accepted.routing?.assignments[0]?.id,
+				});
+			}
+			const persisted = JSON.parse(
+				await readFile(join(root, "state.json"), "utf8"),
+			);
+			expect(
+				persisted.messages[key].filter(
+					(message: { authorType: string }) => message.authorType === "agent",
+				),
+			).toHaveLength(2);
+
+			const followup: SendMessageRequest = {
+				conversation,
+				text: "@Review-Bot say hello all again",
+			};
+			if (sent.thread !== undefined) followup.threadId = sent.thread.id;
+			await running.service.send(followup);
+			await running.service.whenIdle();
+			const replies = (running.service.snapshot().messages[key] ?? []).filter(
+				(message) => message.authorType === "agent",
+			);
+			expect(replies.map((message) => message.text.trim())).toEqual([
+				"Checking the request.",
+				"Hello all!",
+				"Checking again.",
+				"Hello all!",
+			]);
+			expect(resumedSessions).toEqual([undefined, "native-progress-session"]);
+			if (kind === "dm")
+				expect(running.service.snapshot().messages[key]?.[0]?.replyStatus).toBe(
+					"complete",
+				);
+		},
+	);
+
 	it("attaches a bearer-scoped MCP server instead of replaying room context in the prompt", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-acp-mcp-host-"));
 		roots.push(root);

@@ -353,7 +353,7 @@ export class CommonspaceMcpGateway {
 			{
 				title: "Post Commonspace progress",
 				description:
-					"Post one visible progress note to the current Commonspace conversation/thread. Use commonspace_handoff instead for peer delivery.",
+					"Post one useful interim progress note while work continues in the current Commonspace conversation/thread. Your final response is automatically posted: answer the user in your final response instead of using this tool to deliver the answer or confirming that you posted it. Use commonspace_handoff instead for peer delivery.",
 				inputSchema: {
 					text: z.string().trim().min(1).max(4_000),
 				},

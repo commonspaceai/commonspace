@@ -1728,8 +1728,12 @@ esac
 			"parallel",
 			"@backend inspect the API independently and @frontend inspect the UI independently.",
 		],
+		[
+			"relay",
+			"@backend add the signup endpoint first, then @frontend build the form using the backend result.",
+		],
 	] as const)(
-		"delivers explicit %s work without capping named participants",
+		"delivers explicit %s work without capping named participants: %s",
 		async (mode, text) => {
 			const backend = deferred<string>();
 			const frontend = deferred<string>();
@@ -2334,6 +2338,10 @@ esac
 			if (input.agent.id === "backend") {
 				backendRuns += 1;
 				if (backendRuns === 1) {
+					await mustExist(serviceRef.current).postProgress(
+						input.commonspaceScope,
+						"Backend API boundary ready.",
+					);
 					await mustExist(serviceRef.current).handoff(input.commonspaceScope, {
 						targetAgentId: "frontend",
 						request: "Review the API boundary.",
@@ -2405,6 +2413,7 @@ esac
 			.filter((message) => message.authorType === "agent")
 			.map((message) => ({ authorId: message.authorId, text: message.text }));
 		expect(replies).toEqual([
+			{ authorId: "backend", text: "Backend API boundary ready." },
 			{
 				authorId: "backend",
 				text: "Backend API boundary ready.\n\n@frontend Review the API boundary.",

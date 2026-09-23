@@ -556,6 +556,7 @@ interface ActiveAgentRun {
 	conversation: SendMessageRequest["conversation"];
 	routingAssignmentId?: string;
 	scopeKey: string;
+	progressMessageIds: Set<string>;
 	abortController: AbortController;
 }
 
@@ -902,6 +903,7 @@ function participationContextForAgentRun({
 }: AgentRunExecutionContext): string {
 	return [
 		"Commonspace participation context. The delivered original user message remains authoritative. Follow the role explicitly requested for you; otherwise act within your roster responsibility. Coordinate with other participants and avoid unrequested duplicate implementation. Use scoped Commonspace tools for Channel/Thread instructions and deeper conversation context when needed.",
+		"Your final response is automatically posted to this conversation. Reply normally to answer the user; do not call commonspace_post_progress to deliver the answer or confirm that you posted it. Reserve that tool for useful interim updates while work continues.",
 		JSON.stringify({
 			agent: {
 				name: agent.displayName,
@@ -959,6 +961,7 @@ function pendingFollowupInvalidation(
 			projectIds: assignment.projectIds,
 			conversation: item.prepared.request.conversation,
 			scopeKey,
+			progressMessageIds: new Set(),
 			abortController: new AbortController(),
 		};
 		if (assignment.routingAssignmentId !== undefined)
@@ -4605,6 +4608,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			message.parentMessageId = scoped.thread.rootMessageId;
 		}
 		this.append(message);
+		if (scope.sessionName !== undefined)
+			this.executingAgentRunsByScope
+				.get(`${scoped.agent.id}\u0000${scope.sessionName}`)
+				?.progressMessageIds.add(message.id);
 		await this.persist();
 		this.broadcastRevision();
 		return { messageId: message.id };
@@ -7875,7 +7882,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					: channelBrief;
 			if (
 				this.overrides.classifyRouting !== undefined &&
-				(brief?.status === "current" || brief?.status === "empty") &&
 				!(
 					!send.projectScopeExplicit &&
 					!send.inferProjects &&
@@ -7888,7 +7894,12 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					local = await routeLocally(
 						{
 							...prepared.input,
-							context: brief.summary === "" ? [] : [brief.summary],
+							context:
+								brief?.status === "current" || brief?.status === "empty"
+									? brief.summary === ""
+										? []
+										: [brief.summary]
+									: null,
 						},
 						this.overrides.classifyRouting,
 						this.inferenceShutdown.signal,
@@ -8738,17 +8749,26 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					: undefined,
 			);
 		}
+		const key = conversationKey(prepared.request.conversation);
+		const text =
+			requestedHandoff === undefined || requestedHandoffTarget === undefined
+				? agentResponse.text
+				: `${agentResponse.text}\n\n@${agentMentionName(requestedHandoffTarget)} ${requestedHandoff.request}`;
+		const normalizedResponse = text.normalize("NFKC").trim();
+		const duplicateProgress = this.state.messages[key]?.findLast(
+			(message) =>
+				run.progressMessageIds.has(message.id) &&
+				message.text === normalizedResponse,
+		);
 		const reply: CommonspaceMessage = {
-			id: messageId(),
+			...duplicateProgress,
+			id: duplicateProgress?.id ?? messageId(),
 			sourceMessageId: run.sourceMessageId,
 			conversation: prepared.request.conversation,
 			authorType: "agent",
 			authorId: agent.id,
 			authorName: agent.displayName,
-			text:
-				requestedHandoff === undefined || requestedHandoffTarget === undefined
-					? agentResponse.text
-					: `${agentResponse.text}\n\n@${agentMentionName(requestedHandoffTarget)} ${requestedHandoff.request}`,
+			text,
 			createdAt: completedAt,
 			...projectReferenceFields(deliveryProjects),
 		};
@@ -8761,6 +8781,17 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		if (thread !== undefined) {
 			reply.threadId = thread.id;
 			reply.parentMessageId = thread.rootMessageId;
+		}
+		if (duplicateProgress !== undefined) {
+			this.state = {
+				...this.state,
+				messages: {
+					...this.state.messages,
+					[key]: (this.state.messages[key] ?? []).filter(
+						(message) => message.id !== duplicateProgress.id,
+					),
+				},
+			};
 		}
 		this.append(reply);
 		run.phase = "terminal";
@@ -8989,6 +9020,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			projectIds: deliveryProjects.map((project) => project.id),
 			conversation: prepared.request.conversation,
 			scopeKey: `${agent.id}\u0000${sessionName}`,
+			progressMessageIds: new Set(),
 			abortController: new AbortController(),
 		};
 		if (delivery.routingAssignmentId !== undefined)

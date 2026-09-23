@@ -171,8 +171,8 @@ Refresh does not run a model turn, change native configuration, or persist inven
 1. The human sends a root message in a Channel, with zero or more explicit Project references.
 2. Commonspace persists and displays the message immediately.
 3. The message creates a Thread.
-4. The inference layer resolves missing Project references, selects the smallest useful set of Agents and classifies delivery as parallel or relay.
-5. A request for independent work uses parallel delivery. A request for Agents to discuss, debate, reconcile, review one another, or reach a shared conclusion uses an ordered relay with at least two assignments.
+4. The inference layer resolves missing Project references, selects the complete set of requested and needed Agents, and classifies delivery as parallel or relay. A request may address any subset of the eligible Agents, including several Agents with the same responsibility.
+5. A request for independent work uses parallel delivery. A request for Agents to discuss, debate, reconcile, review one another, reach a shared conclusion, or perform work in a required order uses an ordered relay with at least two assignments. Work that needs another Agent's result follows that Agent; mention order or the word "then" alone does not establish a dependency.
 6. The service stores the routing mode, selected Agents, ordered participant deliveries, Project references, and routing reason. These records associate replies with assignments and retain diagnostics and corrections. A visible receipt shows where the message went.
 7. Parallel assignments run concurrently. In a relay, only the first Agent starts; each later Agent receives a bounded head-and-tail excerpt of the preceding peer response plus the original user message. The complete reply remains available through on-demand context.
 8. Calls to the same native session are serialized.
@@ -184,7 +184,7 @@ Every routed human message has a compact receipt naming its destination. Queued,
 
 1. One or more explicit `@agent` mentions are authoritative.
 2. A mentioned Agent that is not already a Channel member is added immediately and invoked.
-3. A single mentioned Agent is delivered directly without inference. When several Agents are mentioned, the accepted message is persisted before inference classifies only collaboration mode and speaker order. Independent work runs in parallel; discussion, review of one another, reconciliation, debate, or a shared conclusion uses an ordered relay. Each receives the original message, and later relay speakers also receive a bounded preceding peer reply.
+3. A single mentioned Agent is delivered directly without inference. When several Agents are mentioned, the accepted message is persisted before inference classifies only collaboration mode and execution order. Independent work runs in parallel; dependent work and peer discussion use an ordered relay. Each receives the original message, and later relay participants also receive a bounded preceding peer reply.
 4. The explicitly named participant set is fixed, including when it exceeds the default inference selection limit. Classification cannot add, drop, duplicate, or substitute Agents, or change the message's existing Project scope. Invalid classification or inference failure leaves the accepted request visibly failed and retryable without dispatching parallel work.
 5. Explicit Project references are authoritative for the message. Explicitly addressed participants retain the message's selected or inherited Project references; shape classification does not infer additional Projects.
 
@@ -312,9 +312,9 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | ID | Target | Requirement | Acceptance condition |
 | --- | --- | --- | --- |
 | INF-01 | Current | Select one added Agent for workspace routing and shared-context compaction. | Commonspace stores only the Agent ID and invokes its ACP harness with the runtime's existing authentication. The inference Agent chooses participants, mode, order, and Project relevance in one request; code validates the result and dispatches the original user message without an assignment-writing call. Missing or invalid configuration cannot silently select another Agent. |
-| INF-02 | Current | Resolve every unaddressed Channel message after durable acceptance. | Local classification uses the previous compact brief to select a recipient or delivery mode, and can distinguish work from a mere mention for one named Project. Explicit participants and Project scope remain fixed. Saved corrections and unsupported or uncertain decisions use the inference Agent. Receipts identify local decisions; failures never silently broadcast a request. |
+| INF-02 | Current | Resolve every unaddressed Channel message after durable acceptance. | Local classification handles standalone greetings, parallel delivery to fixed recipients, and Project scope for a sole eligible recipient. General recipient sets, saved corrections, and unsupported or uncertain decisions use the inference Agent. Explicit participants and Project scope remain fixed. Receipts identify local decisions; failures never silently broadcast a request. |
 | INF-03 | Current | Treat explicit Agent mentions as authoritative. | For multiple mentioned Agents, inference may classify delivery mode and speaker order but must retain the named participants and existing Project scope. It cannot substitute unmentioned Agents or rewrite the request. |
-| INF-04 | Current | Select the smallest useful Agent set and delivery mode. | One Agent is preferred when sufficient; independent responsibilities use parallel assignments; explicit peer-conversation intent uses an ordered relay with at least two speakers. |
+| INF-04 | Current | Select the complete recipient set and delivery mode. | Include each requested recipient and each Agent needed for the requested responsibilities, within the configured inference limit. Multiple recipients may share a responsibility. Independent work uses parallel assignments; dependent work and explicit peer-conversation intent use an ordered relay with at least two participants in the requested execution order. A shared follow-up retains the relevant participants unless the request narrows the set. |
 | INF-05 | Current | Remove hidden product-wide Agent fan-out caps. | Explicit or inferred requests are not silently limited to two Agents; any safety ceiling is visible and user-controlled. |
 | INF-06 | Current | Deliver the original request to each selected Agent. | A first or parallel native turn contains the original user message unchanged. Separate participation metadata supplies roster responsibility and selected peers. A later relay turn includes the original message and a bounded preceding peer reply; deeper context remains available through scoped tools. |
 | INF-07 | Current | Make routing inspectable. | Delivery mode, selected Agents, ordered participant deliveries, Project references, reason, and confidence where available are stored with the source message. |
@@ -461,6 +461,8 @@ For each Channel root or newly routable follow-up, the inference layer produces 
 
 The original human message remains the source record and stays visible. Delivery references contain Agent and Project metadata, never rewritten requests. Historical wording is retained as `legacySubRequest` for inspection and is never used for execution.
 
+Collective greetings and personal check-ins address the eligible peers in parallel, within the configured participant limit. Each Agent answers for itself; an operations specialist does not replace the group merely because its responsibility includes agent infrastructure. Requests to inspect or repair runtime infrastructure may still have a single responsible owner. A collective greeting alone does not imply a peer discussion or Project access.
+
 The routing response uses a bounded output budget sized for the visible maximum assignment count. Commonspace may retry invalid output once. It validates the delivery mode and entire assignment set, including Agent IDs, count, and Project scopes, before dispatching any Agent work. `relay` requires at least two ordered assignments.
 
 ### Reroute semantics
@@ -538,7 +540,7 @@ Workspace archives are unencrypted private user data. Removing Commonspace-manag
 
 | ID | Scenario | Required result |
 | --- | --- | --- |
-| E2E-01 | Send a projectless unaddressed Channel message | It is persisted, routed by inference, dispatched to the smallest useful Agent set without Project filesystem access, and recorded in one Thread. |
+| E2E-01 | Send a projectless unaddressed Channel message | It is persisted, routed by inference, dispatched to the complete requested and needed Agent set without Project filesystem access, and recorded in one Thread. |
 | E2E-02 | Ask for backend and frontend work spanning two Projects | Each participant receives the original message with an inspectable scope and the correct Project subset; sessions run concurrently and replies share one Thread. |
 | E2E-03 | Mention an Agent not seated in a Channel | The Agent is added and invoked immediately without replacing explicit routing intent. |
 | E2E-04 | Continue the same Agent in two Threads | Each Thread resumes its own native session and both may run concurrently. |

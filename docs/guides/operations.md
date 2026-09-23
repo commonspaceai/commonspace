@@ -131,9 +131,11 @@ The npm launcher runs a pretrained [Laya weight-only INT8 ONNX](https://huggingf
 
 ### Routing and fallback
 
-Each local decision starts fresh with the newest message and the previous compact Channel or Thread brief. Local routing selects a recipient or confirms independent delivery for explicitly selected participants. Peer relays use the inference Agent to choose speaker order. For a single named Project, a second decision distinguishes file work from a mere mention. Explicit Project scope remains fixed.
+Local routing handles complete standalone greetings such as `hi agentops` and `say hello all` with a compact Laya decision over the current roster. A unique display name or name word identifies the possible recipient; `all`, `everyone`, and `everybody` address the roster within the workspace fan-out limit. This decision needs no conversation brief or responsibility descriptions. It grants no inferred Project access and preserves explicit Project scope. Added work, ambiguous names, exclusions, and peer-discussion requests continue through the full router.
 
-The inference Agent handles saved corrections, unclear or multiple recipients, unclear Project scope, stale or oversized briefs, and non-Latin text. The local model accepts up to 512 tokens, including a 192-token instruction-and-option budget.
+Other local decisions use the newest message and the previous compact Channel or Thread brief. Local routing retains a sole eligible recipient or confirms independent delivery for explicitly selected participants. It does not choose a single winner from several candidates for general work: that score cannot establish the complete recipient set. The inference Agent selects all requested and needed recipients, including arbitrary subsets and peers with overlapping responsibilities. Dependent work and peer discussions also use the inference Agent to choose relay execution order. For a single named Project, a local decision distinguishes file work from a mere mention. Explicit Project scope remains fixed.
+
+The inference Agent handles saved corrections, unclear or multiple work recipients, unclear Project scope, context-dependent requests with stale or oversized briefs, and non-Latin text. The local model accepts up to 512 tokens, including a 192-token instruction-and-option budget.
 
 The worker handles one request at a time with a 750 ms deadline. Busy or unavailable workers fall back immediately. A worker that times out or returns an invalid result stays disabled until the next launch.
 

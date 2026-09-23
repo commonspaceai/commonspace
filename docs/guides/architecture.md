@@ -149,6 +149,8 @@ Gemini compatibility is checked during discovery and launch because later native
 
 A native Channel turn receives the original newly delivered message, a separate participation metadata block, and ACP resource links for attached files. Shared room context is available through scoped MCP tools on demand instead of being replayed inside every user message.
 
+Native final responses are posted automatically. The progress tool is reserved for useful interim updates; it is not required to deliver an answer. If the final visible text repeats a progress note from that same active run, the service promotes that note to the completed reply, retaining its message ID and attaching the final source, assignment, trace, and files. Distinct progress and final messages remain visible, including finals that add a peer handoff, and identical text from another run is never merged.
+
 Channel MCP scopes expose current peer IDs through the `commonspace_handoff` schema. A structured handoff records one concrete request during the active run; after that run finishes, the service appends a visible `@agent` handoff and delivers only sender identity plus the request. When a structured handoff starts a planned relay participant, delivery also preserves the original user message and a bounded preceding peer reply. Later inferred relay turns receive a bounded head-and-tail excerpt of the preceding peer response plus the original user message; the full reply remains available through scoped context.
 
 ### Processes and session lifetime

@@ -35,32 +35,63 @@ const results: {
 	text: string;
 	accepted: boolean;
 	correct: boolean;
+	requiredLocal: boolean;
 	milliseconds: number;
+	matches: {
+		mode: boolean;
+		recipients: boolean;
+		projectScopes: boolean;
+	} | null;
 	expected: ClassifierEvaluationCase["expected"];
 	actual: ClassifierEvaluationCase["expected"];
 }[] = [];
+let failure: { text: string; milliseconds: number; message: string } | null =
+	null;
 try {
 	for (const item of classifierEvaluationCases) {
 		const before = performance.now();
-		const result = await routeLocally(
-			item.input,
-			classifier.classify.bind(classifier),
-			cancellation.signal,
-		);
+		let result: Awaited<ReturnType<typeof routeLocally>>;
+		try {
+			result = await routeLocally(
+				item.input,
+				classifier.classify.bind(classifier),
+				cancellation.signal,
+			);
+		} catch (error) {
+			failure = {
+				text: item.input.text,
+				milliseconds: performance.now() - before,
+				message: error instanceof Error ? error.message : String(error),
+			};
+			break;
+		}
 		const accepted = result !== null;
 		const actual =
 			result === null
 				? null
 				: { mode: result.mode, assignments: result.assignments };
+		const milliseconds = performance.now() - before;
+		const matches =
+			actual === null || item.expected === null
+				? null
+				: {
+						mode: actual.mode === item.expected.mode,
+						recipients:
+							JSON.stringify(recipients(actual)) ===
+							JSON.stringify(recipients(item.expected)),
+						projectScopes:
+							JSON.stringify(projectScopes(actual)) ===
+							JSON.stringify(projectScopes(item.expected)),
+					};
 		const correct =
-			accepted &&
-			item.expected !== null &&
-			JSON.stringify(actual) === JSON.stringify(item.expected);
+			matches?.mode === true && matches.recipients && matches.projectScopes;
 		results.push({
 			text: item.input.text,
 			accepted,
 			correct,
-			milliseconds: performance.now() - before,
+			requiredLocal: item.requiredLocal === true,
+			milliseconds,
+			matches,
 			expected: item.expected,
 			actual,
 		});
@@ -76,8 +107,52 @@ const timings = results
 const incorrect = results.filter(
 	(result) => result.accepted && !result.correct,
 );
-process.stdout.write(
-	`${JSON.stringify({ readyMs, total: results.length, accepted: results.filter((result) => result.accepted).length, medianMs: timings[Math.floor(timings.length / 2)], incorrect }, null, 2)}\n`,
+const missedRequired = results.filter(
+	(result) => result.requiredLocal && !result.accepted,
 );
-if (incorrect.length > 0 || !results.some((result) => result.accepted))
+const required = results.filter((result) => result.requiredLocal);
+process.stdout.write(
+	`${JSON.stringify(
+		{
+			readyMs,
+			total: classifierEvaluationCases.length,
+			completed: results.length,
+			accepted: results.filter((result) => result.accepted).length,
+			correctAccepted: results.filter((result) => result.correct).length,
+			abstained: results.filter((result) => !result.accepted).length,
+			medianMs: timings[Math.floor(timings.length / 2)],
+			p95Ms: timings[Math.ceil(timings.length * 0.95) - 1],
+			maxMs: timings.at(-1),
+			required,
+			incorrect,
+			missedRequired,
+			failure,
+		},
+		null,
+		2,
+	)}\n`,
+);
+if (
+	failure !== null ||
+	incorrect.length > 0 ||
+	missedRequired.length > 0 ||
+	!results.some((result) => result.accepted)
+)
 	process.exitCode = 1;
+
+function recipients(route: NonNullable<ClassifierEvaluationCase["expected"]>) {
+	const ids = route.assignments.map((assignment) => assignment.agentId);
+	// Parallel completion order is immaterial; relay speaker order is contractual.
+	return route.mode === "parallel" ? ids.toSorted() : ids;
+}
+
+function projectScopes(
+	route: NonNullable<ClassifierEvaluationCase["expected"]>,
+) {
+	return route.assignments
+		.map((assignment) => ({
+			agentId: assignment.agentId,
+			projectIds: assignment.projectIds.toSorted(),
+		}))
+		.toSorted((a, b) => a.agentId.localeCompare(b.agentId));
+}

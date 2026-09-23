@@ -166,6 +166,8 @@ Use the [adapter proposal template](../adapters/agent-adapter-template.md) when 
 
 Parser and service tests establish routing contracts; they do not measure model decomposition quality or harness latency. Evaluate those properties through an added test Agent using synthetic conversation history, record the runtime/model/version and results, and never turn a mocked JSON parser test into a routing-quality claim.
 
+Run `pnpm evaluate:routing` to check six plain-language Frontend/Backend requests through the real Codex ACP router: independent work reaches both agents, dependent work follows the requested order in either direction, and a background mention does not add a recipient. The test compares exact recipients, delivery mode, relay order, and Project scope. It requires an authenticated Codex installation, reuses one ACP bridge with fresh sessions, and closes the bridge after the suite. Normal `pnpm test` skips these provider-backed cases.
+
 ### Local classifier evaluation
 
 Build the worker and evaluate routing with the local model:

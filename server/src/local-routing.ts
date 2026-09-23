@@ -5,6 +5,10 @@ import type {
 } from "./local-classifier.js";
 
 type LocalRoute = AiRouteResult & { source: "local" };
+interface LocalRouteInput extends Omit<AiRouteInput, "context"> {
+	// A stale brief cannot establish ownership for a context-dependent request.
+	context: string[] | null;
+}
 function confidentChoice(
 	scores: ClassifierScores[] | null,
 	minimum: number,
@@ -19,9 +23,9 @@ function confidentChoice(
 		: null;
 }
 
-/** Local Laya owns the first decision; ambiguous or oversized requests use the inference Agent. */
+/** Classify constrained decisions locally; full inference selects general recipient sets. */
 export async function routeLocally(
-	input: AiRouteInput,
+	input: LocalRouteInput,
 	classify: RunningClassifier["classify"],
 	signal?: AbortSignal,
 ): Promise<LocalRoute | null> {
@@ -36,15 +40,27 @@ export async function routeLocally(
 		(input.fixedAgentIds !== undefined && input.inferProjects)
 	)
 		return null;
-	const state = [
-		input.context.length === 0
-			? ""
-			: `Routing brief:\n${input.context.join("\n")}`,
-		`User: ${input.text}`,
-	]
-		.filter(Boolean)
-		.join("\n\n");
+	if (input.fixedAgentIds === undefined) {
+		// The checkpoint confuses greeting-plus-work with a purely social request.
+		// Require a complete standalone greeting before omitting inferred Project access.
+		const greeting =
+			/^(?:hi|hello|hey|good morning|good afternoon|good evening|thanks|thank you|say hello)[,\s]+(.+?)\s*[.!?]*$/iu.exec(
+				input.text.normalize("NFKC").trim(),
+			);
+		const addressee = greeting?.[1]?.trim().toLowerCase();
+		if (addressee !== undefined)
+			return routeGreetingLocally(input, addressee, classify, signal);
+	}
+	if (input.context === null) return null;
 	if (input.fixedAgentIds !== undefined) {
+		const state = [
+			input.context.length === 0
+				? ""
+				: `Routing brief:\n${input.context.join("\n")}`,
+			`User: ${input.text}`,
+		]
+			.filter(Boolean)
+			.join("\n\n");
 		const mode = confidentChoice(
 			await classify(
 				{
@@ -55,17 +71,17 @@ export async function routeLocally(
 						{
 							id: "parallel",
 							description:
-								"Independent work: each selected agent handles its own responsibility.",
+								"Independent work: each selected agent can start without waiting for another's result.",
 						},
 						{
 							id: "relay",
 							description:
-								"A peer discussion: agents debate, review each other, or reach a shared conclusion.",
+								"Ordered work: an agent waits for another's result, or agents discuss, review each other, or reach a shared conclusion.",
 						},
 						{
 							id: "uncertain",
 							description:
-								"The request does not clearly identify independent work or a peer discussion.",
+								"The request does not clearly identify independent or ordered work.",
 						},
 					],
 				},
@@ -86,37 +102,10 @@ export async function routeLocally(
 				"Local classifier selected the delivery mode for the explicit recipients.",
 		};
 	}
-	let selected =
+	// A confident single match cannot establish that no other responsibility applies.
+	// Leave the complete participant set to the inference Agent.
+	const selected =
 		input.candidates.length === 1 ? input.candidates[0] : undefined;
-	if (selected === undefined) {
-		const scores = await classify(
-			{
-				state,
-				instruction: "Who should receive the newest user message?",
-				options: [
-					...input.candidates.map((candidate, index) => ({
-						id: `agent:${String(index)}`,
-						description: `${candidate.displayName}: ${candidate.description ?? "No responsibility description."}`,
-					})),
-					{
-						id: "multiple",
-						description:
-							"Multiple agents: separate responsibilities or a requested discussion.",
-					},
-					{
-						id: "uncertain",
-						description:
-							"Unclear recipient: vague request, general greeting, or insufficient context.",
-					},
-				],
-			},
-			signal,
-		);
-		const winner = confidentChoice(scores, minimumOwnerScore(input));
-		selected = input.candidates.find(
-			(_, index) => winner === `agent:${String(index)}`,
-		);
-	}
 	if (selected === undefined) return null;
 	const projectIds = input.inferProjects
 		? await inferNamedProjectScope(input, classify, signal)
@@ -128,13 +117,70 @@ export async function routeLocally(
 		assignments: [{ agentId: selected.id, projectIds }],
 		reason:
 			input.inferProjects && input.projects.length > 0
-				? "Local classifier selected the recipient and Project scope."
-				: "Local classifier selected the recipient and retained the explicit Project scope.",
+				? "Local routing retained the only eligible recipient and classified Project scope."
+				: "Local routing retained the only eligible recipient and explicit Project scope.",
+	};
+}
+
+async function routeGreetingLocally(
+	input: LocalRouteInput,
+	addressee: string,
+	classify: RunningClassifier["classify"],
+	signal?: AbortSignal,
+): Promise<LocalRoute | null> {
+	const named = input.candidates.filter((candidate) => {
+		const name = candidate.displayName.normalize("NFKC").toLowerCase();
+		return name === addressee || name.split(/\s+/u).includes(addressee);
+	});
+	const everyone = ["all", "everyone", "everybody", "all agents"].includes(
+		addressee,
+	);
+	if (
+		(everyone &&
+			(named.length > 0 || input.candidates.length > input.maxAgents)) ||
+		(!everyone && named.length !== 1)
+	)
+		return null;
+	const recipient = named[0];
+	const choice = confidentChoice(
+		await classify(
+			{
+				state: `User: ${input.text}`,
+				instruction: "Who is the user addressing?",
+				options: [
+					...input.candidates.map((candidate, index) => ({
+						id: `greeting-agent:${String(index)}`,
+						description:
+							candidate === recipient ? addressee : candidate.displayName,
+					})),
+					{ id: "everyone", description: everyone ? addressee : "all" },
+					{ id: "unclear", description: "unclear" },
+				],
+			},
+			signal,
+		),
+		0.55,
+	);
+	const expected = everyone
+		? "everyone"
+		: `greeting-agent:${String(recipient === undefined ? -1 : input.candidates.indexOf(recipient))}`;
+	if (choice !== expected) return null;
+	return {
+		source: "local",
+		mode: "parallel",
+		assignments: (everyone ? input.candidates : named).map((candidate) => ({
+			agentId: candidate.id,
+			projectIds: input.inferProjects
+				? []
+				: input.projects.map((project) => project.id),
+		})),
+		reason:
+			"Local classifier selected the recipients of a standalone greeting.",
 	};
 }
 
 async function inferNamedProjectScope(
-	input: AiRouteInput,
+	input: Pick<AiRouteInput, "text" | "projects">,
 	classify: RunningClassifier["classify"],
 	signal?: AbortSignal,
 ): Promise<string[] | null> {
@@ -184,11 +230,4 @@ function hasNegation(text: string): boolean {
 	return /\b(?:no|not|never|without|instead|except|unless|stop|ignore|forget|rather|unchanged)\b|\b\w+n['’]t\b/iu.test(
 		text,
 	);
-}
-
-function minimumOwnerScore(input: AiRouteInput): number {
-	// Compound requests can hide a second responsibility behind a confident partial match.
-	if (/\b(?:and|also|plus|together|both)\b/iu.test(input.text)) return 0.85;
-	if (hasNegation(input.text)) return 0.65;
-	return 0.55;
 }

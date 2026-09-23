@@ -31,6 +31,119 @@ const input: AiRouteInput = {
 };
 
 describe("local routing", () => {
+	it.each([
+		["hi agentops", ["ops"]],
+		["say hello all", ["front", "ops"]],
+	] as const)(
+		"routes the standalone greeting %s without inferred Project access",
+		async (text, recipients) => {
+			const classify = vi
+				.fn<RunningClassifier["classify"]>()
+				.mockResolvedValue([
+					{
+						id: text === "hi agentops" ? "greeting-agent:1" : "everyone",
+						score: 0.9,
+					},
+					{ id: "other", score: 0.1 },
+				]);
+			const result = await routeLocally(
+				{
+					...input,
+					text,
+					candidates: input.candidates.map((candidate, index) =>
+						index === 1
+							? { ...candidate, id: "ops", displayName: "Gatdamgames Agentops" }
+							: candidate,
+					),
+					projects: [{ id: "web", name: "Website" }],
+					inferProjects: true,
+				},
+				classify,
+			);
+			expect(result).toMatchObject({
+				source: "local",
+				mode: "parallel",
+				assignments: recipients.map((agentId) => ({ agentId, projectIds: [] })),
+			});
+		},
+	);
+
+	it("keeps explicit Project scope when a standalone greeting has no usable brief", async () => {
+		const classify = async () => [
+			{ id: "greeting-agent:0", score: 0.9 },
+			{ id: "unclear", score: 0.1 },
+		];
+		expect(
+			await routeLocally(
+				{
+					...input,
+					text: "Hello Frontend!",
+					context: null,
+					projects: [{ id: "web", name: "Website" }],
+				},
+				classify,
+			),
+		).toMatchObject({
+			assignments: [{ agentId: "front", projectIds: ["web"] }],
+		});
+	});
+
+	it.each([
+		"hi frontend, continue",
+		"say hello all then improve Website",
+		"Good morning everyone; deploy Website.",
+		"hello all what is your status",
+		"hello everyone except Frontend",
+		"hello everyone but Frontend",
+		"hi unknown",
+	])("does not turn %s into a projectless greeting", async (text) => {
+		const classify = vi.fn<RunningClassifier["classify"]>().mockResolvedValue([
+			{ id: "everyone", score: 0.99 },
+			{ id: "unclear", score: 0.01 },
+		]);
+		expect(
+			await routeLocally(
+				{
+					...input,
+					text,
+					projects: [{ id: "web", name: "Website" }],
+					inferProjects: true,
+				},
+				classify,
+			),
+		).toBeNull();
+		expect(classify).not.toHaveBeenCalled();
+	});
+
+	it("does not silently truncate an everyone greeting to the fan-out limit", async () => {
+		const classify = vi.fn<RunningClassifier["classify"]>();
+		expect(
+			await routeLocally(
+				{ ...input, text: "say hello all", maxAgents: 1 },
+				classify,
+			),
+		).toBeNull();
+		expect(classify).not.toHaveBeenCalled();
+	});
+
+	it("abstains when a shortened greeting names two candidates", async () => {
+		const classify = vi.fn<RunningClassifier["classify"]>();
+		expect(
+			await routeLocally(
+				{
+					...input,
+					text: "hi agent",
+					candidates: input.candidates.map((candidate) => ({
+						...candidate,
+						displayName: `${candidate.displayName} Agent`,
+					})),
+				},
+				classify,
+			),
+		).toBeNull();
+		expect(classify).not.toHaveBeenCalled();
+	});
+
 	it("retains the only eligible projectless participant without inference", async () => {
 		const classify = vi.fn<RunningClassifier["classify"]>();
 		expect(
@@ -50,76 +163,32 @@ describe("local routing", () => {
 		expect(classify).not.toHaveBeenCalled();
 	});
 
-	it("selects a strong single owner while preserving all context", async () => {
-		const classify = vi.fn<RunningClassifier["classify"]>().mockResolvedValue([
-			{ id: "agent:0", score: 0.58 },
-			{ id: "agent:1", score: 0.2 },
-			{ id: "multiple", score: 0.1 },
-			{ id: "uncertain", score: 0.12 },
-		]);
-		const result = await routeLocally(input, classify);
-		expect(result).toMatchObject({
-			source: "local",
-			assignments: [{ agentId: "front", projectIds: [] }],
-		});
-		expect(result).not.toHaveProperty("confidence");
-		expect(classify.mock.calls[0]?.[0].state).toContain(input.context[0]);
-		expect(classify.mock.calls[0]?.[0].state).toContain(input.text);
-	});
-
 	it.each([
-		null,
-		[
-			{ id: "agent:0", score: 0.54 },
-			{ id: "agent:1", score: 0.2 },
-			{ id: "multiple", score: 0.14 },
-			{ id: "uncertain", score: 0.12 },
-		],
-		[
-			{ id: "agent:0", score: 0.6 },
-			{ id: "agent:1", score: 0.4 },
-		],
-		[
-			{ id: "multiple", score: 0.95 },
-			{ id: "agent:0", score: 0.05 },
-		],
-		[
-			{ id: "uncertain", score: 0.95 },
-			{ id: "agent:0", score: 0.05 },
-		],
+		"Fix the login CSS.",
+		"Add the React export button and the API that streams the archive.",
+		"Build a login screen backed by a new authentication endpoint.",
 	])(
-		"defers ambiguity, multiple owners, or unsupported input to the existing router",
-		async (scores) => {
-			expect(await routeLocally(input, async () => scores)).toBeNull();
+		"leaves the complete recipient set to inference despite a confident partial match: %s",
+		async (text) => {
+			const classify = vi
+				.fn<RunningClassifier["classify"]>()
+				.mockResolvedValue([
+					{ id: "agent:0", score: 0.99 },
+					{ id: "agent:1", score: 0.005 },
+					{ id: "multiple", score: 0.005 },
+				]);
+			expect(await routeLocally({ ...input, text }, classify)).toBeNull();
+			expect(classify).not.toHaveBeenCalled();
 		},
 	);
 
-	it("does not accept a partial owner for a compound cross-domain request", async () => {
-		const classify = async () => [
-			{ id: "agent:0", score: 0.8 },
-			{ id: "agent:1", score: 0.1 },
-			{ id: "multiple", score: 0.1 },
-		];
+	it("retains explicitly scoped Projects for the only eligible participant", async () => {
+		const classify = vi.fn<RunningClassifier["classify"]>();
 		expect(
 			await routeLocally(
 				{
 					...input,
-					text: "Add the React export button and the API that streams the archive.",
-				},
-				classify,
-			),
-		).toBeNull();
-	});
-
-	it("retains explicitly scoped Projects when selecting a recipient", async () => {
-		const classify = vi.fn<RunningClassifier["classify"]>().mockResolvedValue([
-			{ id: "agent:1", score: 0.9 },
-			{ id: "agent:0", score: 0.1 },
-		]);
-		expect(
-			await routeLocally(
-				{
-					...input,
+					candidates: input.candidates.slice(1),
 					projects: [{ id: "web", name: "Website" }],
 				},
 				classify,
@@ -127,7 +196,7 @@ describe("local routing", () => {
 		).toMatchObject({
 			assignments: [{ agentId: "back", projectIds: ["web"] }],
 		});
-		expect(classify).toHaveBeenCalledTimes(1);
+		expect(classify).not.toHaveBeenCalled();
 	});
 	it("defers correction memory rather than trusting a confident conflicting classifier", async () => {
 		const classify = vi.fn<RunningClassifier["classify"]>().mockResolvedValue([
@@ -136,23 +205,25 @@ describe("local routing", () => {
 		]);
 		expect(
 			await routeLocally(
-				{ ...input, routingMemory: "Backend handles CSS now." },
+				{
+					...input,
+					candidates: input.candidates.slice(0, 1),
+					routingMemory: "Backend handles CSS now.",
+				},
 				classify,
 			),
 		).toBeNull();
 		expect(classify).not.toHaveBeenCalled();
 	});
-	it("requires stronger evidence when a request negates a responsibility", async () => {
-		const scores = [
-			{ id: "agent:0", score: 0.6 },
-			{ id: "agent:1", score: 0.1 },
-		];
+	it("defers a stale brief even with only one eligible participant", async () => {
+		const classify = vi.fn<RunningClassifier["classify"]>();
 		expect(
 			await routeLocally(
-				{ ...input, text: "Ignore the CSS work; change the API." },
-				async () => scores,
+				{ ...input, candidates: input.candidates.slice(0, 1), context: null },
+				classify,
 			),
 		).toBeNull();
+		expect(classify).not.toHaveBeenCalled();
 	});
 	it.each([
 		["Repair Cairn's API.", "work", ["cairn"]],
@@ -265,6 +336,8 @@ describe("local routing", () => {
 				{ agentId: "front", projectIds: ["web"] },
 			],
 		});
+		expect(classify.mock.calls[0]?.[0].state).toContain(input.context[0]);
+		expect(classify.mock.calls[0]?.[0].state).toContain(input.text);
 	});
 
 	it("defers explicit relay order to inference when the user names a different first speaker", async () => {

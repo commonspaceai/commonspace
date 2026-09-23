@@ -1,6 +1,6 @@
 {
 	"name": "commonspace-workspace",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "A local-first workspace for projects, channels, direct messages, and coding agents.",
 	"private": true,
 	"license": "MIT",
@@ -69,6 +69,7 @@
 		"benchmark:session-isolation": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-session-isolation.ts",
 		"evaluate:context": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/evaluate-context.ts",
 		"evaluate:classifier": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/evaluate-classifier.ts",
+		"evaluate:routing": "node scripts/run-vitest.mjs COMMONSPACE_ROUTING_EVAL tests/routing-quality.spec.ts --maxWorkers=1",
 		"benchmark:context": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-context.ts",
 		"service:install": "node scripts/commonspace-service.mjs install --source .",
 		"service:update": "node scripts/commonspace-service.mjs update",

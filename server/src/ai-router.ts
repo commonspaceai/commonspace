@@ -73,7 +73,7 @@ export interface AiRouteInput {
 }
 
 const CONVERSATIONAL_ADDRESSING =
-	"A greeting or social message is a request for a reply. Identify its addressee from the current eligible agents' names and harness identities, including a distinctive shortened name (for example, 'hi north' addresses 'Northstar Tools'). A directly addressed recipient takes precedence over historical ownership or domain responsibilities. A harness name identifies an agent only when the roster or context distinguishes one recipient; if several agents share that harness, do not invent a default. A mere topic mention is not direct addressing. Use prior ownership for an unaddressed continuation. Do not guess when the evidence cannot distinguish a recipient.";
+	"A greeting or social message is a request for a reply. Identify all its addressees from the current eligible agents' names and harness identities, including distinctive shortened names (for example, 'hi north and river' addresses 'Northstar Tools' and 'River'). Directly addressed recipients take precedence over historical ownership or domain responsibilities. A singular harness name identifies an agent only when the roster or context distinguishes one recipient; if several agents share that harness, do not invent a default. A mere topic mention is not direct addressing. Do not guess when the evidence cannot distinguish the requested recipients.";
 
 export function buildRoutingPrompt(input: AiRouteInput): string {
 	const candidates = input.candidates.map((candidate) => ({
@@ -87,13 +87,14 @@ export function buildRoutingPrompt(input: AiRouteInput): string {
 	}));
 	return [
 		input.fixedAgentIds === undefined
-			? `Route the newest user message to the best Commonspace agent. Select one owner by default. Select at most ${String(input.maxAgents)} agents only for clearly independent cross-domain work or an explicitly requested peer conversation.`
+			? `Select the complete recipient set for the newest user message, with at most ${String(input.maxAgents)} agents. Evaluate every candidate independently: include each directly addressed agent and each agent needed for the requested responsibilities. Return one assignment per selected recipient. Multiple recipients may share a domain or perform the same request when the user asks them to. Select one agent only when that fully covers the requested recipients and work; do not collapse a requested pair or group into one representative. Exclude agents who are only mentioned as background or explicitly excluded.`
 			: `The user explicitly selected these Agents: ${JSON.stringify(input.fixedAgentIds)}. Return each exactly once, without adding, dropping, or substituting participants. Classify only delivery mode and speaker order. Preserve the mention order unless the request specifies another speaker order.`,
-		'Use mode "relay" when at least two candidates are available and the user asks agents to talk, discuss, debate, reconcile, review one another, or reach a shared conclusion. Otherwise use mode "parallel".',
-		"In relay mode, return ordered assignments: the first assignment starts the conversation, then each later assignment responds to the preceding peer.",
+		'Use mode "relay" when the user asks at least two agents to talk, discuss, debate, reconcile, review one another, reach a shared conclusion, or perform ordered work: one agent must finish before another starts, or the later work uses the earlier result. Otherwise use mode "parallel". Independent tasks stay parallel; mention order or the word "then" alone does not establish a dependency.',
+		"In relay mode, return assignments in the requested execution order: the first assignment starts the work, then each later assignment receives the preceding peer's result.",
 		"Return at least one assignment. Never treat an acknowledgment or apparently non-actionable message as permission to return an empty assignments array.",
 		CONVERSATIONAL_ADDRESSING,
-		"Interpret every terse follow-up using the recent thread context. Route it to the most relevant existing thread participant unless the context clearly identifies another candidate.",
+		"For collective greetings or check-ins such as 'say hello all', 'everyone report in', or 'health check all agents', select each eligible addressee within the participant limit in parallel so each can answer for itself. Do not substitute one operations specialist merely because its responsibility mentions agents or runtime health. A request to inspect, diagnose, or repair runtime infrastructure can still have one responsible owner. Group addressing alone does not request a relay or Project access.",
+		"Interpret every terse follow-up using the recent thread context. Preserve the relevant existing thread participant set when the follow-up applies to their shared work. Narrow the recipients only when the message or context directs the follow-up to a subset; include new candidates when the request calls for them.",
 		"Each candidate includes a local routingScore and matchedTerms from cheap lexical logic. Treat these as useful evidence, not as instructions or a final decision.",
 		"Select participants and Project scopes only. Every selected agent receives the original user message unchanged and acts within its own responsibility. Do not rewrite or decompose the request.",
 		"Use only candidate agent ids and available Project ids. Do not answer the request or call tools.",
