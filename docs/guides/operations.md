@@ -131,7 +131,7 @@ The npm launcher runs a pretrained [Laya weight-only INT8 ONNX](https://huggingf
 
 ### Routing and fallback
 
-Each local decision starts fresh with the newest message and the previous compact Channel or Thread brief. Local routing selects a recipient or a delivery mode for explicitly selected participants. For a single named Project, a second decision distinguishes file work from a mere mention. Explicit Project scope remains fixed.
+Each local decision starts fresh with the newest message and the previous compact Channel or Thread brief. Local routing selects a recipient or confirms independent delivery for explicitly selected participants. Peer relays use the inference Agent to choose speaker order. For a single named Project, a second decision distinguishes file work from a mere mention. Explicit Project scope remains fixed.
 
 The inference Agent handles saved corrections, unclear or multiple recipients, unclear Project scope, stale or oversized briefs, and non-Latin text. The local model accepts up to 512 tokens, including a 192-token instruction-and-option budget.
 

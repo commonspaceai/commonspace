@@ -73,7 +73,8 @@ export async function routeLocally(
 			),
 			0.8,
 		);
-		if (mode !== "parallel" && mode !== "relay") return null;
+		// A relay needs an ordered speaker list; this classifier only chooses its mode.
+		if (mode !== "parallel") return null;
 		return {
 			source: "local",
 			mode,

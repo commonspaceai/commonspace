@@ -243,10 +243,10 @@ describe("local routing", () => {
 		).toBeNull();
 		expect(classify).not.toHaveBeenCalled();
 	});
-	it("retains explicit participants and Project scope when classifying peer discussion mode", async () => {
+	it("retains explicit participants and Project scope for independent work", async () => {
 		const classify = vi.fn<RunningClassifier["classify"]>().mockResolvedValue([
-			{ id: "relay", score: 0.9 },
-			{ id: "parallel", score: 0.06 },
+			{ id: "parallel", score: 0.9 },
+			{ id: "relay", score: 0.06 },
 			{ id: "uncertain", score: 0.04 },
 		]);
 		expect(
@@ -259,11 +259,30 @@ describe("local routing", () => {
 				classify,
 			),
 		).toMatchObject({
-			mode: "relay",
+			mode: "parallel",
 			assignments: [
 				{ agentId: "back", projectIds: ["web"] },
 				{ agentId: "front", projectIds: ["web"] },
 			],
 		});
+	});
+
+	it("defers explicit relay order to inference when the user names a different first speaker", async () => {
+		const classify = vi.fn<RunningClassifier["classify"]>().mockResolvedValue([
+			{ id: "relay", score: 0.9 },
+			{ id: "parallel", score: 0.06 },
+			{ id: "uncertain", score: 0.04 },
+		]);
+		expect(
+			await routeLocally(
+				{
+					...input,
+					text: "@Frontend @Backend: Backend speaks first, then Frontend reviews.",
+					fixedAgentIds: ["front", "back"],
+				},
+				classify,
+			),
+		).toBeNull();
+		expect(classify).toHaveBeenCalledTimes(1);
 	});
 });

@@ -21,6 +21,97 @@ afterEach(async () => {
 });
 
 describe("local routing host integration", () => {
+	it("uses inference speaker order for an explicitly addressed relay", async () => {
+		const root = await mkdtemp(
+			join(tmpdir(), "commonspace-local-relay-order-"),
+		);
+		roots.push(root);
+		const agents = [
+			{
+				id: "front",
+				displayName: "Frontend",
+				adapter: "hermes" as const,
+				status: "stopped" as const,
+			},
+			{
+				id: "back",
+				displayName: "Backend",
+				adapter: "hermes" as const,
+				status: "stopped" as const,
+			},
+		];
+		const classifyRouting = vi.fn<RunningClassifier["classify"]>(async () => [
+			{ id: "relay", score: 0.9 },
+			{ id: "parallel", score: 0.06 },
+			{ id: "uncertain", score: 0.04 },
+		]);
+		const routeAgents = vi.fn(
+			async (input: CommonspaceRouteInput): Promise<CommonspaceRouteResult> => {
+				expect(input.fixedAgentIds).toEqual(["front", "back"]);
+				return {
+					mode: "relay",
+					assignments: ["back", "front"].map((agentId) => ({
+						agentId,
+						projectIds: [],
+					})),
+					reason: "Backend speaks first, then Frontend reviews.",
+				};
+			},
+		);
+		const runAgent = vi.fn(
+			async (input: AgentRunInput) => `Reviewed by ${input.agent.id}.`,
+		);
+		const service = new CommonspaceHostService(
+			{},
+			{ root },
+			{
+				discoverAgents: async () => agents,
+				runAgent,
+				routeAgents,
+				classifyRouting,
+			},
+		);
+		services.push(service);
+		await service.initialize();
+		for (const agent of agents)
+			await service.mutate({
+				action: "add-discovered-agent",
+				agentId: agent.id,
+			});
+		const channel = mustExist(
+			(
+				await service.mutate({
+					action: "create-channel",
+					name: "engineering",
+					agentIds: agents.map((agent) => agent.id),
+				})
+			).channels[0],
+		);
+		const sent = await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			text: "@Frontend @Backend: Backend speaks first, then Frontend reviews.",
+		});
+		await service.whenIdle();
+		const saved = mustExist(
+			service
+				.snapshot()
+				.messages[`channel:${channel.id}`]?.find(
+					(message) => message.id === sent.accepted.id,
+				),
+		);
+		expect(classifyRouting).toHaveBeenCalledTimes(1);
+		expect(routeAgents).toHaveBeenCalledTimes(1);
+		expect(saved.routing).toMatchObject({
+			source: "explicit",
+			mode: "relay",
+			assignments: [{ agentId: "back" }, { agentId: "front" }],
+		});
+		expect(runAgent.mock.calls.map(([input]) => input.agent.id)).toEqual([
+			"back",
+			"front",
+		]);
+	});
+
 	it("defers inherited Thread Project access to the inference Agent", async () => {
 		const root = await mkdtemp(
 			join(tmpdir(), "commonspace-local-thread-scope-"),
