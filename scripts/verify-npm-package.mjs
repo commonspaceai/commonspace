@@ -210,7 +210,7 @@ async function main() {
 			"install",
 			"--prefix",
 			installRoot,
-			"--ignore-scripts",
+			"--ignore-scripts=false",
 			"--no-audit",
 			"--no-fund",
 			archive,

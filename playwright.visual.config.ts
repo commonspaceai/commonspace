@@ -1,6 +1,8 @@
 import { defineConfig } from "@playwright/test";
 
 const USE_SYSTEM_CHROME = process.env.COMMONSPACE_USE_SYSTEM_CHROME === "1";
+const STORYBOOK_PORT = Number(process.env.COMMONSPACE_STORYBOOK_PORT ?? 6006);
+const STORYBOOK_URL = `http://127.0.0.1:${STORYBOOK_PORT}`;
 
 export default defineConfig({
 	testDir: "./tests",
@@ -30,7 +32,7 @@ export default defineConfig({
 		},
 	},
 	use: {
-		baseURL: "http://127.0.0.1:6006",
+		baseURL: STORYBOOK_URL,
 		channel: USE_SYSTEM_CHROME ? "chrome" : undefined,
 		colorScheme: "light",
 		trace: "retain-on-failure",
@@ -40,9 +42,8 @@ export default defineConfig({
 		viewport: { width: 1180, height: 820 },
 	},
 	webServer: {
-		command:
-			"pnpm --filter @commonspace/ui exec vite preview --host 127.0.0.1 --port 6006 --strictPort --outDir storybook-static",
-		url: "http://127.0.0.1:6006/index.json",
+		command: `pnpm --filter @commonspace/ui exec vite preview --host 127.0.0.1 --port ${STORYBOOK_PORT} --strictPort --outDir storybook-static`,
+		url: `${STORYBOOK_URL}/index.json`,
 		reuseExistingServer: false,
 		timeout: 120_000,
 	},
