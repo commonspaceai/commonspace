@@ -64,6 +64,7 @@
 		"package:npm": "node scripts/package-npm.mjs",
 		"verify:npm-package": "node scripts/verify-npm-package.mjs",
 		"verify:release": "node scripts/verify-release.mjs",
+		"benchmark": "vitest bench --run --config vitest.benchmark.config.ts",
 		"benchmark:workspace": "node --expose-gc --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-workspace.ts",
 		"benchmark:browser-refresh": "pnpm build && node --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-browser-refresh.ts",
 		"benchmark:session-isolation": "node --import ./server/node_modules/tsx/dist/loader.mjs scripts/benchmark-session-isolation.ts",
@@ -93,6 +94,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.13",
+		"@codspeed/vitest-plugin": "5.7.1",
 		"@eslint/js": "10.0.1",
 		"@modelcontextprotocol/sdk": "1.30.0",
 		"@playwright/test": "1.63.0",
