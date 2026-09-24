@@ -1,3 +1,4 @@
+import { COMMONSPACE_EXPORT_VERSION } from "@commonspace/shared";
 import { describe, expect, it } from "vitest";
 import { parseWorkspaceImport } from "../ui/src/workspace-import.ts";
 
@@ -21,6 +22,17 @@ describe("workspace import manifest decoding", () => {
 	it("proves UI mapping metadata while preserving the original archive for server validation", () => {
 		expect(parseWorkspaceImport(JSON.stringify(archive))).toEqual({
 			source: { value: archive },
+			projects: [
+				{
+					id: "project-commonspace",
+					name: "Commonspace",
+					rootCount: 2,
+				},
+			],
+		});
+		const currentArchive = { ...archive, version: COMMONSPACE_EXPORT_VERSION };
+		expect(parseWorkspaceImport(JSON.stringify(currentArchive))).toEqual({
+			source: { value: currentArchive },
 			projects: [
 				{
 					id: "project-commonspace",

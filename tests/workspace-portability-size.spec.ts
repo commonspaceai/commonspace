@@ -35,14 +35,14 @@ describe("workspace portability size contract", () => {
 			"workspace archive exceeds the supported",
 		);
 		expect(() => assertWorkspaceImportSize(archive, exactBytes - 1)).toThrow(
-			"choose a smaller version-1 archive",
+			"choose a smaller workspace archive",
 		);
 	});
 
 	it("projects Base64 expansion before attachment data is loaded", () => {
 		const archive = {
 			format: "commonspace-workspace" as const,
-			version: 1 as const,
+			version: 2 as const,
 			exportedAt: "2026-01-01T00:00:00.000Z",
 			workspace: {
 				inboxReadAt: null,

@@ -27,6 +27,12 @@ describe("routing state migration", () => {
 			model: null,
 			createdAt: "2026-08-30T00:00:00.000Z",
 		});
+		state.projects.push({
+			id: "project-1",
+			name: "App",
+			paths: [root],
+			createdAt: "2026-08-30T00:00:00.000Z",
+		});
 		state = applyMutation(state, {
 			action: "create-channel",
 			name: "engineering",
@@ -55,7 +61,7 @@ describe("routing state migration", () => {
 					agentIds: ["agent-1"],
 					assignments: [
 						{ id: "from", agentId: "agent-1", projectIds: [] },
-						{ id: "to", agentId: "agent-1", projectIds: [] },
+						{ id: "to", agentId: "agent-1", projectIds: ["project-1"] },
 					],
 					corrections: [
 						{
@@ -80,13 +86,21 @@ describe("routing state migration", () => {
 				supersedesMessageId: "source",
 			},
 		];
-		await writeFile(join(root, "state.json"), JSON.stringify(state));
+		await writeFile(
+			join(root, "state.json"),
+			JSON.stringify({ ...state, version: 33 }),
+		);
 		const service = new CommonspaceHostService(
 			{},
 			{ root },
 			{ discoverAgents: async () => [] },
 		);
 		await service.initialize();
+		expect(service.snapshot().version).toBe(34);
+		expect(
+			service.snapshot().messages[`channel:${channel.id}`]?.[0]?.routing
+				?.corrections[0]?.projectIds,
+		).toEqual(["project-1"]);
 		expect(service.snapshot().channels[0]?.routingMemory).toEqual({
 			summary: "",
 			status: "empty",
@@ -336,6 +350,7 @@ describe("routing state migration", () => {
 				id: "correction-1",
 				fromAssignmentId: "assignment-1",
 				toAssignmentId: "assignment-9",
+				projectIds: [],
 				createdAt: "2026-08-30T00:01:00.000Z",
 			},
 		]);

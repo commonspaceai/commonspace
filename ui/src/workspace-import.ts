@@ -29,7 +29,7 @@ export function parseWorkspaceImport(
 			!("format" in value) ||
 			value.format !== "commonspace-workspace" ||
 			!("version" in value) ||
-			value.version !== COMMONSPACE_EXPORT_VERSION ||
+			(value.version !== 1 && value.version !== COMMONSPACE_EXPORT_VERSION) ||
 			!("workspace" in value) ||
 			!isObject(value.workspace) ||
 			!("projects" in value.workspace) ||

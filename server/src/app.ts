@@ -115,7 +115,7 @@ const sendMessageRequestSchema = z.strictObject({
 const rerouteAssignmentSchema = z.strictObject({
 	sourceMessageId: z.string(),
 	assignmentId: z.string(),
-	agentId: z.string(),
+	agentIds: z.array(z.string()).min(1),
 	projectIds: z.array(z.string()),
 }) satisfies z.ZodType<RerouteAssignmentRequest>;
 const retryRoutingSchema = z.discriminatedUnion("mode", [
