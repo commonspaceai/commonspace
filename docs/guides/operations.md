@@ -35,6 +35,15 @@ The server reads these variables at startup. They apply to the foreground proces
 | `COMMONSPACE_HOME` | Local state directory; defaults to `~/.commonspace`. Use a separate directory for development or verification. |
 | `COMMONSPACE_UI_ROOT` | Built browser asset directory. The source server serves no UI when unset; npm/service launchers set it. |
 | `COMMONSPACE_LOG_LEVEL` | Server log level; defaults to `info`. |
+| `COMMONSPACE_OTLP_ENDPOINT` | Optional OTLP/HTTP collector origin on loopback, such as `http://127.0.0.1:4318`. Unset by default; remote hosts, paths, credentials, and query strings are rejected. |
+
+### OpenTelemetry
+
+When `COMMONSPACE_OTLP_ENDPOINT` is set, the server exports traces and named exception logs to the local collector's `/v1/traces` and `/v1/logs` endpoints. For example, start a local OTLP/HTTP collector on port `4318`, then run `COMMONSPACE_OTLP_ENDPOINT=http://127.0.0.1:4318 pnpm start`. Shutdown flushes pending records with a bounded timeout. The first failed export prints a generic warning that records may be missing; the server still shuts down normally.
+
+The initial operation spans cover sent and edited message requests and logical Agent runs, with a child span for each Agent attempt. The message span's status describes the full send or edit request; `commonspace.message.accepted=true` records that the message was persisted even if later follow-up activation fails. Edit spans begin after input and source validation, then cover DM reset, persistence, and follow-up activation. Message fields include bounded conversation kind and delivery mode. Agent fields include adapter, session reuse, response length, and final outcome. Intentional Agent cancellation has a `cancelled` outcome without an error status; an inference deadline has a failed `timeout` outcome. A recovered missing-session attempt emits a `WARN` exception log; terminal failures emit an `ERROR` exception log. Logs produced by the server's Pino logger include trace and span IDs when a span is active. The saved Agent activity trace shown in the workspace is separate from OpenTelemetry.
+
+Exported records omit message and response text, domain IDs, Project paths, native session IDs, credentials, raw exception messages, and stack traces. Exception records retain bounded error and cause types without setting `exception.message`. The configured resource identifies only `service.name=commonspace`. Keep the collector local and control its retention and forwarding separately.
 
 ### Agent executables
 
