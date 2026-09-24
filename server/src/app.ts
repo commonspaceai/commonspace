@@ -27,6 +27,7 @@ import express, {
 	type Request,
 	type Response,
 } from "express";
+import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import type { CommonspaceMcpGateway } from "./commonspace-mcp.js";
 import { selectLocalDirectory } from "./directory-picker.js";
@@ -101,6 +102,9 @@ const threadContextRequestSchema =
 const discoverAgentsRequestSchema = z.strictObject({
 	adapter: z.enum(AGENT_ADAPTER_KINDS),
 }) satisfies z.ZodType<DiscoverAgentsRequest>;
+const mcpAuthenticationRequestSchema = z.strictObject({
+	serverName: z.string().min(1).max(120),
+});
 const sendMessageRequestSchema = z.strictObject({
 	conversation: conversationSchema,
 	text: z.string(),
@@ -785,6 +789,8 @@ function registerAgentRoutes(
 		},
 	);
 
+	registerMcpAuthenticationRoute(app, service);
+
 	app.post("/api/discover-agents", requireSameOrigin, async (req, res) => {
 		try {
 			const body = discoverAgentsRequestSchema.parse(req.body);
@@ -839,6 +845,67 @@ function registerAgentRoutes(
 			});
 		}
 	});
+}
+
+function registerMcpAuthenticationRoute(
+	app: Express,
+	service: CommonspaceHostService,
+): void {
+	app.post(
+		"/api/agents/:agentId/mcp-authentication",
+		requireSameOrigin,
+		rateLimit({
+			windowMs: 60_000,
+			limit: 5,
+			message: {
+				code: "mcp_authentication_rate_limited",
+				error: "Too many MCP sign-in attempts. Try again in a minute.",
+			},
+		}),
+		async (req, res) => {
+			res.setHeader("cache-control", "no-store");
+			try {
+				const agentId = req.params.agentId;
+				const { serverName } = mcpAuthenticationRequestSchema.parse(req.body);
+				if (typeof agentId !== "string") {
+					res.status(400).json({
+						code: "invalid_agent_id",
+						error: "Agent ID is required.",
+					});
+					return;
+				}
+				const result = await service.authenticateAgentMcp(agentId, serverName);
+				if (result === undefined) {
+					res.status(404).json({
+						code: "agent_not_found",
+						error: "Agent is not in this workspace.",
+					});
+					return;
+				}
+				if (result === false) {
+					res.status(409).json({
+						code: "mcp_authentication_unavailable",
+						error: "Native sign-in is unavailable for this MCP server.",
+					});
+					return;
+				}
+				res.json({ status: "complete" });
+			} catch (error) {
+				if (error instanceof z.ZodError) {
+					res.status(400).json({
+						code: "invalid_mcp_authentication_request",
+						error: "Select an MCP server to authenticate.",
+					});
+					return;
+				}
+				res.status(500).json({
+					code: "mcp_authentication_failed",
+					error:
+						"Native MCP sign-in did not complete. Try again from agent settings.",
+				});
+			}
+		},
+	);
 }
 
 function registerDeliveryRoutes(

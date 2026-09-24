@@ -5561,10 +5561,24 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 							item.description,
 							1_000,
 						);
+					if (item.authentication !== undefined)
+						metadata.authentication = item.authentication;
 					return metadata;
 				}),
 			})),
 		};
+	}
+
+	async authenticateAgentMcp(
+		agentId: string,
+		serverName: string,
+	): Promise<boolean | undefined> {
+		const agent = this.state.agents.find(
+			(candidate) => candidate.id === agentId,
+		);
+		if (agent === undefined) return undefined;
+		const authenticate = this.adapters[agent.adapter].authenticateMcp;
+		return authenticate === undefined ? false : authenticate(serverName);
 	}
 
 	async discoverAgents(

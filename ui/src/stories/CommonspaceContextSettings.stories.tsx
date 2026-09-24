@@ -1,3 +1,4 @@
+import { McpAuthenticationStatus } from "@commonspace/shared";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
@@ -7,6 +8,7 @@ import {
 	HarnessCapabilities,
 } from "../CommonspaceContextSettings";
 import {
+	codexCapabilityInventory,
 	createStoryStore,
 	populatedCapabilityInventory,
 	storyBootstrap,
@@ -119,17 +121,136 @@ export const AgentConfiguredModel: Story = {
 	},
 };
 
-export const AgentCapabilitiesPopulatedVisual: Story = {
-	render: () => (
+function CodexMcpAuthenticationScenario({ fail = false }: { fail?: boolean }) {
+	const [store] = useState(() => {
+		let authenticated = false;
+		return createStoryStore(storyBootstrap, {
+			inspectAgentCapabilities: async () => ({
+				...codexCapabilityInventory,
+				groups: codexCapabilityInventory.groups.map((group) => ({
+					...group,
+					items: group.items.map((item) =>
+						item.name === "Context catalog" && authenticated
+							? {
+									...item,
+									authentication: McpAuthenticationStatus.Authenticated,
+								}
+							: item,
+					),
+				})),
+			}),
+			authenticateAgentMcp: async () => {
+				if (fail) {
+					authenticated = true;
+					throw new Error("Could not confirm native MCP sign-in.");
+				}
+				authenticated = true;
+			},
+		});
+	});
+	return (
 		<AgentSettingsPane
 			bootstrap={storyBootstrap}
-			id="agent-hermes"
-			store={createStoryStore(storyBootstrap, {
-				inspectAgentCapabilities: async () => populatedCapabilityInventory,
-			})}
+			id="agent-codex"
+			store={store}
 			onClose={fn()}
 		/>
+	);
+}
+
+export const AgentCapabilitiesPopulatedVisual: Story = {
+	render: () => <CodexMcpAuthenticationScenario />,
+};
+
+export const AgentMcpAuthentication: Story = {
+	render: () => <CodexMcpAuthenticationScenario />,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(await canvas.findByText("Not authenticated")).toBeVisible();
+		await expect(canvas.getByText("Native OAuth unavailable")).toBeVisible();
+		await expect(
+			canvas.getByRole("button", { name: "Reauthenticate Issue tracker" }),
+		).toBeVisible();
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Authenticate Context catalog" }),
+		);
+		await expect(
+			await canvas.findByRole("button", {
+				name: "Reauthenticate Context catalog",
+			}),
+		).toBeVisible();
+		await expect(
+			canvas.queryByText("Not authenticated"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const AgentMcpAuthenticationExpired: Story = {
+	render: () => (
+		<div className="mx-auto max-w-3xl p-8">
+			<HarnessCapabilities
+				agentId="agent-opencode"
+				store={createStoryStore(storyBootstrap, {
+					inspectAgentCapabilities: async () => ({
+						agentId: "agent-opencode",
+						checkedAt: "2026-09-24T00:00:00.000Z",
+						groups: [
+							{
+								id: "mcp",
+								status: "available",
+								source: "opencode mcp auth list --pure",
+								notice:
+									"Native OAuth token status. Connection health is not checked.",
+								items: [
+									{
+										name: "Issue tracker",
+										status: "configured",
+										authentication: McpAuthenticationStatus.Expired,
+									},
+								],
+							},
+						],
+					}),
+				})}
+			/>
+		</div>
 	),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByText("Authentication expired"),
+		).toBeVisible();
+		await expect(
+			canvas.getByRole("button", { name: "Reauthenticate Issue tracker" }),
+		).toBeVisible();
+	},
+};
+
+export const AgentMcpAuthenticationFailure: Story = {
+	render: () => <CodexMcpAuthenticationScenario fail />,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("button", {
+				name: "Authenticate Context catalog",
+			}),
+		);
+		await expect(await canvas.findByRole("alert")).toHaveTextContent(
+			"Could not confirm native MCP sign-in.",
+		);
+		await expect(
+			canvas.getByRole("button", { name: "Authenticate Context catalog" }),
+		).toBeEnabled();
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Refresh capabilities" }),
+		);
+		await expect(
+			await canvas.findByRole("button", {
+				name: "Reauthenticate Context catalog",
+			}),
+		).toBeVisible();
+		await expect(canvas.queryByRole("alert")).not.toBeInTheDocument();
+	},
 };
 
 export const AgentCapabilitiesLoading: Story = {

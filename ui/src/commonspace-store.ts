@@ -648,6 +648,16 @@ export class CommonspaceClientStore {
 		);
 	}
 
+	async authenticateAgentMcp(
+		agentId: string,
+		serverName: string,
+	): Promise<void> {
+		await requestJson<{ status: "complete" }>(
+			`/api/agents/${encodeURIComponent(agentId)}/mcp-authentication`,
+			{ method: "POST", body: JSON.stringify({ serverName }) },
+		);
+	}
+
 	async discoverAgents(adapter: AgentAdapterKind): Promise<void> {
 		const request = ++this.discoveryRequest;
 		this.set({

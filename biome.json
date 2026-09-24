@@ -60,6 +60,8 @@
 		{
 			"includes": [
 				"packages/shared/src/contracts.ts",
+				"packages/shared/src/harness-capabilities.ts",
+				"ui/src/CommonspaceContextSettings.tsx",
 				"ui/src/CommonspaceThreads.tsx",
 				"ui/src/design-system/RoutingReceipt.tsx",
 				"ui/src/settings-operation.ts"
