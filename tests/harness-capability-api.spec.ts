@@ -186,6 +186,7 @@ if (args[0] === 'mcp' && args[1] === 'list') {
 			}),
 		]),
 	});
+	expect((await request("catalog")).status).toBe(200);
 	const callsBeforeLimit = await readFile(calls, "utf8");
 	const limited = await request("catalog");
 	expect(limited.status).toBe(429);

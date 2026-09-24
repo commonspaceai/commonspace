@@ -856,7 +856,7 @@ function registerMcpAuthenticationRoute(
 		requireSameOrigin,
 		rateLimit({
 			windowMs: 60_000,
-			limit: 4,
+			limit: 5,
 			message: {
 				code: "mcp_authentication_rate_limited",
 				error: "Too many MCP sign-in attempts. Try again in a minute.",
