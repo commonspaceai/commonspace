@@ -27,6 +27,7 @@ import express, {
 	type Request,
 	type Response,
 } from "express";
+import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import type { CommonspaceMcpGateway } from "./commonspace-mcp.js";
 import { selectLocalDirectory } from "./directory-picker.js";
@@ -853,6 +854,14 @@ function registerMcpAuthenticationRoute(
 	app.post(
 		"/api/agents/:agentId/mcp-authentication",
 		requireSameOrigin,
+		rateLimit({
+			windowMs: 60_000,
+			limit: 4,
+			message: {
+				code: "mcp_authentication_rate_limited",
+				error: "Too many MCP sign-in attempts. Try again in a minute.",
+			},
+		}),
 		async (req, res) => {
 			res.setHeader("cache-control", "no-store");
 			try {

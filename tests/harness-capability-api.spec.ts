@@ -186,5 +186,12 @@ if (args[0] === 'mcp' && args[1] === 'list') {
 			}),
 		]),
 	});
+	const callsBeforeLimit = await readFile(calls, "utf8");
+	const limited = await request("catalog");
+	expect(limited.status).toBe(429);
+	expect(await limited.json()).toMatchObject({
+		code: "mcp_authentication_rate_limited",
+	});
+	expect(await readFile(calls, "utf8")).toBe(callsBeforeLimit);
 	expect(JSON.stringify(running.service.snapshot())).toBe(before);
 });
