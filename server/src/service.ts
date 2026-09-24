@@ -10697,12 +10697,14 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 						markOperationFailed(span, timeout, "Agent attempt timed out");
 					} else if (input.signal.aborted)
 						span.setAttribute("commonspace.agent.outcome", "cancelled");
-					else
+					else {
+						span.setAttribute("commonspace.agent.outcome", "failed");
 						markOperationFailed(
 							span,
 							error instanceof Error ? error : undefined,
 							"Agent attempt failed",
 						);
+					}
 					throw error;
 				} finally {
 					span.end();
@@ -11114,6 +11116,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 						span.setAttribute("commonspace.agent.outcome", "cancelled");
 					} else {
 						const observedError = error instanceof Error ? error : undefined;
+						span.setAttribute("commonspace.agent.outcome", "failed");
 						markOperationFailed(span, observedError, "Agent run failed");
 						recordOperationException(observedError, {
 							eventName: "commonspace.agent.run.exception",

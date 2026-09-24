@@ -134,8 +134,10 @@ it("records bounded acceptance, agent failures, and intentional cancellation", a
 			"edit",
 		);
 		expect(agentRun?.status.code).toBe(SpanStatusCode.ERROR);
+		expect(agentRun?.attributes["commonspace.agent.outcome"]).toBe("failed");
 		expect(agentRun?.attributes["error.type"]).toBe("Error");
 		expect(attempt?.status.code).toBe(SpanStatusCode.ERROR);
+		expect(attempt?.attributes["commonspace.agent.outcome"]).toBe("failed");
 		expect(attempt?.attributes["error.type"]).toBe("Error");
 		expect(attempt?.parentSpanContext?.spanId).toBe(
 			agentRun?.spanContext().spanId,

@@ -1,5 +1,6 @@
 import { type Span, SpanStatusCode, trace } from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
+import type { ExportResult } from "@opentelemetry/core";
 import {
 	ATTR_ERROR_TYPE,
 	ATTR_EXCEPTION_TYPE,
@@ -86,6 +87,7 @@ export async function startTelemetry(value: string | undefined) {
 	const endpoint = configuredTelemetryEndpoint(value);
 	if (endpoint === undefined) return undefined;
 	const [
+		{ ExportResultCode },
 		{ NodeTracerProvider },
 		{ BatchSpanProcessor },
 		{ OTLPTraceExporter },
@@ -93,6 +95,7 @@ export async function startTelemetry(value: string | undefined) {
 		{ BatchLogRecordProcessor, LoggerProvider },
 		{ resourceFromAttributes },
 	] = await Promise.all([
+		import("@opentelemetry/core"),
 		import("@opentelemetry/sdk-trace-node"),
 		import("@opentelemetry/sdk-trace-base"),
 		import("@opentelemetry/exporter-trace-otlp-http"),
@@ -100,6 +103,41 @@ export async function startTelemetry(value: string | undefined) {
 		import("@opentelemetry/sdk-logs"),
 		import("@opentelemetry/resources"),
 	]);
+	let exportFailureReported = false;
+	const warnExportFailure = () => {
+		if (exportFailureReported) return;
+		exportFailureReported = true;
+		process.stderr.write(
+			"Commonspace telemetry export failed; records may be missing\n",
+		);
+	};
+	const reportExportFailure = (result: ExportResult) => {
+		if (result.code !== ExportResultCode.SUCCESS) warnExportFailure();
+	};
+	class NotifyingTraceExporter extends OTLPTraceExporter {
+		override export(
+			...[spans, callback]: Parameters<
+				InstanceType<typeof OTLPTraceExporter>["export"]
+			>
+		) {
+			super.export(spans, (result) => {
+				reportExportFailure(result);
+				callback(result);
+			});
+		}
+	}
+	class NotifyingLogExporter extends OTLPLogExporter {
+		override export(
+			...[records, callback]: Parameters<
+				InstanceType<typeof OTLPLogExporter>["export"]
+			>
+		) {
+			super.export(records, (result) => {
+				reportExportFailure(result);
+				callback(result);
+			});
+		}
+	}
 	const resource = resourceFromAttributes({
 		[ATTR_SERVICE_NAME]: "commonspace",
 	});
@@ -107,7 +145,7 @@ export async function startTelemetry(value: string | undefined) {
 		resource,
 		spanProcessors: [
 			new BatchSpanProcessor(
-				new OTLPTraceExporter({
+				new NotifyingTraceExporter({
 					url: `${endpoint}/v1/traces`,
 					timeoutMillis: 1_500,
 				}),
@@ -119,7 +157,7 @@ export async function startTelemetry(value: string | undefined) {
 		resource,
 		processors: [
 			new BatchLogRecordProcessor({
-				exporter: new OTLPLogExporter({
+				exporter: new NotifyingLogExporter({
 					url: `${endpoint}/v1/logs`,
 					timeoutMillis: 1_500,
 				}),
@@ -135,9 +173,8 @@ export async function startTelemetry(value: string | undefined) {
 				loggerProvider.shutdown(),
 				tracerProvider.shutdown(),
 			]);
-			for (const result of results) {
-				if (result.status === "rejected") throw result.reason;
-			}
+			if (results.some((result) => result.status === "rejected"))
+				warnExportFailure();
 		},
 	};
 }
