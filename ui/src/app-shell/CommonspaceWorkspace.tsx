@@ -22,6 +22,7 @@ import { CommonspaceConversation } from "../CommonspaceConversation.tsx";
 import { CommonspaceDirectory } from "../CommonspaceDirectory.tsx";
 import { CommonspaceInbox } from "../CommonspaceInbox.tsx";
 import { CommonspaceProjectView } from "../CommonspaceProjectView.tsx";
+import { CommonspaceScheduled } from "../CommonspaceScheduled.tsx";
 import { CommonspaceThreads } from "../CommonspaceThreads.tsx";
 import type {
 	CommonspaceClientSnapshot,
@@ -378,6 +379,12 @@ export function CommonspaceWorkspace({
 				store={store}
 				onOpenThread={openTarget}
 			/>
+		);
+	}
+
+	if (activeDestination === "scheduled") {
+		return (
+			<CommonspaceScheduled bootstrap={snapshot.bootstrap} store={store} />
 		);
 	}
 

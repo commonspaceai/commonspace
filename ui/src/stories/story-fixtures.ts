@@ -360,6 +360,7 @@ function createStoryState(
 		projects: [primaryProject, secondaryProject],
 		channels: [designChannel, buildChannel],
 		threads: [reviewThread],
+		schedules: [],
 		pins: [],
 		permissions: [],
 		messages: {

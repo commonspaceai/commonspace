@@ -18,6 +18,7 @@ import {
 } from "@commonspace/shared";
 import {
 	ArrowRightIcon,
+	Clock3Icon,
 	FolderIcon,
 	GripVerticalIcon,
 	InboxIcon,
@@ -105,6 +106,7 @@ export interface CommonspaceSidebarProps {
 	onSettingsOpenChange?: (open: boolean) => void;
 	inboxActive?: boolean;
 	threadsActive?: boolean;
+	scheduledActive?: boolean;
 	conversationActive?: boolean;
 	directoryActive?: boolean;
 	activeProjectViewId?: string | null;
@@ -113,6 +115,7 @@ export interface CommonspaceSidebarProps {
 	onOpenSearch?: () => void;
 	onOpenInbox?: () => void;
 	onOpenThreads?: () => void;
+	onOpenScheduled?: () => void;
 	onOpenDirectory?: (kind: CommonspaceDirectoryKind) => void;
 	onOpenContextSettings?: (kind: CommonspaceCollectionKind, id: string) => void;
 	onMentionAgent?: (agentName: string) => void;
@@ -497,6 +500,7 @@ export function CommonspaceSidebar({
 	onSettingsOpenChange,
 	inboxActive = false,
 	threadsActive = false,
+	scheduledActive = false,
 	conversationActive = false,
 	directoryActive = false,
 	activeProjectViewId = null,
@@ -505,6 +509,7 @@ export function CommonspaceSidebar({
 	onOpenSearch,
 	onOpenInbox,
 	onOpenThreads,
+	onOpenScheduled,
 	onOpenDirectory,
 	onOpenContextSettings,
 	onMentionAgent,
@@ -2083,6 +2088,24 @@ export function CommonspaceSidebar({
 					</span>
 					<span className="text-sm font-medium">Threads</span>
 					{threadUnreadCount > 0 && <UnreadCount count={threadUnreadCount} />}
+				</NavigationItem>
+				<NavigationItem
+					type="button"
+					className="pr-9"
+					aria-label="Open Scheduled"
+					aria-pressed={scheduledActive}
+					onClick={() => {
+						setSettingsOpen(false);
+						onOpenScheduled?.();
+					}}
+				>
+					<span
+						className="grid size-5 place-items-center rounded-sm text-sidebar-foreground/50"
+						aria-hidden="true"
+					>
+						<Clock3Icon className="size-[15px]" />
+					</span>
+					<span className="text-sm font-medium">Scheduled</span>
 				</NavigationItem>
 			</nav>
 

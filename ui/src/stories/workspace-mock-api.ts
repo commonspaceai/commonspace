@@ -41,7 +41,8 @@ type WorkspaceScenario =
 	| "empty"
 	| "routing-failed"
 	| "offline"
-	| "queued";
+	| "queued"
+	| "scheduled";
 
 const now = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
@@ -149,6 +150,37 @@ class WorkspaceMockApi {
 		this.initializeAgents();
 		this.initializeConversation(scenario);
 		if (scenario === "queued") this.initializeQueue();
+		if (scenario === "scheduled") {
+			const upcoming = new Date(Date.now() + 2 * 60 * 60_000).toISOString();
+			this.data.state.schedules = [
+				{
+					id: "schedule-review",
+					title: "Review the release",
+					channelId: "channel-design",
+					text: "Review the latest release notes and report any gaps.",
+					timing: {
+						kind: "cron",
+						expression: "0 9 * * 1-5",
+						timeZone: "UTC",
+					},
+					paused: false,
+					nextRunAt: upcoming,
+					lastRunAt: null,
+					createdAt: now(),
+				},
+				{
+					id: "schedule-checkin",
+					title: "Team check-in",
+					channelId: "channel-build",
+					text: "Summarize what changed in the build.",
+					timing: { kind: "once", runAt: upcoming },
+					paused: true,
+					nextRunAt: upcoming,
+					lastRunAt: null,
+					createdAt: now(),
+				},
+			];
+		}
 		if (scenario === "empty") {
 			this.data.state.channels = [];
 			this.data.state.projects = [];
@@ -409,6 +441,9 @@ class WorkspaceMockApi {
 				state.channels = state.channels.filter(
 					(channel) => channel.id !== mutation.channelId,
 				);
+				state.schedules = state.schedules.filter(
+					(schedule) => schedule.channelId !== mutation.channelId,
+				);
 				delete state.messages[`channel:${mutation.channelId}`];
 				state.threads = state.threads.filter(
 					(thread) => thread.channelId !== mutation.channelId,
@@ -444,6 +479,51 @@ class WorkspaceMockApi {
 			case "reset-dm":
 				state.messages[`dm:${mutation.agentId}`] = [];
 				delete state.dmSessions[mutation.agentId];
+				break;
+			case "create-schedule":
+				state.schedules.push({
+					id: id(),
+					title: mutation.title,
+					channelId: mutation.channelId,
+					text: mutation.text,
+					timing: mutation.timing,
+					paused: false,
+					nextRunAt:
+						mutation.timing.kind === "once"
+							? mutation.timing.runAt
+							: new Date(Date.now() + 60 * 60_000).toISOString(),
+					lastRunAt: null,
+					createdAt: now(),
+				});
+				break;
+			case "update-schedule":
+				state.schedules = state.schedules.map((schedule) =>
+					schedule.id === mutation.id
+						? {
+								...schedule,
+								title: mutation.title,
+								channelId: mutation.channelId,
+								text: mutation.text,
+								timing: mutation.timing,
+								nextRunAt:
+									mutation.timing.kind === "once"
+										? mutation.timing.runAt
+										: new Date(Date.now() + 60 * 60_000).toISOString(),
+							}
+						: schedule,
+				);
+				break;
+			case "set-schedule-paused":
+				state.schedules = state.schedules.map((schedule) =>
+					schedule.id === mutation.id
+						? { ...schedule, paused: mutation.paused }
+						: schedule,
+				);
+				break;
+			case "delete-schedule":
+				state.schedules = state.schedules.filter(
+					(schedule) => schedule.id !== mutation.id,
+				);
 				break;
 		}
 		this.touch();
@@ -1239,6 +1319,7 @@ class WorkspaceMockApi {
 			}));
 			this.data.state = {
 				...imported,
+				schedules: imported.schedules ?? [],
 				version: this.data.state.version,
 				revision: this.data.state.revision + 1,
 				projects,

@@ -26,6 +26,7 @@ The following example shows the envelope and workspace field names. Empty settin
     "projects": [],
     "channels": [],
     "threads": [],
+    "schedules": [],
     "pins": [],
     "permissions": [],
     "messages": {}
@@ -39,6 +40,10 @@ The following example shows the envelope and workspace field names. Empty settin
 ### Projects
 
 Each Project contains `id`, `name`, `rootCount`, and `createdAt`. Absolute roots are omitted. Import requires exactly `rootCount` existing local directories for each Project, supplied in an explicit mapping outside the archive.
+
+### Schedules
+
+Each schedule contains its Channel ID, title, message text, paused state, and either a one-time ISO timestamp or a five-field cron expression with an IANA time zone. It also stores the next and last run timestamps. Older version-1 archives may omit `schedules`; import treats that as an empty list. Schedules for missing Channels are discarded during state sanitization.
 
 ### Attachments
 
