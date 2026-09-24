@@ -390,15 +390,19 @@ export const ScheduledManagement: Story = {
 			}),
 		).toBeVisible();
 		await userEvent.click(page.getByRole("button", { name: "Pause" }));
-		await expect(
-			page.getByRole("button", { name: "Edit schedule Review the launch" }),
-		).toHaveTextContent("Paused");
+		await waitFor(() =>
+			expect(
+				page.getByRole("button", { name: "Edit schedule Review the launch" }),
+			).toHaveTextContent("Paused"),
+		);
 		const resume = page.getAllByRole("button", { name: "Resume" })[0];
 		if (resume === undefined) throw new Error("Resume action is missing.");
 		await userEvent.click(resume);
-		await expect(
-			page.getByRole("button", { name: "Edit schedule Review the launch" }),
-		).toHaveTextContent("Next run");
+		await waitFor(() =>
+			expect(
+				page.getByRole("button", { name: "Edit schedule Review the launch" }),
+			).toHaveTextContent("Next run"),
+		);
 	},
 };
 export const DirectMessage: Story = {

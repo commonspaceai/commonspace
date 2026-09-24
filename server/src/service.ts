@@ -4486,14 +4486,20 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				if (this.closing || this.draining) break;
 				if (!this.scheduleIsDue(schedule)) continue;
 				try {
-					await this.withAdmission(async () => {
-						const prepared = await this.prepareSend({
-							conversation: { kind: "channel", id: schedule.channelId },
-							text: schedule.text,
-						});
-						prepared.schedule = schedule;
-						await this.acceptPreparedSend(prepared);
-					});
+					await this.withMessageSubmissionTelemetry(
+						"scheduled",
+						"channel",
+						"queue",
+						(markAccepted) =>
+							this.withAdmission(async () => {
+								const prepared = await this.prepareSend({
+									conversation: { kind: "channel", id: schedule.channelId },
+									text: schedule.text,
+								});
+								prepared.schedule = schedule;
+								return this.acceptPreparedSend(prepared, markAccepted);
+							}),
+					);
 				} catch (error) {
 					failed = true;
 					this.environment.logger?.warn(
@@ -6450,7 +6456,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	}
 
 	private withMessageSubmissionTelemetry(
-		source: "send" | "edit",
+		source: "send" | "edit" | "scheduled",
 		conversationKind: SendMessageRequest["conversation"]["kind"],
 		deliveryMode: NonNullable<SendMessageRequest["delivery"]>,
 		operation: (markAccepted: () => void) => Promise<SendMessageResponse>,
