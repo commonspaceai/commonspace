@@ -12,10 +12,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	parseCodexMcpInventory,
 	parseNamedJsonInventory,
+	parseOpenCodeMcpAuthList,
 } from "../server/src/adapters/capability-inventory.ts";
 import { createClaudeCodeAdapter } from "../server/src/adapters/claude-code.ts";
 import { createCodexAdapter } from "../server/src/adapters/codex.ts";
 import { createHermesAdapter } from "../server/src/adapters/hermes.ts";
+import { createOpenCodeAdapter } from "../server/src/adapters/opencode.ts";
 
 const roots: string[] = [];
 
@@ -111,6 +113,225 @@ describe("native capability inventory", () => {
 		expect(JSON.stringify(parseCodexMcpInventory(output))).not.toContain(
 			"private.example",
 		);
+	});
+
+	it("keeps only OpenCode OAuth states from its native status listing", () => {
+		const output = [
+			"┌  MCP OAuth Status",
+			"●  ✓ catalog \u001b[90mauthenticated",
+			"│      \u001b[90mhttps://private.example/token",
+			"●  ⚠ expired \u001b[90mexpired",
+			"│      \u001b[90mhttps://private.example/expired",
+			"●  ✗ needs-login \u001b[90mnot authenticated",
+			"│      \u001b[90mhttps://private.example/login",
+			"└  3 OAuth-capable server(s)",
+		].join("\n");
+		const urls = new Map([
+			["catalog", "https://private.example/token"],
+			["expired", "https://private.example/expired"],
+			["needs-login", "https://private.example/login"],
+		]);
+		expect([...parseOpenCodeMcpAuthList(output, urls)]).toEqual([
+			["catalog", "authenticated"],
+			["expired", "expired"],
+			["needs-login", "not_authenticated"],
+		]);
+		expect(() =>
+			parseOpenCodeMcpAuthList(
+				output.replace("3 OAuth-capable", "4 OAuth-capable"),
+				urls,
+			),
+		).toThrow();
+		expect(
+			parseOpenCodeMcpAuthList(
+				output.replace(
+					"https://private.example/token",
+					"https://other.example/token",
+				),
+				urls,
+			).has("catalog"),
+		).toBe(false);
+		expect(
+			[
+				...parseOpenCodeMcpAuthList(
+					output.replace("catalog", "4 OAuth-capable server(s)"),
+					new Map([
+						...urls,
+						["4 OAuth-capable server(s)", "https://private.example/token"],
+					]),
+				),
+			].length,
+		).toBe(3);
+	});
+
+	it("reports and renews OpenCode OAuth without exposing URLs or starting MCP servers", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-opencode-auth-"));
+		roots.push(root);
+		const configRoot = join(root, "opencode");
+		await mkdir(configRoot);
+		vi.stubEnv("HOME", root);
+		vi.stubEnv("XDG_CONFIG_HOME", root);
+		vi.stubEnv("XDG_DATA_HOME", join(root, "native-data"));
+		const statusPath = join(root, "status");
+		const callsPath = join(root, "calls");
+		const probePath = join(root, "probe-env.json");
+		const nativeUrlPath = join(root, "native-url");
+		const cli = join(root, "opencode-fixture");
+		await writeFile(statusPath, "authenticated");
+		await writeFile(callsPath, "");
+		await writeFile(
+			join(configRoot, "opencode.json"),
+			JSON.stringify({
+				mcp: {
+					catalog: {
+						type: "remote",
+						url: "https://private.example/token",
+						headers: { Authorization: "Bearer PRIVATE_HEADER" },
+						oauth: { clientSecret: "PRIVATE_CLIENT_SECRET" },
+					},
+					expired: { type: "remote", url: "https://private.example/expired" },
+					local: { type: "local", command: ["/private/never-run"] },
+					templated: {
+						type: "remote",
+						url: "https://{env:MCP_HOST}/mcp",
+					},
+				},
+			}),
+		);
+		await writeFile(
+			cli,
+			`#!${process.execPath}
+const fs = require('node:fs');
+const path = require('node:path');
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify(args) + '\\n');
+if (args[0] === 'mcp' && args[1] === 'auth' && args[2] === 'list') {
+  fs.writeFileSync(${JSON.stringify(probePath)}, JSON.stringify({ home: process.env.HOME, configHome: process.env.XDG_CONFIG_HOME, dataHome: process.env.XDG_DATA_HOME, content: process.env.OPENCODE_CONFIG_CONTENT }));
+  for (const directory of [path.join(process.env.XDG_CONFIG_HOME, 'opencode'), path.join(process.env.HOME, '.opencode')]) {
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, '.gitignore'), 'native startup side effect');
+  }
+  const status = fs.readFileSync(${JSON.stringify(statusPath)}, 'utf8');
+  const catalogUrl = process.env.OPENCODE_CONFIG_CONTENT || !fs.existsSync(${JSON.stringify(nativeUrlPath)}) ? 'https://private.example/token' : fs.readFileSync(${JSON.stringify(nativeUrlPath)}, 'utf8');
+  console.log('┌  MCP OAuth Status\\n●  ✓ catalog \\x1b[90m' + status + '\\n│      ' + catalogUrl + '\\n●  ⚠ expired \\x1b[90mexpired\\n│      https://private.example/expired\\n└  2 OAuth-capable server(s)');
+} else if (args[0] === 'mcp' && args[1] === 'auth' && args[2] === 'catalog') {
+  process.stdout.write('◆  catalog already has valid credentials. Re-authenticate?\\n');
+  process.stdin.on('data', (input) => {
+    if (input.includes(13)) { console.log('Authentication successful!'); process.exit(0); }
+  });
+} else if (args[0] === 'mcp' && args[1] === 'auth' && args[2] === 'expired') {
+  console.log('Authentication failed');
+} else {
+  process.exitCode = 1;
+}
+`,
+			{ mode: 0o700 },
+		);
+		const adapter = createOpenCodeAdapter({ opencodePath: cli });
+		const groups = await adapter.inspectCapabilities({
+			id: "opencode",
+			adapter: "opencode",
+			displayName: "OpenCode",
+			model: null,
+			createdAt: "2026-09-24T00:00:00.000Z",
+		});
+		expect(groups.find((group) => group.id === "mcp")).toMatchObject({
+			status: "available",
+			items: [
+				{ name: "catalog", authentication: "authenticated" },
+				{ name: "expired", authentication: "expired" },
+				{ name: "local", status: "configured" },
+				{ name: "templated", status: "configured" },
+			],
+		});
+		expect(groups.find((group) => group.id === "mcp")?.notice).toContain(
+			"URLs using variable substitution",
+		);
+		expect(JSON.stringify(groups)).not.toMatch(/private\.example|never-run/u);
+		const probe = JSON.parse(await readFile(probePath, "utf8"));
+		expect(probe.home).not.toBe(root);
+		expect(probe.configHome).not.toBe(root);
+		expect(probe.dataHome).toBe(join(root, "native-data"));
+		expect(JSON.parse(probe.content)).toEqual({
+			mcp: {
+				catalog: { type: "remote", url: "https://private.example/token" },
+				expired: { type: "remote", url: "https://private.example/expired" },
+			},
+		});
+		await expect(
+			readFile(join(configRoot, ".gitignore")),
+		).rejects.toMatchObject({
+			code: "ENOENT",
+		});
+		await expect(
+			readFile(join(root, ".opencode", ".gitignore")),
+		).rejects.toMatchObject({
+			code: "ENOENT",
+		});
+		const callsBeforeLocal = await readFile(callsPath, "utf8");
+		expect(await adapter.authenticateMcp?.("local")).toBe(false);
+		expect(await adapter.authenticateMcp?.("templated")).toBe(false);
+		expect(await readFile(callsPath, "utf8")).toBe(callsBeforeLocal);
+		expect(await adapter.authenticateMcp?.("catalog")).toBe(true);
+		await expect(adapter.authenticateMcp?.("expired")).rejects.toThrow();
+		const calls = await readFile(callsPath, "utf8");
+		expect(calls).not.toContain("/private/never-run");
+		expect(calls).toContain('["mcp","auth","catalog","--pure"]');
+		await writeFile(nativeUrlPath, "https://different.example/mcp");
+		const authCallsBefore = (
+			(await readFile(callsPath, "utf8")).match(
+				/\["mcp","auth","catalog","--pure"\]/gu,
+			) ?? []
+		).length;
+		expect(await adapter.authenticateMcp?.("catalog")).toBe(false);
+		expect(
+			(
+				(await readFile(callsPath, "utf8")).match(
+					/\["mcp","auth","catalog","--pure"\]/gu,
+				) ?? []
+			).length,
+		).toBe(authCallsBefore);
+		vi.stubEnv("OPENCODE_CONFIG_DIR", join(root, "override"));
+		const overridden = createOpenCodeAdapter({ opencodePath: cli });
+		expect(
+			(
+				await overridden.inspectCapabilities({
+					id: "opencode",
+					adapter: "opencode",
+					displayName: "OpenCode",
+					model: null,
+					createdAt: "2026-09-24T00:00:00.000Z",
+				})
+			).find((group) => group.id === "mcp")?.items[0],
+		).not.toHaveProperty("authentication");
+		expect(await overridden.authenticateMcp?.("catalog")).toBe(false);
+		vi.stubEnv("OPENCODE_CONFIG_DIR", undefined);
+		vi.stubEnv("OPENCODE_CONFIG_CONTENT", '{"mcp":{}}');
+		const contentOverridden = createOpenCodeAdapter({ opencodePath: cli });
+		expect(await contentOverridden.authenticateMcp?.("catalog")).toBe(false);
+		expect(
+			(
+				await contentOverridden.inspectCapabilities({
+					id: "opencode",
+					adapter: "opencode",
+					displayName: "OpenCode",
+					model: null,
+					createdAt: "2026-09-24T00:00:00.000Z",
+				})
+			).find((group) => group.id === "mcp")?.items[0],
+		).not.toHaveProperty("authentication");
+
+		vi.stubEnv("OPENCODE_CONFIG_CONTENT", undefined);
+		await writeFile(join(configRoot, "opencode.json"), '{"mcp":{}}');
+		await writeFile(callsPath, "");
+		await createOpenCodeAdapter({ opencodePath: cli }).inspectCapabilities({
+			id: "opencode",
+			adapter: "opencode",
+			displayName: "OpenCode",
+			model: null,
+			createdAt: "2026-09-24T00:00:00.000Z",
+		});
+		expect(await readFile(callsPath, "utf8")).toBe("");
 	});
 
 	it("reports the Hermes ACP tool surface without executing inventory commands", async () => {

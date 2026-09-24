@@ -712,6 +712,8 @@ function mcpAuthenticationLabel(
 			return "Authenticated";
 		case McpAuthenticationStatus.NotAuthenticated:
 			return "Not authenticated";
+		case McpAuthenticationStatus.Expired:
+			return "Authentication expired";
 		case McpAuthenticationStatus.Unsupported:
 			return "Native OAuth unavailable";
 		case McpAuthenticationStatus.Unknown:
@@ -735,7 +737,8 @@ function CapabilityItemRow({
 	const canAuthenticate =
 		isMcp &&
 		(item.authentication === McpAuthenticationStatus.Authenticated ||
-			item.authentication === McpAuthenticationStatus.NotAuthenticated);
+			item.authentication === McpAuthenticationStatus.NotAuthenticated ||
+			item.authentication === McpAuthenticationStatus.Expired);
 	const pending =
 		authentication.status === McpAuthenticationRequestStatus.Pending &&
 		authentication.serverName === item.name;
@@ -746,9 +749,9 @@ function CapabilityItemRow({
 			? authentication.message
 			: null;
 	const actionLabel =
-		item.authentication === McpAuthenticationStatus.Authenticated
-			? "Reauthenticate"
-			: "Authenticate";
+		item.authentication === McpAuthenticationStatus.NotAuthenticated
+			? "Authenticate"
+			: "Reauthenticate";
 
 	return (
 		<div className="flex items-start justify-between gap-3 rounded-sm bg-muted px-2.5 py-2">
@@ -768,7 +771,8 @@ function CapabilityItemRow({
 							item.authentication === McpAuthenticationStatus.Authenticated
 								? "text-[var(--status-success)]"
 								: item.authentication ===
-										McpAuthenticationStatus.NotAuthenticated
+											McpAuthenticationStatus.NotAuthenticated ||
+										item.authentication === McpAuthenticationStatus.Expired
 									? "text-amber-800 dark:text-amber-300"
 									: "text-muted-foreground",
 						)}

@@ -2,6 +2,7 @@
 export const enum McpAuthenticationStatus {
 	Authenticated = "authenticated",
 	NotAuthenticated = "not_authenticated",
+	Expired = "expired",
 	Unsupported = "unsupported",
 	Unknown = "unknown",
 }

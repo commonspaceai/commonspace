@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import type {
 	HarnessCapabilityGroup,
 	HarnessCapabilityItem,
@@ -17,6 +18,11 @@ interface CapabilityProbe {
 }
 
 const SAFE_NAME = /^[\p{L}\p{N}][\p{L}\p{N} ._:@()+-]{0,119}$/u;
+const OPENCODE_AUTH_STATUSES: Record<string, McpAuthenticationStatus> = {
+	authenticated: McpAuthenticationStatus.Authenticated,
+	"not authenticated": McpAuthenticationStatus.NotAuthenticated,
+	expired: McpAuthenticationStatus.Expired,
+};
 const inventoryEntrySchema = z.looseObject({
 	name: z.string().optional(),
 	id: z.string().optional(),
@@ -94,6 +100,57 @@ export function parseCodexMcpInventory(
 		}
 		return [{ ...item, authentication }];
 	});
+}
+
+/** OpenCode's native OAuth listing is text; keep only validated names and states. */
+function openCodeAuthEntry(
+	entry: RegExpExecArray,
+	urlLine: string | undefined,
+	expectedUrls: ReadonlyMap<string, string>,
+): [string, McpAuthenticationStatus] | undefined {
+	const name = entry[1];
+	const nativeStatus = entry[2];
+	if (name === undefined || nativeStatus === undefined)
+		throw new Error("Invalid OpenCode MCP OAuth status");
+	const item = safeItem(name, "unknown");
+	if (item === undefined) return undefined;
+	const url = /^\s*│\s+(\S+)\s*$/u.exec(urlLine ?? "")?.[1];
+	if (url === undefined || url !== expectedUrls.get(item.name))
+		return undefined;
+	const authentication = OPENCODE_AUTH_STATUSES[nativeStatus];
+	return authentication === undefined ? undefined : [item.name, authentication];
+}
+
+export function parseOpenCodeMcpAuthList(
+	output: string,
+	expectedUrls: ReadonlyMap<string, string>,
+): Map<string, McpAuthenticationStatus> {
+	const plain = stripVTControlCharacters(output);
+	const states = new Map<string, McpAuthenticationStatus>();
+	let matched = 0;
+	const lines = plain.split(/\r?\n/u);
+	for (const [index, line] of lines.entries()) {
+		const entry =
+			/^\s*\S+\s+[✓⚠✗]\s+(.+?)\s+(not authenticated|authenticated|expired)\s*$/u.exec(
+				line,
+			);
+		if (entry === null) continue;
+		matched += 1;
+		const parsed = openCodeAuthEntry(entry, lines[index + 1], expectedUrls);
+		if (parsed !== undefined) states.set(...parsed);
+	}
+	const summary = /^\s*└\s+(\d+) OAuth-capable server\(s\)\s*$/mu.exec(plain);
+	if (summary === null) {
+		if (
+			matched === 0 &&
+			/^\s*\S+\s+No OAuth-capable MCP servers configured\s*$/mu.test(plain)
+		)
+			return states;
+		throw new Error("Invalid OpenCode MCP OAuth listing");
+	}
+	if (Number(summary[1]) !== matched)
+		throw new Error("Incomplete OpenCode MCP OAuth listing");
+	return states;
 }
 
 export function unavailableGroup(

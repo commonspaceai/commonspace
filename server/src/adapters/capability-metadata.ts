@@ -10,7 +10,15 @@ const MAX_RESOURCE_ENTRIES = 2_000;
 const MCP_SERVER_NAME_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N} ._:@()+-]{0,119}$/u;
 const RESOURCE_NAME_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N} ._@()+-]{0,119}$/u;
 
-const serverEntrySchema = z.object({ enabled: z.boolean().optional() });
+const serverEntrySchema = z.object({
+	enabled: z.boolean().optional(),
+	type: z.unknown().optional(),
+	url: z.unknown().optional(),
+	oauth: z
+		.unknown()
+		.optional()
+		.transform((value) => value === false),
+});
 const serverMetadataSchema = z.object({
 	mcpServers: z.record(z.string(), serverEntrySchema).optional(),
 	mcp: z.record(z.string(), serverEntrySchema).optional(),
@@ -45,6 +53,38 @@ async function readMcpServers(
 	} finally {
 		await file.close();
 	}
+}
+
+/** Only URLs needed for a native OAuth status probe, never configured headers or tokens. */
+export async function readOpenCodeOAuthServers(
+	paths: readonly string[],
+): Promise<{ urls: Map<string, string>; hasTemplatedUrl: boolean }> {
+	const servers = new Map<string, string>();
+	const templatedNames = new Set<string>();
+	for (const path of paths) {
+		const entries = await readMcpServers(path, "mcp");
+		if (entries === undefined) continue;
+		for (const [name, entry] of Object.entries(entries)) {
+			if (!MCP_SERVER_NAME_PATTERN.test(name)) continue;
+			if (
+				entry.type !== "remote" ||
+				typeof entry.url !== "string" ||
+				entry.oauth
+			) {
+				servers.delete(name);
+				templatedNames.delete(name);
+				continue;
+			}
+			if (/\{(?:env|file):[^}]+\}/u.test(entry.url)) {
+				templatedNames.add(name);
+				servers.delete(name);
+				continue;
+			}
+			templatedNames.delete(name);
+			servers.set(name, entry.url);
+		}
+	}
+	return { urls: servers, hasTemplatedUrl: templatedNames.size > 0 };
 }
 
 /** Fixed native configuration sources, never commands, arguments, URLs, or credentials. */

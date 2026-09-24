@@ -185,6 +185,47 @@ export const AgentMcpAuthentication: Story = {
 	},
 };
 
+export const AgentMcpAuthenticationExpired: Story = {
+	render: () => (
+		<div className="mx-auto max-w-3xl p-8">
+			<HarnessCapabilities
+				agentId="agent-opencode"
+				store={createStoryStore(storyBootstrap, {
+					inspectAgentCapabilities: async () => ({
+						agentId: "agent-opencode",
+						checkedAt: "2026-09-24T00:00:00.000Z",
+						groups: [
+							{
+								id: "mcp",
+								status: "available",
+								source: "opencode mcp auth list --pure",
+								notice:
+									"Native OAuth token status. Connection health is not checked.",
+								items: [
+									{
+										name: "Issue tracker",
+										status: "configured",
+										authentication: McpAuthenticationStatus.Expired,
+									},
+								],
+							},
+						],
+					}),
+				})}
+			/>
+		</div>
+	),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByText("Authentication expired"),
+		).toBeVisible();
+		await expect(
+			canvas.getByRole("button", { name: "Reauthenticate Issue tracker" }),
+		).toBeVisible();
+	},
+};
+
 export const AgentMcpAuthenticationFailure: Story = {
 	render: () => <CodexMcpAuthenticationScenario fail />,
 	play: async ({ canvasElement }) => {
