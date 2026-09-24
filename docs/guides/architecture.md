@@ -111,9 +111,9 @@ Server-sent events carry durable state revisions, routing configuration invalida
 
 ### Native capability inventory
 
-Native capability browsing uses `GET /api/agents/:agentId/capabilities` for an added agent. The shared `HarnessCapabilityInventory` contract contains only display metadata. Each adapter owns native inventory extraction; the service applies host redaction, and the endpoint is same-origin with `Cache-Control: no-store`. Inspection is lazy and separate from bootstrap, saved agent profiles, and portable exports.
+Native capability browsing uses `GET /api/agents/:agentId/capabilities` for an added agent. The shared `HarnessCapabilityInventory` contract contains only display metadata, including native OAuth status when the adapter can report it. Each adapter owns native inventory extraction; the service applies host redaction, and the endpoint is same-origin with `Cache-Control: no-store`. Inspection is lazy and separate from bootstrap, saved agent profiles, and portable exports.
 
-Per-category failures do not erase categories that were successfully inspected. The browser owns loading, refresh, and unavailable states; it has no native capability editing controls.
+Per-category failures do not erase categories that were successfully inspected. The browser owns loading, refresh, and unavailable states. `POST /api/agents/:agentId/mcp-authentication` is an explicit same-origin native sign-in action for supported MCP servers. The adapter rechecks the server's current OAuth status before invoking native login with an argument array. Commonspace does not receive or persist credentials or infer that OAuth is required when the harness only reports a missing login.
 
 ### Package and service lifecycle
 

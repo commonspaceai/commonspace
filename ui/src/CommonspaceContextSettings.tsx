@@ -5,8 +5,9 @@ import type {
 	CommonspacePin,
 	HarnessCapabilityGroup,
 	HarnessCapabilityInventory,
+	HarnessCapabilityItem,
 } from "@commonspace/shared";
-import { AGENT_ADAPTERS } from "@commonspace/shared";
+import { AGENT_ADAPTERS, McpAuthenticationStatus } from "@commonspace/shared";
 import {
 	ChevronDownIcon,
 	LoaderCircleIcon,
@@ -675,6 +676,21 @@ type CapabilityRequest =
 	| LoadedCapabilities
 	| FailedCapabilities;
 
+const enum McpAuthenticationRequestStatus {
+	Idle = "idle",
+	Pending = "pending",
+	Error = "error",
+}
+
+type McpAuthenticationRequest =
+	| { status: McpAuthenticationRequestStatus.Idle }
+	| { status: McpAuthenticationRequestStatus.Pending; serverName: string }
+	| {
+			status: McpAuthenticationRequestStatus.Error;
+			serverName: string;
+			message: string;
+	  };
+
 function capabilityStatusLabel(
 	status: HarnessCapabilityGroup["status"],
 ): string {
@@ -688,6 +704,110 @@ function capabilityStatusLabel(
 	}
 }
 
+function mcpAuthenticationLabel(
+	status: HarnessCapabilityItem["authentication"],
+): string {
+	switch (status) {
+		case McpAuthenticationStatus.Authenticated:
+			return "Authenticated";
+		case McpAuthenticationStatus.NotAuthenticated:
+			return "Not authenticated";
+		case McpAuthenticationStatus.Unsupported:
+			return "Native OAuth unavailable";
+		case McpAuthenticationStatus.Unknown:
+			return "Authentication unknown";
+		case undefined:
+			return "Authentication not reported";
+	}
+}
+
+function CapabilityItemRow({
+	item,
+	isMcp,
+	authentication,
+	onAuthenticate,
+}: {
+	item: HarnessCapabilityItem;
+	isMcp: boolean;
+	authentication: McpAuthenticationRequest;
+	onAuthenticate: (serverName: string) => Promise<void>;
+}) {
+	const canAuthenticate =
+		isMcp &&
+		(item.authentication === McpAuthenticationStatus.Authenticated ||
+			item.authentication === McpAuthenticationStatus.NotAuthenticated);
+	const pending =
+		authentication.status === McpAuthenticationRequestStatus.Pending &&
+		authentication.serverName === item.name;
+	const error =
+		isMcp &&
+		authentication.status === McpAuthenticationRequestStatus.Error &&
+		authentication.serverName === item.name
+			? authentication.message
+			: null;
+	const actionLabel =
+		item.authentication === McpAuthenticationStatus.Authenticated
+			? "Reauthenticate"
+			: "Authenticate";
+
+	return (
+		<div className="flex items-start justify-between gap-3 rounded-sm bg-muted px-2.5 py-2">
+			<span className="min-w-0 flex-1">
+				<strong className="block break-words text-foreground">
+					{item.name}
+				</strong>
+				{item.description === undefined ? null : (
+					<small className="mt-0.5 block leading-4 text-muted-foreground">
+						{item.description}
+					</small>
+				)}
+				{isMcp ? (
+					<small
+						className={cn(
+							"mt-1 flex items-center gap-1.5 leading-4",
+							item.authentication === McpAuthenticationStatus.Authenticated
+								? "text-[var(--status-success)]"
+								: item.authentication ===
+										McpAuthenticationStatus.NotAuthenticated
+									? "text-amber-800 dark:text-amber-300"
+									: "text-muted-foreground",
+						)}
+					>
+						<span
+							className="size-1.5 shrink-0 rounded-full bg-current"
+							aria-hidden="true"
+						/>
+						{mcpAuthenticationLabel(item.authentication)}
+					</small>
+				) : null}
+				{error === null ? null : (
+					<small className="mt-1 block text-destructive" role="alert">
+						{error}
+					</small>
+				)}
+			</span>
+			<span className="flex shrink-0 flex-col items-end gap-1.5">
+				<span className="rounded-full border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+					{item.status}
+				</span>
+				{canAuthenticate ? (
+					<Button
+						size="xs"
+						className="bg-chart-2 text-zinc-950 hover:brightness-95"
+						aria-label={`${pending ? "Authenticating" : actionLabel} ${item.name}`}
+						disabled={
+							authentication.status === McpAuthenticationRequestStatus.Pending
+						}
+						onClick={() => void onAuthenticate(item.name)}
+					>
+						{pending ? "Authenticating…" : actionLabel}
+					</Button>
+				) : null}
+			</span>
+		</div>
+	);
+}
+
 export function HarnessCapabilities({
 	agentId,
 	store,
@@ -698,41 +818,71 @@ export function HarnessCapabilities({
 	const [request, setRequest] = useState<CapabilityRequest>({
 		status: CapabilityRequestStatus.Loading,
 	});
+	const [authentication, setAuthentication] =
+		useState<McpAuthenticationRequest>({
+			status: McpAuthenticationRequestStatus.Idle,
+		});
 	const [query, setQuery] = useState("");
 	const requestId = useRef(0);
 
-	const inspect = useCallback(() => {
-		const currentRequest = ++requestId.current;
-		setRequest({ status: CapabilityRequestStatus.Loading });
-		void store
-			.inspectAgentCapabilities(agentId)
-			.then((inventory) => {
-				if (
-					requestId.current === currentRequest &&
-					inventory.agentId === agentId
-				) {
-					setRequest({
-						status: CapabilityRequestStatus.Success,
-						inventory,
-					});
-				}
-			})
-			.catch((cause: unknown) => {
-				if (requestId.current === currentRequest) {
-					setRequest({
-						status: CapabilityRequestStatus.Error,
-						message: cause instanceof Error ? cause.message : String(cause),
-					});
-				}
-			});
-	}, [agentId, store]);
+	const inspect = useCallback(
+		(showLoading = true) => {
+			const currentRequest = ++requestId.current;
+			if (showLoading) setRequest({ status: CapabilityRequestStatus.Loading });
+			return store
+				.inspectAgentCapabilities(agentId)
+				.then((inventory) => {
+					if (
+						requestId.current === currentRequest &&
+						inventory.agentId === agentId
+					) {
+						setRequest({
+							status: CapabilityRequestStatus.Success,
+							inventory,
+						});
+					}
+				})
+				.catch((cause: unknown) => {
+					if (requestId.current === currentRequest) {
+						setRequest({
+							status: CapabilityRequestStatus.Error,
+							message: cause instanceof Error ? cause.message : String(cause),
+						});
+					}
+				});
+		},
+		[agentId, store],
+	);
 
 	useEffect(() => {
-		inspect();
+		void inspect();
 		return () => {
 			requestId.current += 1;
 		};
 	}, [inspect]);
+
+	const authenticate = async (serverName: string) => {
+		setAuthentication({
+			status: McpAuthenticationRequestStatus.Pending,
+			serverName,
+		});
+		try {
+			await store.authenticateAgentMcp(agentId, serverName);
+			await inspect(false);
+			setAuthentication({ status: McpAuthenticationRequestStatus.Idle });
+		} catch (cause) {
+			setAuthentication({
+				status: McpAuthenticationRequestStatus.Error,
+				serverName,
+				message: cause instanceof Error ? cause.message : String(cause),
+			});
+		}
+	};
+
+	const refresh = () => {
+		setAuthentication({ status: McpAuthenticationRequestStatus.Idle });
+		void inspect();
+	};
 
 	if (request.status === CapabilityRequestStatus.Loading) {
 		return (
@@ -753,7 +903,7 @@ export function HarnessCapabilities({
 					Capability inspection failed
 				</strong>
 				<p className="mt-1 text-muted-foreground">{request.message}</p>
-				<Button className="mt-3" size="sm" variant="outline" onClick={inspect}>
+				<Button className="mt-3" size="sm" variant="outline" onClick={refresh}>
 					<RefreshCwIcon data-icon="inline-start" aria-hidden="true" />
 					Try again
 				</Button>
@@ -767,7 +917,7 @@ export function HarnessCapabilities({
 		items: group.items.filter((item) =>
 			normalized === ""
 				? true
-				: `${item.name} ${item.description ?? ""} ${item.status}`
+				: `${item.name} ${item.description ?? ""} ${item.status} ${group.id === "mcp" ? mcpAuthenticationLabel(item.authentication) : ""}`
 						.toLocaleLowerCase()
 						.includes(normalized),
 		),
@@ -798,14 +948,17 @@ export function HarnessCapabilities({
 					size="icon"
 					variant="outline"
 					aria-label="Refresh capabilities"
-					onClick={inspect}
+					onClick={refresh}
+					disabled={
+						authentication.status === McpAuthenticationRequestStatus.Pending
+					}
 				>
 					<RefreshCwIcon aria-hidden="true" />
 				</Button>
 			</div>
 			<p className="text-[11px] leading-4 text-muted-foreground">
-				Read-only metadata from native harness. Configured entries may still
-				require runtime approval or authentication.
+				Inventory comes from the native harness. MCP sign-in uses its native CLI
+				when available; connection health and other credentials are not checked.
 			</p>
 			<div className="grid gap-2">
 				{groups.map((group, index) => (
@@ -840,24 +993,13 @@ export function HarnessCapabilities({
 							<p className="text-muted-foreground">{group.notice}</p>
 							{group.items.length > 0 ? (
 								group.items.map((item) => (
-									<div
+									<CapabilityItemRow
 										key={item.name}
-										className="flex items-start justify-between gap-3 rounded-sm bg-muted px-2.5 py-2"
-									>
-										<span className="min-w-0">
-											<strong className="block break-words text-foreground">
-												{item.name}
-											</strong>
-											{item.description === undefined ? null : (
-												<small className="mt-0.5 block leading-4 text-muted-foreground">
-													{item.description}
-												</small>
-											)}
-										</span>
-										<span className="shrink-0 rounded-full border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
-											{item.status}
-										</span>
-									</div>
+										item={item}
+										isMcp={group.id === "mcp"}
+										authentication={authentication}
+										onAuthenticate={authenticate}
+									/>
 								))
 							) : (
 								<p className="rounded-sm bg-muted px-2.5 py-2 text-muted-foreground">

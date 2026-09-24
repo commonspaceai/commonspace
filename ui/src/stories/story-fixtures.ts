@@ -22,6 +22,7 @@ import {
 	type ConversationRef,
 	DEFAULT_COMMONSPACE_NOTIFICATION_SETTINGS,
 	type HarnessCapabilityInventory,
+	McpAuthenticationStatus,
 	type ProjectDirectoryResponse,
 	type ProjectGitDiffResponse,
 	type ProjectGitStatusResponse,
@@ -641,6 +642,7 @@ interface StoryStoreOptions {
 	readonly removePin?: CommonspaceStore["removePin"];
 	readonly discoverAgents?: CommonspaceStore["discoverAgents"];
 	readonly inspectAgentCapabilities?: CommonspaceStore["inspectAgentCapabilities"];
+	readonly authenticateAgentMcp?: CommonspaceStore["authenticateAgentMcp"];
 }
 
 type StoryStoreHandlers = Readonly<Partial<CommonspaceStore>>;
@@ -710,6 +712,8 @@ function storyStoreOptionHandlers(
 		handlers.discoverAgents = options.discoverAgents;
 	if (options.inspectAgentCapabilities !== undefined)
 		handlers.inspectAgentCapabilities = options.inspectAgentCapabilities;
+	if (options.authenticateAgentMcp !== undefined)
+		handlers.authenticateAgentMcp = options.authenticateAgentMcp;
 	return handlers;
 }
 
@@ -875,6 +879,37 @@ export const populatedCapabilityInventory: HarnessCapabilityInventory = {
 			source: "Hermes native skill registry",
 			notice: "Skill metadata could not be inspected.",
 			items: [],
+		},
+	],
+};
+
+export const codexCapabilityInventory: HarnessCapabilityInventory = {
+	agentId: codexAgent.id,
+	checkedAt: now,
+	groups: [
+		{
+			id: "mcp",
+			status: "available",
+			source: "codex mcp list --json",
+			notice:
+				"Codex user configuration. OAuth status does not verify connection health or other credentials.",
+			items: [
+				{
+					name: "Context catalog",
+					status: "enabled",
+					authentication: McpAuthenticationStatus.NotAuthenticated,
+				},
+				{
+					name: "Issue tracker",
+					status: "enabled",
+					authentication: McpAuthenticationStatus.Authenticated,
+				},
+				{
+					name: "Local index",
+					status: "enabled",
+					authentication: McpAuthenticationStatus.Unsupported,
+				},
+			],
 		},
 	],
 };

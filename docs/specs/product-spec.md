@@ -141,7 +141,7 @@ flowchart TD
 | Normalized ACP activity presentation | Runtime configuration and credentials |
 | Search, unread state, notifications, export/import | Raw terminal and runtime debugging |
 
-Agent settings provide an on-demand, read-only native capability browser for every supported adapter. Categories cover tools, MCP integrations, skills, plugins, native agents, and memory metadata. Each category identifies its source and distinguishes available inventory, unavailable inspection, and read failure. Empty inventory is distinct from unavailable inspection.
+Agent settings provide an on-demand native capability browser for every supported adapter. Categories cover tools, MCP integrations, skills, plugins, native agents, and memory metadata. Each category identifies its source and distinguishes available inventory, unavailable inspection, and read failure. Empty inventory is distinct from unavailable inspection. When a native MCP listing reports OAuth state, Agent settings show whether the server is authenticated, not authenticated, or its sign-in status is unavailable. A user may start native MCP sign-in only for a server whose harness supports that action. Other credential methods and connection health are not inferred from configuration.
 
 Refresh does not run a model turn, change native configuration, or persist inventory in workspace data. Native credentials, launch arguments, server endpoints, host paths, and memory contents are excluded. A profile-level inventory must not imply that every item is enabled in every Project or native session.
 
@@ -552,7 +552,7 @@ Workspace archives are unencrypted private user data. Removing Commonspace-manag
 | E2E-10 | Receive a permission request while the client is closed | The service keeps the request pending, other sessions continue, and reopening shows an exact attention item with harness-provided choices. |
 | E2E-11 | Restart after a conversation exceeds the legacy 500-message boundary | Every accepted message and its context restore, resumable sessions continue exactly, and unrecoverable in-flight work is marked interrupted. |
 | E2E-12 | Export and import into a clean workspace | Conversation data and exact attachment bytes import safely. Managed private fields are omitted from the archive, and local Project roots require explicit remapping. |
-| E2E-13 | Open an added Agent's capabilities and refresh | Native metadata loads on demand with source, scope, and inspection time. Search reveals matching items; unavailable inspection differs from empty inventory. No native configuration, private memory content, or workspace data is changed. |
+| E2E-13 | Open an added Agent's capabilities and refresh | Native metadata loads on demand with source, scope, and inspection time. Search reveals matching items; unavailable inspection differs from empty inventory. Refresh does not change native configuration, private memory content, or workspace data. When native OAuth state and sign-in are supported, the displayed status and explicit sign-in action use the harness without exposing credentials. |
 
 ## Definition of done
 

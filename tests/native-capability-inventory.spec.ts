@@ -9,7 +9,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseNamedJsonInventory } from "../server/src/adapters/capability-inventory.ts";
+import {
+	parseCodexMcpInventory,
+	parseNamedJsonInventory,
+} from "../server/src/adapters/capability-inventory.ts";
 import { createClaudeCodeAdapter } from "../server/src/adapters/claude-code.ts";
 import { createCodexAdapter } from "../server/src/adapters/codex.ts";
 import { createHermesAdapter } from "../server/src/adapters/hermes.ts";
@@ -80,6 +83,34 @@ describe("native capability inventory", () => {
 			{ name: "browser", status: "enabled" },
 			{ name: "disabled@example", status: "disabled" },
 		]);
+	});
+
+	it("reports Codex MCP authentication without exposing connection details", () => {
+		const output = JSON.stringify([
+			{
+				name: "signed-in",
+				enabled: true,
+				auth_status: "logged_in",
+				transport: { url: "https://private.example/token" },
+			},
+			{ name: "needs-login", auth_status: "not_logged_in" },
+			{ name: "local", auth_status: "unsupported" },
+			{ name: "uncertain", auth_status: "future_native_status" },
+			{ name: "/private/invalid", auth_status: "logged_in" },
+		]);
+		expect(parseCodexMcpInventory(output)).toEqual([
+			{ name: "signed-in", status: "enabled", authentication: "authenticated" },
+			{
+				name: "needs-login",
+				status: "unknown",
+				authentication: "not_authenticated",
+			},
+			{ name: "local", status: "unknown", authentication: "unsupported" },
+			{ name: "uncertain", status: "unknown", authentication: "unknown" },
+		]);
+		expect(JSON.stringify(parseCodexMcpInventory(output))).not.toContain(
+			"private.example",
+		);
 	});
 
 	it("reports the Hermes ACP tool surface without executing inventory commands", async () => {

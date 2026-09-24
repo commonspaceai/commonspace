@@ -17,6 +17,7 @@ import {
 	type CommonspaceWorkspaceArchive,
 	type ConversationRef,
 	type EditMessageRequest,
+	McpAuthenticationStatus,
 	type ProjectFileEntry,
 	type RerouteAssignmentRequest,
 	type RetryRoutingRequest,
@@ -28,6 +29,7 @@ import {
 } from "@commonspace/shared";
 import { HttpResponse, http } from "msw";
 import {
+	codexCapabilityInventory,
 	discoveryStoryBootstrap,
 	populatedCapabilityInventory,
 	runtimeStoryBootstrap,
@@ -137,6 +139,7 @@ export function createWorkspaceMockApi(scenario: WorkspaceScenario = "ready") {
 
 class WorkspaceMockApi {
 	private readonly data: CommonspaceBootstrap = structuredClone(storyBootstrap);
+	private mcpAuthenticated = false;
 	private readonly uploads = new Map<string, CommonspaceArchiveAttachment>();
 
 	constructor(private readonly scenario: WorkspaceScenario) {
@@ -855,8 +858,37 @@ class WorkspaceMockApi {
 			);
 			return json(this.data);
 		}),
-		http.get("/api/agents/:agentId/capabilities", ({ params }) =>
-			json({ ...populatedCapabilityInventory, agentId: params.agentId }),
+		http.get("/api/agents/:agentId/capabilities", ({ params }) => {
+			if (params.agentId !== "agent-codex")
+				return json({
+					...populatedCapabilityInventory,
+					agentId: params.agentId,
+				});
+			const inventory = structuredClone(codexCapabilityInventory);
+			if (this.mcpAuthenticated) {
+				const item = inventory.groups[0]?.items[0];
+				if (item !== undefined)
+					item.authentication = McpAuthenticationStatus.Authenticated;
+			}
+			return json(inventory);
+		}),
+		http.post(
+			"/api/agents/:agentId/mcp-authentication",
+			async ({ request, params }) => {
+				const { serverName } = await trustedRequestJson<{ serverName: string }>(
+					request,
+				);
+				if (
+					params.agentId !== "agent-codex" ||
+					(serverName !== "Context catalog" && serverName !== "Issue tracker")
+				)
+					return HttpResponse.json(
+						{ error: "Native sign-in is unavailable for this MCP server." },
+						{ status: 409 },
+					);
+				this.mcpAuthenticated = true;
+				return json({ status: "complete" });
+			},
 		),
 		http.get("/api/diagnostics", () => json(this.diagnostics())),
 		http.post("/api/notifications/verify", () =>

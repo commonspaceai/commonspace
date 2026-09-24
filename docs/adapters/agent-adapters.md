@@ -41,10 +41,11 @@ Every configured adapter implements these members:
 | `privatePaths` | List configured executable and argument paths for host redaction. Never send them to the browser. |
 | `discover()` | Return existing `CommonspaceAgentProfile` identities using bounded commands. Throw installation failures; the host logs once and reports no candidates. |
 | `inspectCapabilities(agent)` | Return browser-safe native inventory groups with their source and scope. Distinguish empty inventory, unsupported inspection, and failure. |
+| `authenticateMcp?(serverName)` | For adapters with native MCP sign-in, recheck the named server's OAuth status and invoke the harness login command only when supported. Return unavailable for other servers. |
 | `launch(agent, fullAccess, signal)` | Select the exact native identity and return executable, argument array, environment, and optional `validateInitialization` check. May be synchronous or asynchronous. |
 | `sessionSettings(input)` | Map explicit per-Agent Full access to a native ACP permission mode when supported. Leave model and reasoning absent so native setup remains authoritative. |
 
-Discovery and capability inspection must not authenticate, start a model turn, inspect credentials, or mutate native configuration. Capability sources must be bounded and read-only; returned metadata excludes secrets, paths, endpoints, and memory contents.
+Discovery and capability inspection must not authenticate, start a model turn, inspect credentials, or mutate native configuration. Capability sources must be bounded and read-only; returned metadata excludes secrets, paths, endpoints, and memory contents. The separate sign-in action requires a user click and leaves credentials with the native harness.
 
 Launch preflight checks must honor cancellation. `validateInitialization` checks ACP initialization before sending session references or MCP bindings. Invoke executables with argument arrays; never construct shell command strings.
 
@@ -57,12 +58,14 @@ Open an added Agent's settings to browse and refresh inventory. This is user/pro
 | Harness     | Inventory sources                                                                                                                                                                                                              |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Hermes      | The documented default `hermes-acp` tool surface; profile-specific MCP, skill, plugin, agent, and memory inventory remains unavailable because native inventory commands can initialize files or execute plugin/provider hooks |
-| Codex       | Native MCP/plugin JSON listings and user skill folders, including system skill markers                                                                                                                                         |
+| Codex       | Native MCP/plugin JSON listings and user skill folders, including system skill markers; MCP OAuth status and explicit native sign-in when supported                                                                           |
 | Claude Code | Native plugin JSON, user agent-definition filenames, user skill folders, and global MCP configuration names without running MCP health checks; `claude agents` is not used because current versions list native sessions       |
 | Gemini CLI  | User MCP settings and skill/extension folders with native file markers, including linked folders; no CLI initialization or MCP connections                                                                                     |
 | OpenCode    | Global MCP configuration names, including JSONC, and global skill folders; environment/project overrides are excluded                                                                                                          |
 
 Skill directory readers expose folder labels only when `SKILL.md` exists; they do not read prompts or establish that a skill is enabled. Native tool inventories are not universally available through ACP, so adapters without a safe tool source report that category as unavailable. Memory browsing is limited to native status metadata where supplied; private memory contents are never read into the browser. Inventory is not persisted or exported.
+
+For Codex, `codex mcp list --json` supplies `logged_in`, `not_logged_in`, `unsupported`, or `unknown` OAuth state. `not_logged_in` does not prove the server requires OAuth; `unsupported` does not rule out other credentials. Agent settings only offer Authenticate or Reauthenticate for the first two states, and `codex mcp login <name>` runs only after the adapter confirms the name and current status. Other adapters report no authentication status until a safe native source is implemented.
 
 Resource directory scans inspect at most 2,000 entries per category. Gemini extension directories require a `gemini-extension.json` file. Claude Code's user agent inventory lists direct `.md` definition filenames; project, plugin, and built-in definitions are excluded. Missing directories return an empty inventory; unreadable markers, traversal failures, and oversized scans return an inspection error with no partial results. Marker directories do not count as files, and resource contents are never read.
 

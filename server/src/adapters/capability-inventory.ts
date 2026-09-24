@@ -2,6 +2,7 @@ import type {
 	HarnessCapabilityGroup,
 	HarnessCapabilityItem,
 } from "@commonspace/shared";
+import { McpAuthenticationStatus } from "@commonspace/shared";
 import { z } from "zod";
 import { readHarnessCommand } from "./discovery.js";
 
@@ -26,6 +27,13 @@ const inventorySchema = z.union([
 	z.array(inventoryEntrySchema),
 	z.object({ installed: z.array(inventoryEntrySchema) }),
 ]);
+const codexMcpInventorySchema = z.array(
+	z.looseObject({
+		name: z.string(),
+		enabled: z.boolean().optional(),
+		auth_status: z.string().optional(),
+	}),
+);
 
 function safeItem(
 	name: string | undefined,
@@ -53,6 +61,38 @@ export function parseNamedJsonInventory(
 						: "unknown";
 		const item = safeItem(entry.name ?? entry.id, status);
 		return item === undefined ? [] : [item];
+	});
+}
+
+export function parseCodexMcpInventory(
+	output: string,
+): HarnessCapabilityItem[] {
+	const entries = codexMcpInventorySchema.parse(JSON.parse(output));
+	return entries.flatMap((entry) => {
+		const item = safeItem(
+			entry.name,
+			entry.enabled === true
+				? "enabled"
+				: entry.enabled === false
+					? "disabled"
+					: "unknown",
+		);
+		if (item === undefined) return [];
+		let authentication: McpAuthenticationStatus;
+		switch (entry.auth_status) {
+			case "logged_in":
+				authentication = McpAuthenticationStatus.Authenticated;
+				break;
+			case "not_logged_in":
+				authentication = McpAuthenticationStatus.NotAuthenticated;
+				break;
+			case "unsupported":
+				authentication = McpAuthenticationStatus.Unsupported;
+				break;
+			default:
+				authentication = McpAuthenticationStatus.Unknown;
+		}
+		return [{ ...item, authentication }];
 	});
 }
 

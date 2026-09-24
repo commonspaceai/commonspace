@@ -1,8 +1,12 @@
+import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
+import { McpAuthenticationStatus } from "@commonspace/shared";
 import {
 	inspectCommandCapabilities,
+	parseCodexMcpInventory,
 	parseNamedJsonInventory,
 	unavailableGroup,
 } from "./capability-inventory.js";
@@ -11,6 +15,7 @@ import { readHarnessCommand } from "./discovery.js";
 import type { AgentAdapterConfig, NativeAgentAdapter } from "./types.js";
 
 const moduleRequire = createRequire(import.meta.url);
+const execFileAsync = promisify(execFile);
 
 export function createCodexAdapter(
 	config: AgentAdapterConfig,
@@ -44,8 +49,8 @@ export function createCodexAdapter(
 						args: ["mcp", "list", "--json"],
 						source: "codex mcp list --json",
 						notice:
-							"Server names and enabled state from the native Codex user configuration.",
-						parse: parseNamedJsonInventory,
+							"Server names, enabled state, and OAuth status from native Codex configuration. Other credentials and connection health are not checked.",
+						parse: parseCodexMcpInventory,
 					},
 					{
 						id: "plugins",
@@ -75,6 +80,23 @@ export function createCodexAdapter(
 					),
 				],
 			);
+		},
+		async authenticateMcp(serverName) {
+			const items = parseCodexMcpInventory(
+				await readHarnessCommand(cliPath, ["mcp", "list", "--json"]),
+			);
+			const item = items.find((candidate) => candidate.name === serverName);
+			if (
+				item?.authentication !== McpAuthenticationStatus.Authenticated &&
+				item?.authentication !== McpAuthenticationStatus.NotAuthenticated
+			)
+				return false;
+			await execFileAsync(cliPath, ["mcp", "login", serverName], {
+				maxBuffer: 1024 * 1024,
+				timeout: 180_000,
+				encoding: "utf8",
+			});
+			return true;
 		},
 		async discover() {
 			await readHarnessCommand(cliPath, ["--version"]);
