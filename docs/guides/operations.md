@@ -341,7 +341,7 @@ Replace `YYYYMMDD` with your backup date, and adjust the source if using `COMMON
 
 ### Automatic state recovery
 
-The current internal state version is 34 and migrates versions 1–33 on startup. Version 34 adds schedules, retains multiple correction links from one assignment, and stores the chosen Project scope per correction. Older corrections derive that scope from their target assignment, and workspaces without schedules receive an empty list. Version 33 added private pending attachment cleanup IDs. Older workspaces retain their conversations and native-session mappings without creating cleanup work.
+On startup, the host loads persisted state versions 1–34 into the current shape. Version 34 adds Channel schedules and per-correction Project scopes while preserving multiple correction links from one assignment. Older corrections inherit their target assignment's scope; missing schedule lists default to empty. Version 33 added private pending attachment cleanup IDs. Older workspaces retain their conversations and native-session mappings without creating cleanup work.
 
 Each write retains the previous valid primary as `state.backup.json`. On startup:
 

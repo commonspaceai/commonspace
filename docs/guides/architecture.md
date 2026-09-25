@@ -200,7 +200,7 @@ Project scope is inferred unless the user supplies visible `@@project` reference
 
 ## Persistence
 
-The current internal state version is 34, defined by `COMMONSPACE_STATE_VERSION`. Versions 1–33 migrate during load through structural validation and sanitization. Version 34 adds schedules and preserves multiple correction links from one assignment and the explicitly chosen Project scope on each correction; older corrections inherit the target assignment's saved scope during migration.
+Version 34 adds scheduled Channel messages and stores the chosen Project scope on each routing correction while preserving multiple corrections from one assignment. Older corrections inherit the scope from their target assignment.
 
 Persisted state includes the roster, appearance, workspace coordination defaults, host-private native sessions, bounded activity, Inbox read/unread/saved state, notification preferences, attachments, routing decisions and memory, Project references, Channel/Thread context, schedules, pins, message versions, deletion markers, permissions, and execution state. Native model and reasoning settings are not Commonspace state.
 
