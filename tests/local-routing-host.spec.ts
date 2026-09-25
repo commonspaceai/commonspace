@@ -418,7 +418,7 @@ describe("local routing host integration", () => {
 				const rerouted = await service.rerouteAssignment({
 					sourceMessageId: sent.accepted.id,
 					assignmentId: assignment.id,
-					agentId: "backend",
+					agentIds: ["backend"],
 					projectIds: [],
 				});
 				await service.whenIdle();
@@ -442,12 +442,12 @@ describe("local routing host integration", () => {
 						.messages[`channel:${channel.id}`]?.find(
 							(message) => message.id === correctedSourceId,
 						)?.routing?.corrections,
-				).toContainEqual(rerouted.correction);
+				).toContainEqual(rerouted.corrections[0]);
 				expect(
 					service.snapshot().channels[0]?.routingMemory.correctionCount,
 				).toBe(1);
 				expect(await readFile(join(root, "state.json"), "utf8")).toContain(
-					rerouted.correction.id,
+					mustExist(rerouted.corrections[0]).id,
 				);
 			}
 			const message = mustExist(
@@ -536,7 +536,7 @@ describe("local routing host integration", () => {
 					service.rerouteAssignment({
 						sourceMessageId: correctedSourceId,
 						assignmentId: mustExist(message.routing?.assignments[0]).id,
-						agentId: "backend",
+						agentIds: ["backend"],
 						projectIds: [],
 					}),
 				).rejects.toThrow("superseded or deleted messages cannot be corrected");

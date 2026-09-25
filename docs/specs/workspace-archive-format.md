@@ -4,14 +4,14 @@ A Commonspace workspace archive is a self-contained JSON export of conversation 
 
 This is the developer reference for archive validation. For export, import, and cleanup steps, see [Operations](../guides/operations.md#export-import-and-retention).
 
-## Version 1 envelope
+## Version 2 envelope
 
 The following example shows the envelope and workspace field names. Empty settings objects abbreviate the full contracts; use an application-generated export for a complete importable document.
 
 ```json
 {
   "format": "commonspace-workspace",
-  "version": 1,
+  "version": 2,
   "exportedAt": "2026-08-31T00:00:00.000Z",
   "workspace": {
     "inboxReadAt": null,
@@ -35,7 +35,7 @@ The following example shows the envelope and workspace field names. Empty settin
 }
 ```
 
-`format` and `version` identify the archive contract. Archive version 1 is independent of the internal persisted-state version. `exportedAt` and other timestamps use ISO 8601. IDs are opaque strings, and records refer to each other by those IDs. Detailed workspace shapes are defined in [`packages/shared/src/contracts.ts`](../../packages/shared/src/contracts.ts).
+`format` and `version` identify the archive contract. Archive version 2 is independent of the internal persisted-state version. It records the explicitly chosen Project scope on each routing correction. Version 1 archives remain importable; a correction without this field inherits its target assignment's saved Project scope. `exportedAt` and other timestamps use ISO 8601. IDs are opaque strings, and records refer to each other by those IDs. Detailed workspace shapes are defined in [`packages/shared/src/contracts.ts`](../../packages/shared/src/contracts.ts).
 
 ### Projects
 
@@ -55,8 +55,8 @@ All limits below measure UTF-8 JSON size:
 
 | Value | Maximum | Purpose |
 | --- | --- | --- |
-| Generated version-1 archive | 48 MiB | Keeps supported exports within the HTTP restoration workflow. |
-| Imported version-1 archive value | 64 MiB | Accepts earlier exports as well as current ones. |
+| Generated version-2 archive | 48 MiB | Keeps supported exports within the HTTP restoration workflow. |
+| Imported version-1 or version-2 archive value | 64 MiB | Accepts earlier exports as well as current ones. |
 | Explicit Project mappings | 8 MiB | Maps archived Projects to local directories. |
 | Complete HTTP import request | 80 MiB | Includes the archive, mappings, and JSON framing. This does not increase the archive limit. |
 

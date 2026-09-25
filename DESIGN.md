@@ -94,7 +94,7 @@ Render activity and evidence as quiet disclosure rows without surrounding cards.
 
 Completed outcomes stay in the routing popover; queued, running, cancelled, and failed outcomes remain visible. Open one anchored popover containing the stored decision, selection source, timing, assignments, Project references, and correction history. Do not nest delivery details under another disclosure or invent a rationale from a generic router selection.
 
-Failed routing exposes retry and manual agent selection. Resolved assignments offer **Wrong recipient? → Reroute and remember**, preserving the original request and Project scope. General inline editing of assignments remains deferred.
+Failed routing exposes retry and manual agent selection. Compact resolved receipts show destination Agent marks instead of long names; the full names remain in the accessible label and popover. Resolved assignments offer **Wrong recipient? → Reroute and remember** with multiple replacement Agent choices, preserving the original request and Project scope. General inline editing of assignments remains deferred.
 
 Thread context is an explicit view within the right-hand pane, with a return to replies. Keep reply drafts mounted while context is open.
 

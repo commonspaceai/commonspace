@@ -145,7 +145,7 @@ export function currentRoutingExamples(
 			(item) =>
 				!superseded.has(item.to.id) &&
 				members.has(item.to.agentId) &&
-				item.to.projectIds.every((id) => projects.has(id)),
+				item.correction.projectIds.every((id) => projects.has(id)),
 		)
 		.slice(0, 8)
 		.map((item) => ({
@@ -154,9 +154,9 @@ export function currentRoutingExamples(
 					? item.sourceMessage
 					: `${item.sourceMessage.slice(0, 500)}\n[excerpt omitted]\n${item.sourceMessage.slice(-500)}`,
 			agentId: item.to.agentId,
-			projectIds: item.to.projectIds,
+			projectIds: item.correction.projectIds,
 			agent: agentNames.get(item.to.agentId),
-			projects: item.to.projectIds.map((id) => projectNames.get(id)),
+			projects: item.correction.projectIds.map((id) => projectNames.get(id)),
 		}));
 	return examples.length === 0
 		? null
@@ -194,7 +194,7 @@ export function buildRoutingMemoryCompactionPrompt(
 			},
 			to: {
 				agent: agentNames.get(item.to.agentId) ?? item.to.agentId,
-				projects: item.to.projectIds
+				projects: item.correction.projectIds
 					.map((projectId) => projectNames.get(projectId))
 					.filter((projectName) => projectName !== undefined),
 			},

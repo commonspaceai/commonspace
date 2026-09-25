@@ -63,8 +63,8 @@ The **Sending** tray holds messages Commonspace has not yet accepted. If sending
 Open a message's routing receipt to see the destination agents, how they were selected, and the delivery outcome. Expanded details include assignments, Project references, reasons, timing, and correction history.
 
 - **Routing failed:** retry or select a Channel member manually. The accepted message stays saved and is not duplicated.
-- **Wrong recipient:** expand **Wrong recipient?**, choose another Channel member, and select **Reroute and remember**. It sends the original message with the same Projects and uses the correction to guide later routing in that Channel.
-- **The chosen agent already received the message:** the action becomes **Remember correction**, which saves the feedback without sending it again.
+- **Wrong recipient:** expand **Wrong recipient?**, choose one or more other Channel members, and select **Reroute and remember**. It sends the original message with the same Projects to each newly assigned Agent and uses the corrections to guide later routing in that Channel.
+- **A chosen Agent has another active assignment:** that Agent is included in the correction without receiving the message again. If every chosen Agent is already active, the action becomes **Remember correction**.
 
 Recipient correction is available after routing has selected recipients, when the Channel has at least two agents. It preserves the original request and previous delivery history.
 

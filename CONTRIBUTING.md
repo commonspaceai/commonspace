@@ -51,7 +51,7 @@ Use [Visual verification](docs/design/visual-verification.md) while iterating on
 
 Explain the problem, resulting behavior, changed files, checks and skipped checks, visible-change evidence, and migration/security/compatibility risks. Disclose the AI provider and exact model, or write `None, human-authored`.
 
-Use descriptive branch names and conventional commits. Mark unfinished work as draft. Merge requires passing required CI, resolved substantive feedback, and maintainer approval.
+Use descriptive branch names and conventional commits. Title pull requests in the same `type(scope): summary` form, such as `feat(routing): support multi-agent corrections`. Mark unfinished work as draft. Merge requires passing required CI, resolved substantive feedback, and maintainer approval.
 
 ## Documentation and privacy
 

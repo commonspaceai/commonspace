@@ -3,7 +3,7 @@ import type { AgentAdapterKind } from "./agent-adapters.js";
 export type { AgentAdapterKind } from "./agent-adapters.js";
 
 export const COMMONSPACE_STATE_VERSION = 34 as const;
-export const COMMONSPACE_EXPORT_VERSION = 1 as const;
+export const COMMONSPACE_EXPORT_VERSION = 2 as const;
 
 export interface CommonspaceDefaults {
 	maxAgentsPerTurn: number;
@@ -116,7 +116,7 @@ export type CommonspacePortableWorkspace = Omit<
 	| "schedules"
 > & {
 	projects: CommonspacePortableProject[];
-	/** Older version-1 archives have no schedules. */
+	/** Pre-schedule version-1 archives omit schedules. */
 	schedules?: CommonspaceSchedule[];
 };
 
@@ -170,6 +170,8 @@ export interface CommonspaceRoutingCorrection {
 	id: string;
 	fromAssignmentId: string;
 	toAssignmentId: string;
+	/** Project scope explicitly chosen for this correction. */
+	projectIds: string[];
 	createdAt: string;
 }
 
@@ -784,14 +786,14 @@ export interface EditMessageRequest {
 export interface RerouteAssignmentRequest {
 	sourceMessageId: string;
 	assignmentId: string;
-	agentId: string;
+	agentIds: string[];
 	projectIds: string[];
 }
 
 export interface RerouteAssignmentResponse {
 	sourceMessageId: string;
-	assignment: CommonspaceRoutingAssignment;
-	correction: CommonspaceRoutingCorrection;
+	assignments: CommonspaceRoutingAssignment[];
+	corrections: CommonspaceRoutingCorrection[];
 	state: CommonspaceState;
 }
 

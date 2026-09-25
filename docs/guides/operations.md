@@ -341,7 +341,7 @@ Replace `YYYYMMDD` with your backup date, and adjust the source if using `COMMON
 
 ### Automatic state recovery
 
-The current internal state version is 34 and migrates versions 1–33 on startup. Version 33 added private pending attachment cleanup IDs; version 34 adds schedules. Older workspaces retain their conversations and native-session mappings and receive an empty schedule list when the field is absent.
+The current internal state version is 34 and migrates versions 1–33 on startup. Version 34 adds schedules, retains multiple correction links from one assignment, and stores the chosen Project scope per correction. Older corrections derive that scope from their target assignment, and workspaces without schedules receive an empty list. Version 33 added private pending attachment cleanup IDs. Older workspaces retain their conversations and native-session mappings without creating cleanup work.
 
 Each write retains the previous valid primary as `state.backup.json`. On startup:
 

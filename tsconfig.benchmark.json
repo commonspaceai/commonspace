@@ -16,6 +16,8 @@
 		"scripts/evaluate-context.ts",
 		"scripts/evaluate-classifier.ts",
 		"scripts/benchmark-context.ts",
+		"scripts/benchmark-laya.ts",
+		"scripts/benchmark-routing-latency.ts",
 		"tests/context-evaluation.spec.ts",
 		"scripts/benchmark-session-isolation.ts",
 		"scripts/session-isolation-harness.ts",
