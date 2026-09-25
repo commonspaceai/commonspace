@@ -98,6 +98,7 @@ import {
 
 export interface CommonspaceSidebarProps {
 	wide: boolean;
+	shellHidden?: boolean;
 	expandSidebar: () => void;
 	store: CommonspaceStore;
 	colorMode?: CommonspaceColorMode;
@@ -490,6 +491,7 @@ function AgentProfileEditor({
 
 export function CommonspaceSidebar({
 	wide,
+	shellHidden = false,
 	expandSidebar,
 	store,
 	colorMode = "light",
@@ -649,6 +651,10 @@ export function CommonspaceSidebar({
 		if (createRequest !== null) openCreation(createRequest.kind);
 	}, [createRequest, openCreation]);
 	useEffect(() => {
+		if (shellHidden) setSettingsOpen(false);
+	}, [shellHidden]);
+	useEffect(() => {
+		if (shellHidden) return;
 		const openSearch = (event: KeyboardEvent) => {
 			if (
 				!(event.metaKey || event.ctrlKey) ||
@@ -663,7 +669,7 @@ export function CommonspaceSidebar({
 		return () => {
 			window.removeEventListener("keydown", openSearch);
 		};
-	}, [onOpenSearch]);
+	}, [onOpenSearch, shellHidden]);
 	const bootstrap = snapshot.bootstrap;
 	const state = bootstrap?.state;
 	const savedRouting = bootstrap?.routing;
@@ -1459,7 +1465,8 @@ export function CommonspaceSidebar({
 			{snapshot.loading && bootstrap === null && (
 				<div className="p-4 text-xs text-muted-foreground">Loading agents…</div>
 			)}
-			{settingsOpen &&
+			{!shellHidden &&
+				settingsOpen &&
 				state !== undefined &&
 				createPortal(
 					<section

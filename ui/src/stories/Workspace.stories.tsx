@@ -338,6 +338,73 @@ export const EmptyWorkspace: Story = {
 		msw.use(...createWorkspaceMockApi("empty"));
 	},
 };
+export const OnboardingCompletion: Story = {
+	args: { initialPath: "/" },
+	beforeEach: ({ msw }) => {
+		msw.use(...createWorkspaceMockApi("empty"));
+	},
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		await expect(
+			await page.findByRole("main", { name: "Workspace setup" }),
+		).toBeVisible();
+		await userEvent.keyboard("{Meta>}k{/Meta}");
+		await expect(page.queryByRole("dialog")).not.toBeInTheDocument();
+
+		await userEvent.click(page.getByRole("button", { name: "Add an agent" }));
+		const dialog = within(
+			await page.findByRole("dialog", { name: "Add an agent" }),
+		);
+		await userEvent.click(
+			dialog.getByRole("button", { name: "Choose Hermes harness" }),
+		);
+		await userEvent.click(
+			await dialog.findByRole("button", {
+				name: "Add discovered agent Hermes Reviewer",
+			}),
+		);
+		await userEvent.click(
+			await page.findByRole("radio", { name: /Hermes Reviewer/iu }),
+		);
+		await userEvent.click(
+			page.getByRole("button", { name: "Use selected agent" }),
+		);
+		await expect(
+			await page.findByRole("button", {
+				name: "Search messages, channels, and agents",
+			}),
+		).toBeVisible();
+		await expect(page.queryByRole("dialog")).not.toBeInTheDocument();
+
+		await userEvent.click(
+			page.getByRole("button", {
+				name: "More actions for Hermes Reviewer",
+			}),
+		);
+		await userEvent.click(
+			await page.findByRole("menuitem", {
+				name: /Remove from Commonspace/iu,
+			}),
+		);
+		await waitFor(() =>
+			expect(
+				page.getByRole("alertdialog", {
+					name: "Remove Hermes Reviewer?",
+				}),
+			).toBeVisible(),
+		);
+		await userEvent.click(page.getByRole("button", { name: /^Remove$/u }));
+		await waitFor(() =>
+			expect(page.getByRole("main", { name: "Workspace setup" })).toBeVisible(),
+		);
+		await expect(page.queryByRole("complementary")).not.toBeInTheDocument();
+		await expect(
+			page.queryByRole("button", {
+				name: "Search messages, channels, and agents",
+			}),
+		).not.toBeInTheDocument();
+	},
+};
 export const RoutingFailed: Story = {
 	beforeEach: ({ msw }) => {
 		msw.use(...createWorkspaceMockApi("routing-failed"));

@@ -29,6 +29,7 @@ function WorkspaceCanvas({ store }: { store: CommonspaceStore }) {
 				store={store}
 				snapshot={snapshot}
 				navigation={navigation}
+				onboarding={false}
 				projectFetcher={storyProjectFetcher}
 			/>
 		</div>
