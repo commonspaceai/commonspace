@@ -272,7 +272,7 @@ async function benchmarkScenario(scenario: Scenario) {
 			await service.rerouteAssignment({
 				sourceMessageId: seed.accepted.id,
 				assignmentId: assignment.id,
-				agentId: "backend",
+				agentIds: ["backend"],
 				projectIds: [],
 			});
 			await service.whenIdle();
