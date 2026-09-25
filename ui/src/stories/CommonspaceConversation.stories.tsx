@@ -168,7 +168,7 @@ export const ChannelConversation: Story = {
 			"Routing details: Routed to Review Bot · AI selected · Completed",
 		);
 		await expect(routingTrigger).toBeVisible();
-		await expect(routingTrigger).toHaveTextContent("AI to Review Bot");
+		await expect(routingTrigger).toHaveTextContent("🔎");
 		await userEvent.click(routingTrigger);
 		const details = within(
 			await within(document.body).findByRole("dialog", {
@@ -568,6 +568,7 @@ if (recoveredSource?.routing !== undefined) {
 		id: "recovery",
 		fromAssignmentId: "failed-assignment",
 		toAssignmentId: "assignment-design-review",
+		projectIds: [primaryProject.id],
 		createdAt: "2026-09-03T09:59:00.000Z",
 	});
 	recoveredMessages.push({

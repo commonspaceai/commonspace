@@ -83,7 +83,7 @@ Commonspace inference chooses participants, delivery mode, speaker order, and Pr
 
 Routing should feel immediate. The service stores each delivery mode, decision, and participant delivery reference so it can deliver the request, associate replies with it, and retain correction history. Conversation receipts show destinations, selection source, and outcomes; expanded receipts expose assignments, Project references, reasons, timing, and correction history. Failed routing can be retried without duplicating the accepted request.
 
-An individual assignment can be corrected from an expanded routing receipt using **Wrong recipient?** without restarting unrelated agents. **Reroute and remember** sends the original request to the new recipient with the same Projects. If that Agent already received the message, **Remember correction** records the choice without sending it again. These explicit corrections form **routing memory**, which helps later routing decisions in the same Channel.
+An individual assignment can be corrected from an expanded routing receipt using **Wrong recipient?** without restarting unrelated agents. **Reroute and remember** sends the original request to one or more chosen Channel Agents with the same Projects and records a correction link for each. An Agent with another active assignment is linked without receiving the message again; when all chosen Agents are already active, **Remember correction** records the choices without new delivery. These explicit corrections form **routing memory**, which helps later routing decisions in the same Channel.
 
 ## Product decisions
 

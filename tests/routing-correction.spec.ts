@@ -1,8 +1,9 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CommonspaceRoutingProvider } from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildRoutingMemoryCompactionPrompt } from "../server/src/routing-memory.ts";
 import {
 	type AgentRunInput,
 	CommonspaceHostService,
@@ -170,7 +171,7 @@ describe("routing correction", () => {
 		});
 	});
 
-	it("reroutes only one assignment while preserving every attempt and reply", async () => {
+	it("reroutes one assignment to multiple agents while preserving every attempt and reply", async () => {
 		const root = await mkdtemp(
 			join(tmpdir(), "commonspace-routing-correction-"),
 		);
@@ -196,6 +197,13 @@ describe("routing correction", () => {
 			{
 				id: "reviewer",
 				displayName: "Reviewer",
+				adapter: "hermes" as const,
+				model: null,
+				status: "stopped" as const,
+			},
+			{
+				id: "qa",
+				displayName: "QA",
 				adapter: "hermes" as const,
 				model: null,
 				status: "stopped" as const,
@@ -262,7 +270,7 @@ describe("routing correction", () => {
 				await service.mutate({
 					action: "create-channel",
 					name: "engineering",
-					agentIds: ["backend", "frontend", "reviewer"],
+					agentIds: ["backend", "frontend", "reviewer", "qa"],
 				})
 			).channels[0],
 		);
@@ -271,6 +279,9 @@ describe("routing correction", () => {
 			conversation: { kind: "channel", id: channel.id },
 			projectIds: [first.id, second.id],
 			text: "Change the API and UI.",
+			attachments: [
+				{ name: "diagram.png", mimeType: "image/png", data: "iVBORw==" },
+			],
 		});
 		await service.whenIdle();
 		const original = service
@@ -293,14 +304,21 @@ describe("routing correction", () => {
 			reroute.call(service, {
 				sourceMessageId: sent.accepted.id,
 				assignmentId: mustExist(frontendAssignment).id,
-				agentId: "outsider",
+				agentIds: ["reviewer", "outsider"],
 				projectIds: [second.id],
 			}),
 		).rejects.toThrow("reroute agent must belong to the channel");
+		expect(
+			service
+				.snapshot()
+				.messages[`channel:${channel.id}`]?.find(
+					(message) => message.id === sent.accepted.id,
+				)?.routing?.corrections,
+		).toEqual([]);
 		await reroute.call(service, {
 			sourceMessageId: sent.accepted.id,
 			assignmentId: mustExist(frontendAssignment).id,
-			agentId: "reviewer",
+			agentIds: ["reviewer", "qa", "backend"],
 			projectIds: [second.id],
 		});
 		await service.whenIdle();
@@ -311,10 +329,16 @@ describe("routing correction", () => {
 			messages.find((message) => message.id === sent.accepted.id),
 		);
 		const correction = source.routing?.corrections[0];
+		const qaCorrection = source.routing?.corrections[1];
+		const existingCorrection = source.routing?.corrections[2];
 		const replacement = source.routing?.assignments.find(
 			(assignment) => assignment.id === correction?.toAssignmentId,
 		);
-		expect(source.routing?.assignments).toHaveLength(3);
+		const qaAssignment = source.routing?.assignments.find(
+			(assignment) => assignment.id === qaCorrection?.toAssignmentId,
+		);
+		expect(source.routing?.assignments).toHaveLength(4);
+		expect(source.routing?.corrections).toHaveLength(3);
 		expect(correction).toMatchObject({
 			id: expect.any(String),
 			fromAssignmentId: mustExist(frontendAssignment).id,
@@ -325,25 +349,55 @@ describe("routing correction", () => {
 			agentId: "reviewer",
 			projectIds: [second.id],
 		});
+		expect(qaCorrection).toMatchObject({
+			fromAssignmentId: mustExist(frontendAssignment).id,
+			toAssignmentId: expect.any(String),
+		});
+		expect(qaAssignment).toMatchObject({
+			agentId: "qa",
+			projectIds: [second.id],
+		});
+		expect(existingCorrection).toMatchObject({
+			fromAssignmentId: mustExist(frontendAssignment).id,
+			toAssignmentId: source.routing?.assignments[0]?.id,
+			projectIds: [second.id],
+		});
+		expect(source.routing?.assignments[0]?.projectIds).toEqual([first.id]);
+		expect(
+			buildRoutingMemoryCompactionPrompt(state, channel.id)?.prompt,
+		).toContain('"to":{"agent":"Backend","projects":["Second"]}');
 		const deliveries = runAgent.mock.calls.map((call) => ({
 			agentId: call[0].agent.id,
 			message: call[0].message,
 		}));
-		expect(deliveries).toHaveLength(3);
+		expect(deliveries).toHaveLength(4);
 		expect(deliveries).toEqual(
 			expect.arrayContaining([
 				{ agentId: "backend", message: "Change the API and UI." },
 				{ agentId: "frontend", message: "Change the API and UI." },
 				{ agentId: "reviewer", message: "Change the API and UI." },
+				{ agentId: "qa", message: "Change the API and UI." },
 			]),
 		);
+		const reviewerRun = runAgent.mock.calls.find(
+			([input]) => input.agent.id === "reviewer",
+		)?.[0];
+		const qaRun = runAgent.mock.calls.find(
+			([input]) => input.agent.id === "qa",
+		)?.[0];
+		for (const run of [reviewerRun, qaRun]) {
+			expect(run?.participationContext).toContain('"name":"Backend"');
+			expect(run?.participationContext).toContain('"name":"Reviewer"');
+			expect(run?.participationContext).toContain('"name":"QA"');
+			expect(run?.participationContext).not.toContain('"name":"Frontend"');
+		}
 		const replies = messages
 			.filter((message) => message.authorType === "agent")
 			.map((message) => ({
 				text: message.text,
 				routingAssignmentId: message.routingAssignmentId,
 			}));
-		expect(replies).toHaveLength(3);
+		expect(replies).toHaveLength(4);
 		expect(replies).toEqual(
 			expect.arrayContaining([
 				{
@@ -358,11 +412,15 @@ describe("routing correction", () => {
 					text: "reviewer: Change the API and UI.",
 					routingAssignmentId: replacement?.id,
 				},
+				{
+					text: "qa: Change the API and UI.",
+					routingAssignmentId: qaAssignment?.id,
+				},
 			]),
 		);
 		expect(
 			state.threads.find((thread) => thread.id === sent.thread?.id)?.agentIds,
-		).toEqual(["backend", "frontend", "reviewer"]);
+		).toEqual(["backend", "frontend", "reviewer", "qa"]);
 
 		const backendAssignment = mustExist(
 			source.routing?.assignments.find(
@@ -373,19 +431,19 @@ describe("routing correction", () => {
 			service.rerouteAssignment({
 				sourceMessageId: sent.accepted.id,
 				assignmentId: backendAssignment.id,
-				agentId: "backend",
+				agentIds: ["backend"],
 				projectIds: [first.id],
 			}),
 		).rejects.toThrow("reroute agent already owns this assignment");
 		const remembered = await service.rerouteAssignment({
 			sourceMessageId: sent.accepted.id,
 			assignmentId: backendAssignment.id,
-			agentId: "reviewer",
+			agentIds: ["reviewer"],
 			projectIds: [first.id],
 		});
 		await service.whenIdle();
-		expect(remembered.assignment.id).toBe(replacement?.id);
-		expect(remembered.correction).toMatchObject({
+		expect(remembered.assignments[0]?.id).toBe(replacement?.id);
+		expect(remembered.corrections[0]).toMatchObject({
 			fromAssignmentId: backendAssignment.id,
 			toAssignmentId: replacement?.id,
 		});
@@ -395,8 +453,60 @@ describe("routing correction", () => {
 				.messages[`channel:${channel.id}`]?.find(
 					(message) => message.id === sent.accepted.id,
 				)?.routing?.assignments,
-		).toHaveLength(3);
-		expect(runAgent).toHaveBeenCalledTimes(3);
+		).toHaveLength(4);
+		expect(runAgent).toHaveBeenCalledTimes(4);
+
+		const savedCorrections = mustExist(
+			service
+				.snapshot()
+				.messages[`channel:${channel.id}`]?.find(
+					(message) => message.id === sent.accepted.id,
+				)?.routing,
+		).corrections;
+		await service.close();
+		const reopened = new CommonspaceHostService(
+			{},
+			{ root },
+			{ discoverAgents: async () => agents },
+		);
+		await reopened.initialize();
+		const reopenedMessages =
+			reopened.snapshot().messages[`channel:${channel.id}`] ?? [];
+		const reopenedSource = mustExist(
+			reopenedMessages.find((message) => message.id === sent.accepted.id),
+		);
+		expect(reopenedSource.routing?.assignments).toHaveLength(4);
+		expect(reopenedSource.routing?.corrections).toEqual(savedCorrections);
+		expect(
+			buildRoutingMemoryCompactionPrompt(reopened.snapshot(), channel.id)
+				?.prompt,
+		).toContain('"to":{"agent":"Backend","projects":["Second"]}');
+		expect(
+			reopenedMessages.filter((message) => message.authorType === "agent"),
+		).toHaveLength(4);
+		expect(
+			reopened.snapshot().channels.find((item) => item.id === channel.id)
+				?.routingMemory.correctionCount,
+		).toBe(4);
+		await unlink(
+			join(root, "attachments", mustExist(sent.accepted.attachments?.[0]).id),
+		);
+		await expect(
+			reopened.rerouteAssignment({
+				sourceMessageId: sent.accepted.id,
+				assignmentId: mustExist(replacement).id,
+				agentIds: ["frontend"],
+				projectIds: [second.id],
+			}),
+		).rejects.toThrow("ENOENT");
+		expect(
+			reopened
+				.snapshot()
+				.messages[`channel:${channel.id}`]?.find(
+					(message) => message.id === sent.accepted.id,
+				)?.routing?.corrections,
+		).toEqual(savedCorrections);
+		await reopened.close();
 	});
 
 	it("compacts explicit corrections into routing knowledge used by later decisions", async () => {
@@ -480,7 +590,7 @@ describe("routing correction", () => {
 		const corrected = await service.rerouteAssignment({
 			sourceMessageId: first.accepted.id,
 			assignmentId: assignment.id,
-			agentId: "reviewer",
+			agentIds: ["reviewer"],
 			projectIds: [],
 		});
 		await service.whenIdle();
@@ -492,7 +602,7 @@ describe("routing correction", () => {
 			summary: "Route review-only requests to Reviewer.",
 			status: "current",
 			correctionCount: 1,
-			compactedThroughCorrectionId: corrected.correction.id,
+			compactedThroughCorrectionId: corrected.corrections[0]?.id,
 			updatedAt: expect.any(String),
 		});
 		const routingMemoryCompaction = runAgent.mock.calls.find(([input]) =>

@@ -178,7 +178,7 @@ Refresh does not run a model turn, change native configuration, or persist inven
 8. Calls to the same native session are serialized.
 9. Replies, activity, results, and attention states appear under the same Thread.
 
-Every routed human message has a compact receipt naming its destination. Queued, running, cancelled, and failed outcomes remain visible; routine completion stays in the expanded details. Opening the receipt's popover shows the stored reason, selection source, outcome, and routing duration. The same popover shows participants, Projects, historical requests, and reroutes without a nested disclosure. If routing fails, the receipt lets the user retry inference or choose a Channel Agent manually without duplicating the persisted message.
+Every routed human message has a compact receipt showing destination Agent icons; its accessible name and popover give the full names. Queued, running, cancelled, and failed outcomes remain visible; routine completion stays in the expanded details. Opening the receipt's popover shows the stored reason, selection source, outcome, and routing duration. The same popover shows participants, Projects, historical requests, and reroutes without a nested disclosure. If routing fails, the receipt lets the user retry inference or choose a Channel Agent manually without duplicating the persisted message.
 
 ### 5.4 Explicitly addressed Channel message
 
@@ -318,7 +318,7 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | INF-05 | Current | Remove hidden product-wide Agent fan-out caps. | Explicit or inferred requests are not silently limited to two Agents; any safety ceiling is visible and user-controlled. |
 | INF-06 | Current | Deliver the original request to each selected Agent. | A first or parallel native turn contains the original user message unchanged. Separate participation metadata supplies roster responsibility and selected peers. A later relay turn includes the original message and a bounded preceding peer reply; deeper context remains available through scoped tools. |
 | INF-07 | Current | Make routing inspectable. | Delivery mode, selected Agents, ordered participant deliveries, Project references, reason, and confidence where available are stored with the source message. |
-| INF-08 | Current | Support participant rerouting and correction. | The routing receipt and service/API can redirect one assignment without resending unrelated assignments. The original request, Project scope, and prior attempts remain stored. |
+| INF-08 | Current | Support participant rerouting and correction. | The routing receipt and service/API can redirect one assignment to one or more selected Channel Agents in one action without resending unrelated assignments or Agents with another active assignment for the message. The original request, Project scope, and prior attempts remain stored. |
 | INF-09 | Current | Learn from explicit corrections. | Reroutes are stored as feedback and compacted into bounded routing knowledge used by later decisions. |
 | INF-10 | Current | Fail visibly when inference is unavailable or invalid. | The message remains accepted and receives a retryable needs-attention state; Commonspace does not silently broadcast it. |
 | INF-11 | Current | Target effectively immediate routing. | The routing stage targets sub-second completion where the selected harness permits and reports separately from normal Agent execution time. |
@@ -467,11 +467,11 @@ The routing response uses a bounded output budget sized for the visible maximum 
 
 ### Reroute semantics
 
-- A service-level correction targets one participant delivery.
+- A service-level correction replaces one participant delivery with one or more selected Channel Agents in one atomic action.
 - The original assignment and any response remain retained in routing history.
-- A correction changes the selected Agent and explicitly supplied Project scope; it cannot replace request text.
-- The new Agent receives the original user message plus responsibility metadata and scoped shared context.
-- The correction event becomes routing feedback.
+- A correction changes the selected Agent set and explicitly supplied Project scope; it cannot replace request text.
+- Each newly selected Agent receives the original user message plus responsibility metadata and scoped shared context. An Agent with another active assignment for the message is not invoked again.
+- Each selected replacement creates a correction event with the explicitly chosen Project scope that becomes routing feedback, including when the Agent has another active assignment under a different scope.
 - Feedback compaction may generalize patterns but cannot edit historical routing records.
 - Expanded routing receipts offer **Wrong recipient? → Reroute and remember**. Corrections preserve the original request, Project scope, and prior attempts, and guide later routing in the same Channel.
 
@@ -547,7 +547,7 @@ Workspace archives are unencrypted private user data. Removing Commonspace-manag
 | E2E-05 | Use `/new` during an active DM | The old generation is cancelled or isolated, a visible boundary appears, and no late reply crosses into the new session. |
 | E2E-06 | Reach Channel context pressure after a human edit | Context becomes stale, compaction preserves human-authored meaning, and state/source boundaries remain inspectable. |
 | E2E-07 | Edit a delivered routed message | A new visible branch is routed independently while the original branch and native results remain intact. |
-| E2E-08 | Correct a recipient through its routing receipt | Only that participant delivery is redirected with its Project scope preserved; other Agents are not restarted, and the correction enters routing memory. Current explicit examples remain available to routing if summary compaction fails. |
+| E2E-08 | Correct a recipient through its routing receipt | One or several selected Channel Agents replace that participant delivery with its Project scope preserved; other Agents are not restarted, and each correction enters routing memory. Current explicit examples remain available to routing if summary compaction fails. |
 | E2E-09 | Attach a normal file and receive an Agent file | Both attachments remain bound to their exact messages. Managed attachment metadata omits source host paths and credential fields; the file contents remain unchanged. |
 | E2E-10 | Receive a permission request while the client is closed | The service keeps the request pending, other sessions continue, and reopening shows an exact attention item with harness-provided choices. |
 | E2E-11 | Restart after a conversation exceeds the legacy 500-message boundary | Every accepted message and its context restore, resumable sessions continue exactly, and unrecoverable in-flight work is marked interrupted. |

@@ -9,6 +9,7 @@ import {
 	type CommonspaceMutation,
 	CommonspaceMutationSchema,
 	type CommonspaceRetentionPreview,
+	type CommonspaceRoutingAssignment,
 	CommonspaceRoutingProvider,
 	type CommonspaceSearchResult,
 	type CommonspaceSearchTarget,
@@ -39,6 +40,7 @@ import {
 type WorkspaceScenario =
 	| "ready"
 	| "empty"
+	| "routing-correction"
 	| "routing-failed"
 	| "offline"
 	| "queued";
@@ -179,6 +181,15 @@ class WorkspaceMockApi {
 			delete agent.avatarEmoji;
 			agent.accentColor = "#9bc4ff";
 			agent.status = "stopped";
+		}
+		if (this.scenario === "routing-correction") {
+			const reviewer = {
+				...secondaryAgent,
+				id: "agent-reviewer",
+				displayName: "Reviewer",
+			};
+			this.data.agents.push(reviewer);
+			primaryChannel.agentIds.push(reviewer.id);
 		}
 		this.data.state.agents = this.data.agents.map((agent) => ({
 			...agent,
@@ -1123,25 +1134,49 @@ class WorkspaceMockApi {
 					{ error: "This message has no routing decision." },
 					{ status: 400 },
 				);
-			const assignment = {
-				id: id(),
-				agentId: reroute.agentId,
-				projectIds: reroute.projectIds,
-			};
-			const correction = {
+			const superseded = new Set(
+				source.routing.corrections.map((item) => item.fromAssignmentId),
+			);
+			const newAssignments: CommonspaceRoutingAssignment[] = [];
+			const assignments = reroute.agentIds.map((agentId) => {
+				const existing = source.routing?.assignments.find(
+					(item) => item.agentId === agentId && !superseded.has(item.id),
+				);
+				if (existing !== undefined) return existing;
+				const assignment = {
+					id: id(),
+					agentId,
+					projectIds: reroute.projectIds,
+				};
+				newAssignments.push(assignment);
+				return assignment;
+			});
+			const corrections = assignments.map((assignment) => ({
 				id: id(),
 				fromAssignmentId: reroute.assignmentId,
 				toAssignmentId: assignment.id,
+				projectIds: reroute.projectIds,
 				createdAt: now(),
-			};
-			source.routing.assignments.push(assignment);
-			source.routing.corrections.push(correction);
-			this.appendReply(source, reroute.agentId);
+			}));
+			source.routing.assignments.push(...newAssignments);
+			source.routing.corrections.push(...corrections);
+			source.routing.agentIds = [
+				...new Set([...source.routing.agentIds, ...reroute.agentIds]),
+			];
+			const thread = this.data.state.threads.find(
+				(item) => item.rootMessageId === source.id,
+			);
+			if (thread)
+				thread.agentIds = [
+					...new Set([...thread.agentIds, ...reroute.agentIds]),
+				];
+			for (const assignment of newAssignments)
+				this.appendReply(source, assignment.agentId);
 			this.touch();
 			return json({
 				sourceMessageId: source.id,
-				assignment,
-				correction,
+				assignments,
+				corrections,
 				state: this.data.state,
 			});
 		}),
@@ -1190,7 +1225,9 @@ class WorkspaceMockApi {
 		http.get("/api/export", () => json(this.archive())),
 		http.post("/api/import", async ({ request }) => {
 			const input = await trustedRequestJson<{
-				archive: CommonspaceWorkspaceArchive;
+				archive: Omit<CommonspaceWorkspaceArchive, "version"> & {
+					version: 1 | typeof COMMONSPACE_EXPORT_VERSION;
+				};
 				projectMappings: Record<string, string[]>;
 			}>(request);
 			if (
@@ -1209,7 +1246,7 @@ class WorkspaceMockApi {
 			const saved = input.archive;
 			if (
 				saved?.format !== "commonspace-workspace" ||
-				saved.version !== COMMONSPACE_EXPORT_VERSION ||
+				(saved.version !== 1 && saved.version !== COMMONSPACE_EXPORT_VERSION) ||
 				!saved.workspace ||
 				!Array.isArray(saved.attachments) ||
 				!Array.isArray(saved.workspace.projects) ||

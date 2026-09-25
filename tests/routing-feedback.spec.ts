@@ -38,12 +38,14 @@ it("uses only current human corrections, excluding deleted, replaced, and inelig
 					id: "correction-1",
 					fromAssignmentId: "first",
 					toAssignmentId: "second",
+					projectIds: [],
 					createdAt: "2026-09-22T00:00:01Z",
 				},
 				{
 					id: "correction-2",
 					fromAssignmentId: "second",
 					toAssignmentId: "third",
+					projectIds: [],
 					createdAt: "2026-09-22T00:00:02Z",
 				},
 			],
@@ -79,7 +81,7 @@ it("uses only current human corrections, excluding deleted, replaced, and inelig
 	channel.agentIds = ["a", "b"];
 	expect(currentRoutingExamples(state, channel.id)).toBeNull();
 	channel.agentIds.push("c");
-	const current = mustExist(message.routing?.assignments[2]);
+	const current = mustExist(message.routing?.corrections[1]);
 	current.projectIds = ["removed-project"];
 	expect(currentRoutingExamples(state, channel.id)).toBeNull();
 	current.projectIds = [];

@@ -10,7 +10,7 @@ import {
 	startCommonspaceServer,
 } from "../server/src/index.ts";
 import { CommonspaceHostService } from "../server/src/service.ts";
-import { createInitialState } from "../server/src/state.ts";
+import { applyMutation, createInitialState } from "../server/src/state.ts";
 import { addTestHarness, discoverTestHarnesses } from "./test-harnesses.ts";
 import { mustExist } from "./test-helpers.ts";
 
@@ -196,6 +196,121 @@ describe("workspace portability HTTP workflow", () => {
 });
 
 describe("workspace portability", () => {
+	it("imports version-1 routing corrections without an explicit Project scope", async () => {
+		const sourceRoot = await mkdtemp(
+			join(tmpdir(), "commonspace-legacy-export-"),
+		);
+		const targetRoot = await mkdtemp(
+			join(tmpdir(), "commonspace-legacy-import-"),
+		);
+		roots.push(sourceRoot, targetRoot);
+		let state = createInitialState();
+		state.agents.push(
+			{
+				id: "frontend",
+				displayName: "Frontend",
+				adapter: "hermes",
+				model: null,
+				createdAt: "2026-08-30T00:00:00.000Z",
+			},
+			{
+				id: "backend",
+				displayName: "Backend",
+				adapter: "hermes",
+				model: null,
+				createdAt: "2026-08-30T00:00:00.000Z",
+			},
+		);
+		state.projects.push({
+			id: "project-1",
+			name: "App",
+			paths: [sourceRoot],
+			createdAt: "2026-08-30T00:00:00.000Z",
+		});
+		state = applyMutation(state, {
+			action: "create-channel",
+			name: "portable",
+			agentIds: ["frontend", "backend"],
+		});
+		const channel = mustExist(state.channels[0]);
+		state.messages[`channel:${channel.id}`] = [
+			{
+				id: "source",
+				conversation: { kind: "channel", id: channel.id },
+				authorType: "user",
+				authorId: "user",
+				authorName: "Human",
+				text: "Fix the API.",
+				createdAt: "2026-08-30T00:00:00.000Z",
+				routing: {
+					source: "ai",
+					agentIds: ["frontend", "backend"],
+					assignments: [
+						{ id: "from", agentId: "frontend", projectIds: [] },
+						{
+							id: "to",
+							agentId: "backend",
+							projectIds: ["project-1"],
+						},
+					],
+					corrections: [
+						{
+							id: "correction-1",
+							fromAssignmentId: "from",
+							toAssignmentId: "to",
+							projectIds: ["project-1"],
+							createdAt: "2026-08-30T00:00:01.000Z",
+						},
+					],
+					inferredProjectIds: [],
+					reason: "Initial route",
+				},
+			},
+		];
+		await writeFile(join(sourceRoot, "state.json"), JSON.stringify(state));
+		const source = new CommonspaceHostService(
+			{},
+			{ root: sourceRoot },
+			{ discoverAgents: discoverTestHarnesses },
+		);
+		await source.initialize();
+		const archive = await source.exportWorkspace();
+		await source.close();
+		expect(archive.version).toBe(2);
+		const legacyArchive = { ...archive, version: 1 };
+		const legacyCorrection = mustExist(
+			legacyArchive.workspace.messages[`channel:${channel.id}`]?.[0]?.routing
+				?.corrections[0],
+		);
+		Reflect.deleteProperty(legacyCorrection, "projectIds");
+
+		const target = new CommonspaceHostService(
+			{},
+			{ root: targetRoot },
+			{ discoverAgents: discoverTestHarnesses },
+		);
+		await target.initialize();
+		await expect(
+			target.importWorkspace(archive, { "project-1": [targetRoot] }),
+		).rejects.toThrow("workspace archive failed structural validation");
+		await target.importWorkspace(legacyArchive, { "project-1": [targetRoot] });
+		const imported = mustExist(
+			target.snapshot().messages[`channel:${channel.id}`]?.[0],
+		);
+		expect(imported.text).toBe("Fix the API.");
+		expect(imported.routing?.corrections[0]).toMatchObject({
+			fromAssignmentId: "from",
+			toAssignmentId: "to",
+			projectIds: ["project-1"],
+		});
+		expect(
+			(await target.exportWorkspace()).workspace.messages[
+				`channel:${channel.id}`
+			]?.[0]?.routing?.corrections[0]?.projectIds,
+		).toEqual(["project-1"]);
+		await target.close();
+	});
+
 	it("exports sanitized metadata and imports into a clean workspace with explicit Project remapping", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-export-source-"));
 		roots.push(root);
@@ -264,7 +379,7 @@ describe("workspace portability", () => {
 		const serialized = JSON.stringify(archive);
 		expect(archive).toMatchObject({
 			format: "commonspace-workspace",
-			version: 1,
+			version: 2,
 			workspace: {
 				projects: [{ id: project.id, name: "Portable App", rootCount: 2 }],
 			},
