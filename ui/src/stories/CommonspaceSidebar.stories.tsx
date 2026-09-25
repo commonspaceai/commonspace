@@ -19,6 +19,7 @@ import {
 	createStoryBootstrap,
 	createStoryStore,
 	designChannel,
+	discoveryStoryBootstrap,
 	hermesAgent,
 	primaryProject,
 	secondaryProject,
@@ -898,21 +899,24 @@ export const CreateChannelRequest: Story = {
 };
 
 export const CancelledAgentCreation: Story = {
+	args: { store: createStoryStore(discoveryStoryBootstrap) },
 	play: async ({ canvas }) => {
 		const page = within(document.body);
 		await userEvent.click(canvas.getByRole("button", { name: "Add agent" }));
-		await userEvent.click(
-			page.getByRole("button", { name: "Choose Codex harness" }),
-		);
+		await userEvent.click(page.getByRole("button", { name: "Choose Codex" }));
+		await page.findByRole("button", {
+			name: "Add discovered agent Codex Builder",
+		});
 		await userEvent.click(page.getByRole("checkbox", { name: /Full access/u }));
 		await expect(
 			page.getByRole("checkbox", { name: /Full access/u }),
 		).toBeChecked();
 		await userEvent.click(page.getByRole("button", { name: "Cancel" }));
 		await userEvent.click(canvas.getByRole("button", { name: "Add agent" }));
-		await userEvent.click(
-			page.getByRole("button", { name: "Choose Codex harness" }),
-		);
+		await userEvent.click(page.getByRole("button", { name: "Choose Codex" }));
+		await page.findByRole("button", {
+			name: "Add discovered agent Codex Builder",
+		});
 		await expect(
 			page.getByRole("checkbox", { name: /Full access/u }),
 		).not.toBeChecked();

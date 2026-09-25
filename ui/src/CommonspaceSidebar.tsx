@@ -18,6 +18,7 @@ import {
 } from "@commonspace/shared";
 import {
 	ArrowRightIcon,
+	CheckIcon,
 	FolderIcon,
 	GripVerticalIcon,
 	InboxIcon,
@@ -38,6 +39,11 @@ import {
 	useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
+import claudeCodeLogo from "@/assets/agent-logos/claude-code.svg";
+import codexLogo from "@/assets/agent-logos/codex.svg";
+import geminiCliLogo from "@/assets/agent-logos/gemini-cli.svg";
+import hermesLogo from "@/assets/agent-logos/hermes.svg";
+import openCodeLogo from "@/assets/agent-logos/opencode.svg";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -250,7 +256,7 @@ function SidebarDialog({
 	children,
 }: {
 	title: string;
-	size?: "compact" | "form";
+	size?: "compact" | "form" | "wide";
 	description?: string;
 	onClose: () => void;
 	children: React.ReactNode;
@@ -281,7 +287,11 @@ function SidebarDialog({
 				aria-describedby={undefined}
 				className={cn(
 					"top-[10vh] max-h-[80vh] -translate-y-0",
-					size === "compact" ? "sm:max-w-[440px]" : "sm:max-w-[520px]",
+					size === "compact"
+						? "sm:max-w-[440px]"
+						: size === "wide"
+							? "sm:max-w-[640px]"
+							: "sm:max-w-[520px]",
 				)}
 			>
 				<DialogHeader className="border-b px-6 py-5">
@@ -307,6 +317,14 @@ function FormError({ message }: { message: string | null }) {
 function runtimeLabel(adapter: AgentAdapterKind): string {
 	return AGENT_ADAPTERS[adapter].label;
 }
+
+const AGENT_ADAPTER_LOGOS: Record<AgentAdapterKind, string> = {
+	codex: codexLogo,
+	hermes: hermesLogo,
+	"claude-code": claudeCodeLogo,
+	gemini: geminiCliLogo,
+	opencode: openCodeLogo,
+};
 
 function agentStatusLabel(status: CommonspaceAgentProfile["status"]): string {
 	if (status === "running") return "online";
@@ -2597,7 +2615,9 @@ export function CommonspaceSidebar({
 							/>
 						)
 					}
-					open={!preferences.collapsedSections.includes("agent")}
+					open={
+						form === "agent" || !preferences.collapsedSections.includes("agent")
+					}
 					onOpenChange={(open) => {
 						sidebarPreferencesStore.setSectionCollapsed("agent", !open);
 					}}
@@ -2608,108 +2628,165 @@ export function CommonspaceSidebar({
 					{form === "agent" && (
 						<SidebarDialog
 							title="Add an agent"
-							size={agentAdapter === null ? "compact" : "form"}
-							description="Choose an installed coding agent. Credentials stay in its native app."
+							size="wide"
+							description="Choose an installed agent. Your sign-in stays in its own app."
 							onClose={() => {
 								setForm(null);
 							}}
 						>
-							<div className="grid gap-2">
-								{AGENT_ADAPTER_KINDS.map((adapter) => (
+							<fieldset className="grid grid-cols-4 gap-2.5 border-0 p-0 md:grid-cols-6">
+								<legend className="sr-only">Coding agents</legend>
+								{AGENT_ADAPTER_KINDS.map((adapter, index) => (
 									<button
 										key={adapter}
 										type="button"
-										className="grid min-h-12 grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 text-left aria-pressed:bg-selection hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-										aria-label={`Choose ${runtimeLabel(adapter)} harness`}
+										className={cn(
+											"col-span-2 grid min-h-16 grid-cols-[40px_minmax(0,1fr)_16px] items-center gap-2.5 rounded-xl border border-transparent bg-muted/50 px-3 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring aria-pressed:border-border aria-pressed:bg-selection",
+											index === AGENT_ADAPTER_KINDS.length - 2 &&
+												AGENT_ADAPTER_KINDS.length % 3 === 2 &&
+												"md:col-start-2",
+											index === AGENT_ADAPTER_KINDS.length - 1 &&
+												AGENT_ADAPTER_KINDS.length % 2 === 1 &&
+												"col-start-2 md:col-start-4",
+										)}
+										aria-label={`Choose ${runtimeLabel(adapter)}`}
 										aria-pressed={agentAdapter === adapter}
 										onClick={() => {
 											selectAgentHarness(adapter);
 										}}
 									>
-										<span className="grid size-8 place-items-center rounded-md bg-muted font-mono font-semibold">
-											{AGENT_ADAPTERS[adapter].monogram}
+										<img
+											className={cn(
+												"size-10 object-contain",
+												(adapter === "hermes" || adapter === "opencode") &&
+													"dark:invert",
+											)}
+											src={AGENT_ADAPTER_LOGOS[adapter]}
+											alt=""
+											aria-hidden="true"
+										/>
+										<span className="truncate font-medium">
+											{runtimeLabel(adapter)}
 										</span>
-										<span>
-											<strong className="block">{runtimeLabel(adapter)}</strong>
-										</span>
-										<span className="text-xs text-muted-foreground">
-											{agentAdapter === adapter ? "Selected" : null}
+										<span
+											className="flex size-4 items-center justify-center text-primary"
+											aria-hidden="true"
+										>
+											{agentAdapter === adapter ? (
+												<CheckIcon className="size-4" />
+											) : null}
 										</span>
 									</button>
 								))}
-							</div>
+							</fieldset>
 							{agentAdapter !== null && (
-								<div className="grid gap-2">
-									<strong>{runtimeLabel(agentAdapter)} harness</strong>
-									{discovery?.status === AgentDiscoveryStatus.Pending ? (
-										<span role="status">
-											Checking for installed {runtimeLabel(agentAdapter)}…
-										</span>
-									) : null}
-									{discovery?.status === AgentDiscoveryStatus.Failed ? (
-										<div className="grid justify-items-start gap-2">
-											<p role="alert">{discovery.error}</p>
-											<button
-												type="button"
-												className="min-h-11 rounded-sm border px-4"
-												aria-label={`Retry ${runtimeLabel(agentAdapter)} discovery`}
-												onClick={() => void store.discoverAgents(agentAdapter)}
+								<section
+									className="mt-4 grid gap-3 border-t pt-4"
+									aria-label={`${runtimeLabel(agentAdapter)} agent discovery`}
+								>
+									<div className="grid gap-3">
+										{discovery?.status === AgentDiscoveryStatus.Pending ? (
+											<p
+												role="status"
+												className="text-sm text-muted-foreground"
 											>
-												Retry discovery
-											</button>
-										</div>
-									) : null}
-									{discovery?.status === AgentDiscoveryStatus.Success &&
-										availableDiscoveredAgents.length === 0 && (
-											<span>
-												{runtimeLabel(agentAdapter)} is not available or is
-												already added.
-											</span>
+												Checking {runtimeLabel(agentAdapter)} for agents…
+											</p>
+										) : null}
+										{discovery?.status === AgentDiscoveryStatus.Failed ? (
+											<div className="grid justify-items-start gap-3">
+												<p role="alert">{discovery.error}</p>
+												<button
+													type="button"
+													className="min-h-10 rounded-md border px-3 text-sm font-medium"
+													aria-label={`Retry ${runtimeLabel(agentAdapter)} search`}
+													onClick={() =>
+														void store.discoverAgents(agentAdapter)
+													}
+												>
+													Try again
+												</button>
+											</div>
+										) : null}
+										{discovery?.status === AgentDiscoveryStatus.Success &&
+											availableDiscoveredAgents.length === 0 && (
+												<div className="flex items-center justify-between gap-4">
+													<p
+														role="status"
+														className="text-sm text-muted-foreground"
+													>
+														{discoveredAgents.length === 0
+															? `No ${runtimeLabel(agentAdapter)} agents found. Make sure it is installed and signed in.`
+															: `All discovered ${runtimeLabel(agentAdapter)} agents are already in Commonspace.`}
+													</p>
+													{discoveredAgents.length === 0 && (
+														<button
+															type="button"
+															className="min-h-10 shrink-0 rounded-md border px-3 text-sm font-medium"
+															aria-label={`Retry ${runtimeLabel(agentAdapter)} search`}
+															onClick={() =>
+																void store.discoverAgents(agentAdapter)
+															}
+														>
+															Try again
+														</button>
+													)}
+												</div>
+											)}
+										{availableDiscoveredAgents.length > 0 && (
+											<div className="grid gap-2.5">
+												<h3 className="text-sm font-semibold">Found agents</h3>
+												<label className="flex items-start gap-2.5 py-1 text-left">
+													<input
+														type="checkbox"
+														className="mt-0.5 size-4"
+														checked={agentFullAccess}
+														onChange={(event) => {
+															setAgentFullAccess(event.target.checked);
+														}}
+													/>
+													<span>
+														<strong className="block text-sm">
+															Full access
+														</strong>
+														<small className="block text-xs leading-5 text-muted-foreground">
+															Skip approval prompts for its Commonspace runs.
+														</small>
+													</span>
+												</label>
+												{availableDiscoveredAgents.map((agent) => (
+													<button
+														key={agent.id}
+														type="button"
+														className="grid min-h-14 grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border bg-background px-3 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+														aria-label={`Add discovered agent ${agent.displayName}`}
+														onClick={() => {
+															void store.mutate({
+																action: "add-discovered-agent",
+																agentId: agent.id,
+																adapter: agent.adapter,
+																fullAccess: agentFullAccess,
+															});
+															setForm(null);
+														}}
+													>
+														<AgentAvatar agent={agent} />
+														<span className="min-w-0">
+															<strong className="block truncate">
+																{agent.displayName}
+															</strong>
+															<small className="block truncate text-xs text-muted-foreground">
+																{runtimeLabel(agent.adapter)} ·{" "}
+																{agent.model ?? "default model"}
+															</small>
+														</span>
+														<span className="text-sm font-medium">Add</span>
+													</button>
+												))}
+											</div>
 										)}
-									<label className="flex items-start gap-3 rounded-md border bg-muted p-3 text-left">
-										<input
-											type="checkbox"
-											className="mt-0.5 size-4"
-											checked={agentFullAccess}
-											onChange={(event) => {
-												setAgentFullAccess(event.target.checked);
-											}}
-										/>
-										<span>
-											<strong className="block text-sm">Full access</strong>
-											<small className="block text-xs leading-5 text-muted-foreground">
-												Bypass approval prompts for this agent's Commonspace
-												runs.
-											</small>
-										</span>
-									</label>
-									{availableDiscoveredAgents.map((agent) => (
-										<button
-											key={agent.id}
-											type="button"
-											className="grid min-h-14 grid-cols-[36px_minmax(0,1fr)] items-center gap-3 rounded-sm border bg-background px-3 text-left hover:bg-muted"
-											aria-label={`Add discovered agent ${agent.displayName}`}
-											onClick={() => {
-												void store.mutate({
-													action: "add-discovered-agent",
-													agentId: agent.id,
-													adapter: agent.adapter,
-													fullAccess: agentFullAccess,
-												});
-												setForm(null);
-											}}
-										>
-											<AgentAvatar agent={agent} />
-											<span>
-												<strong className="block">{agent.displayName}</strong>
-												<small className="block text-xs text-muted-foreground">
-													{runtimeLabel(agent.adapter)} ·{" "}
-													{agent.model ?? "default model"}
-												</small>
-											</span>
-										</button>
-									))}
-								</div>
+									</div>
+								</section>
 							)}
 							<div className="mt-3 flex justify-end border-t pt-3">
 								<button
