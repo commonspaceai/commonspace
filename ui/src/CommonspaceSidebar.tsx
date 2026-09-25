@@ -287,7 +287,7 @@ function SidebarDialog({
 				aria-describedby={undefined}
 				className={cn(
 					size === "wide"
-						? "top-1/2 max-h-[90vh] -translate-y-1/2"
+						? "top-1/2 max-h-[calc(100vh-32px)] -translate-y-1/2"
 						: "top-[10vh] max-h-[80vh] -translate-y-0",
 					size === "compact"
 						? "sm:max-w-[440px]"
@@ -2695,7 +2695,7 @@ export function CommonspaceSidebar({
 							</fieldset>
 							{agentAdapter !== null && (
 								<section
-									className="mt-6 grid gap-4 border-t pt-6"
+									className="mt-8 border-t pt-8"
 									aria-label={`${runtimeLabel(agentAdapter)} agent discovery`}
 								>
 									<div className="grid gap-4">
@@ -2748,11 +2748,11 @@ export function CommonspaceSidebar({
 												</div>
 											)}
 										{availableDiscoveredAgents.length > 0 && (
-											<div className="grid gap-4">
+											<div className="grid gap-5">
 												<h3 className="text-base font-semibold">
 													Found agents
 												</h3>
-												<label className="flex cursor-pointer items-start gap-3 rounded-lg border bg-muted/30 p-4 text-left transition-colors hover:bg-muted/50">
+												<label className="flex cursor-pointer items-start gap-4 rounded-lg border bg-muted/30 p-4 text-left transition-colors hover:bg-muted/50">
 													<input
 														type="checkbox"
 														className="mt-1 size-4 shrink-0"
@@ -2774,7 +2774,7 @@ export function CommonspaceSidebar({
 													<button
 														key={agent.id}
 														type="button"
-														className="grid min-h-16 grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-4 rounded-lg border bg-background px-4 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+														className="grid min-h-16 grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-4 rounded-lg border bg-background px-5 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
 														aria-label={`Add discovered agent ${agent.displayName}`}
 														onClick={() => {
 															void store.mutate({
@@ -2804,7 +2804,7 @@ export function CommonspaceSidebar({
 									</div>
 								</section>
 							)}
-							<div className="mt-5 flex justify-end border-t pt-4">
+							<div className="mt-4 flex justify-end border-t pt-4">
 								<button
 									type="button"
 									className="min-h-11 rounded-sm border px-4"
