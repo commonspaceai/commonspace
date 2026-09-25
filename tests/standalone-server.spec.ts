@@ -302,7 +302,7 @@ describe("standalone Commonspace server", () => {
 			body: JSON.stringify({
 				sourceMessageId: "missing-message",
 				assignmentId: "missing-assignment",
-				agentId: "missing-agent",
+				agentIds: ["missing-agent"],
 				projectIds: [],
 			}),
 		});
@@ -514,7 +514,7 @@ describe("standalone Commonspace server", () => {
 		);
 		await expect(exportResponse.json()).resolves.toMatchObject({
 			format: "commonspace-workspace",
-			version: 1,
+			version: 2,
 		});
 
 		const invalidImportResponse = await fetch(`${running.url}/api/import`, {

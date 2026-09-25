@@ -84,6 +84,8 @@ import {
 	referencedProjectIds,
 	uniqueAgentDisplayName,
 } from "@commonspace/shared";
+import { type Context, context, SpanStatusCode } from "@opentelemetry/api";
+import { SeverityNumber } from "@opentelemetry/api-logs";
 import {
 	AcpAgentProcess,
 	type AcpRunInput,
@@ -187,6 +189,11 @@ import {
 	emptyRoutingMemory,
 } from "./state.js";
 import {
+	markOperationFailed,
+	recordOperationException,
+	serverTracer,
+} from "./telemetry.js";
+import {
 	buildThreadContextCompactionPrompt,
 	createThreadContext,
 	emptyThreadMemory,
@@ -207,6 +214,14 @@ const MAX_IMAGE_ATTACHMENTS = 4;
 const MAX_IMAGE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_IMAGE_ATTACHMENTS_BYTES = 16 * 1024 * 1024;
 const MAX_AGENT_RESPONSE_CHARS = 64_000;
+
+function agentTimeoutReason(signal: AbortSignal): Error | undefined {
+	if (!signal.aborted) return undefined;
+	const reason: unknown = signal.reason;
+	return reason instanceof Error && reason.name === "TimeoutError"
+		? reason
+		: undefined;
+}
 const MAX_MCP_CONTEXT_CHARS = 64_000;
 
 const MAX_MCP_CONTEXT_MESSAGES = 30;
@@ -460,6 +475,7 @@ interface PreparedSend {
 
 	agents: readonly CommonspaceAgentProfile[];
 	agentIds: string[];
+	participantAgentIds?: readonly string[];
 	agentExecutionRevisions: ReadonlyMap<string, number>;
 	routing?: CommonspaceRoutingDecision;
 	channel?: CommonspaceState["channels"][number];
@@ -651,7 +667,7 @@ interface PreparedReroute {
 	routing: CommonspaceRoutingDecision;
 	original: CommonspaceRoutingAssignment;
 	agents: readonly CommonspaceAgentProfile[];
-	target: CommonspaceAgentProfile;
+	targets: CommonspaceAgentProfile[];
 	agentExecutionRevisions: ReadonlyMap<string, number>;
 	projects: CommonspaceState["projects"];
 	thread: CommonspaceThread;
@@ -659,12 +675,12 @@ interface PreparedReroute {
 }
 
 interface RerouteStateChange {
-	assignment: CommonspaceRoutingAssignment;
-	correction: CommonspaceRoutingCorrection;
+	assignments: CommonspaceRoutingAssignment[];
+	corrections: CommonspaceRoutingCorrection[];
+	newAssignments: CommonspaceRoutingAssignment[];
 	source: CommonspaceMessage;
 	thread: CommonspaceThread;
 	channel: CommonspaceState["channels"][number];
-	deliveryNeeded: boolean;
 }
 
 interface PendingFollowupInvalidation {
@@ -791,6 +807,7 @@ interface PendingFollowup {
 	prepared: PreparedSend;
 	response: SendMessageResponse;
 	delivery: NonNullable<SendMessageRequest["delivery"]>;
+	telemetryContext: Context;
 }
 
 interface PendingFollowupLocation {
@@ -901,6 +918,7 @@ function participationContextForAgentRun({
 	agent,
 	prepared,
 }: AgentRunExecutionContext): string {
+	const participantAgentIds = prepared.participantAgentIds ?? prepared.agentIds;
 	return [
 		"Commonspace participation context. The delivered original user message remains authoritative. Follow the role explicitly requested for you; otherwise act within your roster responsibility. Coordinate with other participants and avoid unrequested duplicate implementation. Use scoped Commonspace tools for Channel/Thread instructions and deeper conversation context when needed.",
 		"Your final response is automatically posted to this conversation. Reply normally to answer the user; do not call commonspace_post_progress to deliver the answer or confirm that you posted it. Reserve that tool for useful interim updates while work continues.",
@@ -911,7 +929,7 @@ function participationContextForAgentRun({
 			},
 			mode: prepared.routing?.mode ?? "parallel",
 			participants: prepared.agents
-				.filter((participant) => prepared.agentIds.includes(participant.id))
+				.filter((participant) => participantAgentIds.includes(participant.id))
 				.map((participant) => ({
 					name: participant.displayName,
 					responsibility: participant.description ?? null,
@@ -2304,22 +2322,28 @@ function sanitizeRoutingAssignments(
 			projectIds: [...context.fallbackProjectIds],
 		});
 	}
-	return { assignments, assignmentIds };
+	return assignments;
 }
 
 function sanitizeRoutingCorrections(
 	value: JsonValue | undefined,
-	assignmentIds: ReadonlySet<string>,
+	assignments: readonly CommonspaceRoutingAssignment[],
+	validProjectIds: ReadonlySet<string>,
 ) {
 	const corrections: CommonspaceRoutingCorrection[] = [];
 	const correctionIds = new Set<string>();
-	const correctedAssignments = new Set<string>();
+	const correctedLinks = new Set<string>();
+	const assignmentsById = new Map(
+		assignments.map((assignment) => [assignment.id, assignment]),
+	);
 	if (!Array.isArray(value)) return corrections;
 	for (const candidate of value) {
 		const correction = plainRecord(candidate);
 		const id = loadedId(correction?.id);
 		const fromAssignmentId = loadedId(correction?.fromAssignmentId);
 		const toAssignmentId = loadedId(correction?.toAssignmentId);
+		const toAssignment =
+			toAssignmentId === null ? undefined : assignmentsById.get(toAssignmentId);
 		const createdAt = loadedIsoTimestamp(correction?.createdAt);
 		if (
 			correction === null ||
@@ -2329,14 +2353,31 @@ function sanitizeRoutingCorrections(
 			toAssignmentId === null ||
 			createdAt === null ||
 			fromAssignmentId === toAssignmentId ||
-			!assignmentIds.has(fromAssignmentId) ||
-			!assignmentIds.has(toAssignmentId) ||
-			correctedAssignments.has(fromAssignmentId)
+			!assignmentsById.has(fromAssignmentId) ||
+			toAssignment === undefined ||
+			correctedLinks.has(JSON.stringify([fromAssignmentId, toAssignmentId]))
 		)
 			continue;
+		if (
+			correction.projectIds !== undefined &&
+			!Array.isArray(correction.projectIds)
+		)
+			continue;
+		const projectIds =
+			correction.projectIds === undefined
+				? [...toAssignment.projectIds]
+				: loadedStringArray(correction.projectIds, 32, 200).filter(
+						(projectId) => validProjectIds.has(projectId),
+					);
 		correctionIds.add(id);
-		correctedAssignments.add(fromAssignmentId);
-		corrections.push({ id, fromAssignmentId, toAssignmentId, createdAt });
+		correctedLinks.add(JSON.stringify([fromAssignmentId, toAssignmentId]));
+		corrections.push({
+			id,
+			fromAssignmentId,
+			toAssignmentId,
+			projectIds,
+			createdAt,
+		});
 	}
 	return corrections;
 }
@@ -2394,14 +2435,15 @@ function sanitizeRoutingDecision(
 		32,
 		200,
 	).filter((projectId) => context.projectIds.has(projectId));
-	const { assignments, assignmentIds } = sanitizeRoutingAssignments(
+	const assignments = sanitizeRoutingAssignments(
 		routing.assignments,
 		routedAgentIds,
 		context,
 	);
 	const corrections = sanitizeRoutingCorrections(
 		routing.corrections,
-		assignmentIds,
+		assignments,
+		context.projectIds,
 	);
 	const decision: CommonspaceRoutingDecision = {
 		source: routing.source === "fallback" ? "local" : routing.source,
@@ -3386,6 +3428,7 @@ function collectArchiveAttachments(
 }
 
 interface DecodedWorkspaceArchive {
+	readonly version: 1 | typeof COMMONSPACE_EXPORT_VERSION;
 	readonly workspace: JsonObject;
 	readonly importedWorkspace: JsonObject;
 	readonly projects: JsonValue[];
@@ -3424,7 +3467,7 @@ function decodeWorkspaceArchive(
 		archive === null ||
 		workspace === null ||
 		archive.format !== "commonspace-workspace" ||
-		archive.version !== COMMONSPACE_EXPORT_VERSION
+		(archive.version !== 1 && archive.version !== COMMONSPACE_EXPORT_VERSION)
 	)
 		throw new Error("unsupported Commonspace workspace archive");
 	if (
@@ -3434,6 +3477,7 @@ function decodeWorkspaceArchive(
 	)
 		throw new Error("workspace archive is invalid");
 	return {
+		version: archive.version,
 		workspace,
 		importedWorkspace: workspace,
 		projects: workspace.projects,
@@ -3484,6 +3528,56 @@ async function resolveImportedProjects(
 	return projects;
 }
 
+function archiveRecordReference(
+	value: JsonValue | undefined,
+): JsonObject | null {
+	return value !== undefined &&
+		value !== null &&
+		typeof value === "object" &&
+		!Array.isArray(value)
+		? value
+		: null;
+}
+
+function fillLegacyArchiveCorrectionScopes(
+	value: JsonValue | undefined,
+	canonical: readonly CommonspaceRoutingCorrection[] | undefined,
+): void {
+	if (!Array.isArray(value)) return;
+	for (const [index, candidate] of value.entries()) {
+		const correction = archiveRecordReference(candidate);
+		const projectIds = canonical?.[index]?.projectIds;
+		if (
+			correction !== null &&
+			correction.projectIds === undefined &&
+			projectIds !== undefined
+		)
+			correction.projectIds = projectIds;
+	}
+}
+
+function withLegacyArchiveCorrectionScopes(
+	workspace: JsonObject,
+	canonical: CommonspaceWorkspaceArchive["workspace"],
+): JsonObject {
+	const comparable = structuredClone(workspace);
+	const messages = archiveRecordReference(comparable.messages);
+	if (messages === null) return comparable;
+	for (const [key, entries] of Object.entries(messages)) {
+		if (!Array.isArray(entries)) continue;
+		for (const [messageIndex, entry] of entries.entries()) {
+			const routing = archiveRecordReference(
+				archiveRecordReference(entry)?.routing,
+			);
+			fillLegacyArchiveCorrectionScopes(
+				routing?.corrections,
+				canonical.messages[key]?.[messageIndex]?.routing?.corrections,
+			);
+		}
+	}
+	return comparable;
+}
+
 function sanitizeImportedWorkspace(
 	decoded: DecodedWorkspaceArchive,
 	projects: CommonspaceState["projects"],
@@ -3525,7 +3619,14 @@ function sanitizeImportedWorkspace(
 	if (decoded.workspace.inboxUnreadMessageIds !== undefined)
 		canonicalWorkspace.inboxUnreadMessageIds =
 			imported.inboxUnreadMessageIds ?? [];
-	if (!isDeepStrictEqual(canonicalWorkspace, decoded.importedWorkspace))
+	const comparable =
+		decoded.version === 1
+			? withLegacyArchiveCorrectionScopes(
+					decoded.importedWorkspace,
+					canonicalWorkspace,
+				)
+			: decoded.importedWorkspace;
+	if (!isDeepStrictEqual(canonicalWorkspace, comparable))
 		throw new Error("workspace archive failed structural validation");
 	return imported;
 }
@@ -5561,10 +5662,24 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 							item.description,
 							1_000,
 						);
+					if (item.authentication !== undefined)
+						metadata.authentication = item.authentication;
 					return metadata;
 				}),
 			})),
 		};
+	}
+
+	async authenticateAgentMcp(
+		agentId: string,
+		serverName: string,
+	): Promise<boolean | undefined> {
+		const agent = this.state.agents.find(
+			(candidate) => candidate.id === agentId,
+		);
+		if (agent === undefined) return undefined;
+		const authenticate = this.adapters[agent.adapter].authenticateMcp;
+		return authenticate === undefined ? false : authenticate(serverName);
 	}
 
 	async discoverAgents(
@@ -6252,22 +6367,74 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		);
 	}
 
+	private withMessageSubmissionTelemetry(
+		source: "send" | "edit",
+		conversationKind: SendMessageRequest["conversation"]["kind"],
+		deliveryMode: NonNullable<SendMessageRequest["delivery"]>,
+		operation: (markAccepted: () => void) => Promise<SendMessageResponse>,
+	): Promise<SendMessageResponse> {
+		return serverTracer.startActiveSpan(
+			"commonspace.message.submit",
+			{
+				attributes: {
+					"commonspace.conversation.kind": conversationKind,
+					"commonspace.message.source": source,
+					"commonspace.message.delivery_mode": deliveryMode,
+				},
+			},
+			async (span) => {
+				let accepted = false;
+				const markAccepted = () => {
+					accepted = true;
+					span.setAttribute("commonspace.message.accepted", true);
+				};
+				try {
+					const response = await operation(markAccepted);
+					span.setStatus({ code: SpanStatusCode.OK });
+					return response;
+				} catch (error) {
+					const observedError = error instanceof Error ? error : undefined;
+					const description = accepted
+						? "Message follow-up activation failed"
+						: "Message acceptance failed";
+					markOperationFailed(span, observedError, description);
+					recordOperationException(observedError, {
+						eventName: accepted
+							? "commonspace.message.followup.exception"
+							: "commonspace.message.accept.exception",
+						body: description,
+						severity: SeverityNumber.ERROR,
+					});
+					throw error;
+				} finally {
+					span.end();
+				}
+			},
+		);
+	}
+
 	async send(request: SendMessageRequest): Promise<SendMessageResponse> {
-		return this.withAdmission(async () => {
-			if (
-				request.delivery !== undefined &&
-				!["queue", "steer", "stop-and-send"].includes(request.delivery)
-			) {
-				throw new Error("invalid follow-up delivery mode");
-			}
-			const preparationStartedAt = this.performancePhaseStartedAt();
-			const prepared = await this.prepareSend(request);
-			this.recordPerformanceMeasurement(
-				CommonspaceHostPerformancePhase.AcceptanceRequestPreparation,
-				preparationStartedAt,
-			);
-			return this.acceptPreparedSend(prepared);
-		});
+		return this.withMessageSubmissionTelemetry(
+			"send",
+			request.conversation.kind,
+			request.delivery ?? "queue",
+			(markAccepted) =>
+				this.withAdmission(async () => {
+					if (
+						request.delivery !== undefined &&
+						!["queue", "steer", "stop-and-send"].includes(request.delivery)
+					) {
+						throw new Error("invalid follow-up delivery mode");
+					}
+					const preparationStartedAt = this.performancePhaseStartedAt();
+					const prepared = await this.prepareSend(request);
+					this.recordPerformanceMeasurement(
+						CommonspaceHostPerformancePhase.AcceptanceRequestPreparation,
+						preparationStartedAt,
+					);
+					return this.acceptPreparedSend(prepared, markAccepted);
+				}),
+		);
 	}
 
 	private currentEditableMessage(messageId: string): CommonspaceMessage {
@@ -6324,54 +6491,61 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			throw new Error("only human messages can be edited");
 		if (source.deletedAt !== undefined)
 			throw new Error("deleted messages cannot be edited");
-		if (source.conversation.kind === "dm")
-			await this.mutate({
-				action: "reset-dm",
-				agentId: source.conversation.id,
-			});
-		return this.withAdmission(async () => {
-			const currentSource = this.currentEditableMessage(source.id);
-			const editedProjectIds =
-				request.projectIds ??
-				(parseTags(request.text).projects.length > 0
-					? undefined
-					: referencedProjectIds(currentSource));
-			const editedRequest: SendMessageRequest = {
-				conversation: currentSource.conversation,
-				text: request.text,
-			};
-			if (editedProjectIds !== undefined)
-				editedRequest.projectIds = editedProjectIds;
-			const prepared = await this.prepareSend(editedRequest);
-			if (
-				request.projectIds === undefined &&
-				parseTags(request.text).projects.length === 0
-			)
-				prepared.projectScopeExplicit = false;
-			prepared.attachments = await Promise.all(
-				(currentSource.attachments ?? []).map(async (attachment) => {
-					const { data } = await this.readImageAttachment(attachment.id);
-					return {
-						metadata: { ...attachment, id: crypto.randomUUID() },
-						data,
+		return this.withMessageSubmissionTelemetry(
+			"edit",
+			source.conversation.kind,
+			"queue",
+			async (markAccepted) => {
+				if (source.conversation.kind === "dm")
+					await this.mutate({
+						action: "reset-dm",
+						agentId: source.conversation.id,
+					});
+				return this.withAdmission(async () => {
+					const currentSource = this.currentEditableMessage(source.id);
+					const editedProjectIds =
+						request.projectIds ??
+						(parseTags(request.text).projects.length > 0
+							? undefined
+							: referencedProjectIds(currentSource));
+					const editedRequest: SendMessageRequest = {
+						conversation: currentSource.conversation,
+						text: request.text,
 					};
-				}),
-			);
-			prepared.files = await Promise.all(
-				(currentSource.files ?? []).map(async (file) => {
-					const { data } = await this.readFileAttachment(file.id);
-					return { metadata: { ...file, id: crypto.randomUUID() }, data };
-				}),
-			);
-			prepared.version = {
-				versionRootMessageId:
-					currentSource.versionRootMessageId ?? currentSource.id,
-				supersedesMessageId: currentSource.id,
-				branchId: crypto.randomUUID(),
-			};
-			this.attachEditedMessageBranch(prepared, currentSource);
-			return this.acceptPreparedSend(prepared);
-		});
+					if (editedProjectIds !== undefined)
+						editedRequest.projectIds = editedProjectIds;
+					const prepared = await this.prepareSend(editedRequest);
+					if (
+						request.projectIds === undefined &&
+						parseTags(request.text).projects.length === 0
+					)
+						prepared.projectScopeExplicit = false;
+					prepared.attachments = await Promise.all(
+						(currentSource.attachments ?? []).map(async (attachment) => {
+							const { data } = await this.readImageAttachment(attachment.id);
+							return {
+								metadata: { ...attachment, id: crypto.randomUUID() },
+								data,
+							};
+						}),
+					);
+					prepared.files = await Promise.all(
+						(currentSource.files ?? []).map(async (file) => {
+							const { data } = await this.readFileAttachment(file.id);
+							return { metadata: { ...file, id: crypto.randomUUID() }, data };
+						}),
+					);
+					prepared.version = {
+						versionRootMessageId:
+							currentSource.versionRootMessageId ?? currentSource.id,
+						supersedesMessageId: currentSource.id,
+						branchId: crypto.randomUUID(),
+					};
+					this.attachEditedMessageBranch(prepared, currentSource);
+					return this.acceptPreparedSend(prepared, markAccepted);
+				});
+			},
+		);
 	}
 
 	private prepareMessageDeletion(messageId: string): PreparedMessageDeletion {
@@ -6536,9 +6710,11 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 
 	private async acceptPreparedSend(
 		prepared: PreparedSend,
+		markAccepted: () => void,
 	): Promise<SendMessageResponse> {
 		await this.overrides.beforeAcceptSend?.(prepared);
 		const response = await this.acceptSend(prepared);
+		markAccepted();
 		const scopeKey = this.followupScopeKey(
 			prepared.request.conversation,
 			response.thread?.id,
@@ -6546,7 +6722,12 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		const delivery = prepared.request.delivery ?? "queue";
 		if (this.activeConversationRuns.has(scopeKey)) {
 			const queue = this.pendingFollowups.get(scopeKey) ?? [];
-			const pending = { prepared, response, delivery };
+			const pending = {
+				prepared,
+				response,
+				delivery,
+				telemetryContext: context.active(),
+			};
 			if (delivery === "steer" || delivery === "stop-and-send")
 				queue.unshift(pending);
 			else queue.push(pending);
@@ -6559,7 +6740,12 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				);
 			}
 		} else {
-			this.startConversationRun(scopeKey, { prepared, response, delivery });
+			this.startConversationRun(scopeKey, {
+				prepared,
+				response,
+				delivery,
+				telemetryContext: context.active(),
+			});
 		}
 		return response;
 	}
@@ -6690,6 +6876,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			prepared: retry.prepared,
 			response,
 			delivery: "queue" as const,
+			telemetryContext: context.active(),
 		};
 		const scopeKey = this.followupScopeKey(
 			retry.source.conversation,
@@ -6738,8 +6925,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			request.assignmentId.trim() === ""
 		)
 			throw new Error("assignment id is required");
-		if (typeof request.agentId !== "string" || request.agentId.trim() === "")
-			throw new Error("agent id is required");
+		if (!Array.isArray(request.agentIds) || request.agentIds.length === 0)
+			throw new Error("at least one reroute agent is required");
 		if (!Array.isArray(request.projectIds))
 			throw new Error("project ids must be an array");
 		const projectIds = [
@@ -6758,6 +6945,13 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 
 	private prepareReroute(request: RerouteAssignmentRequest): PreparedReroute {
 		const projectIds = this.validatedRerouteProjectIds(request);
+		const agentIds = request.agentIds.map((agentId) => {
+			if (typeof agentId !== "string" || agentId.trim() === "")
+				throw new Error("reroute agent id is required");
+			return agentId.trim();
+		});
+		if (new Set(agentIds).size !== agentIds.length)
+			throw new Error("reroute agents must be unique");
 		const located = locateMessageById(
 			this.state.messages,
 			request.sourceMessageId,
@@ -6794,10 +6988,13 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		}
 
 		const agents = this.configuredAgents();
-		const target = agents.find((agent) => agent.id === request.agentId);
-		if (target === undefined) throw new Error("unknown reroute agent");
-		if (target.id === original.agentId)
-			throw new Error("reroute agent already owns this assignment");
+		const targets = agentIds.map((agentId) => {
+			const target = agents.find((agent) => agent.id === agentId);
+			if (target === undefined) throw new Error("unknown reroute agent");
+			if (target.id === original.agentId)
+				throw new Error("reroute agent already owns this assignment");
+			return target;
+		});
 		const agentExecutionRevisions = new Map(
 			agents.map((agent) => [agent.id, this.agentExecutionRevision(agent.id)]),
 		);
@@ -6818,7 +7015,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		);
 		if (channel === undefined)
 			throw new Error("routing source channel not found");
-		if (!channel.agentIds.includes(target.id))
+		if (targets.some((target) => !channel.agentIds.includes(target.id)))
 			throw new Error("reroute agent must belong to the channel");
 		return {
 			key,
@@ -6826,7 +7023,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			routing,
 			original,
 			agents,
-			target,
+			targets,
 			agentExecutionRevisions,
 			projects,
 			thread,
@@ -6842,33 +7039,41 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				(correction) => correction.fromAssignmentId,
 			),
 		);
-		const existingAssignment = prepared.routing.assignments.find(
-			(candidate) =>
-				candidate.agentId === prepared.target.id &&
-				!superseded.has(candidate.id),
+		const newAssignments: CommonspaceRoutingAssignment[] = [];
+		const assignments = prepared.targets.map((target) => {
+			const existing = prepared.routing.assignments.find(
+				(candidate) =>
+					candidate.agentId === target.id && !superseded.has(candidate.id),
+			);
+			if (existing !== undefined) return existing;
+			const assignment: CommonspaceRoutingAssignment = {
+				id: crypto.randomUUID(),
+				agentId: target.id,
+				projectIds: prepared.projects.map((project) => project.id),
+			};
+			newAssignments.push(assignment);
+			return assignment;
+		});
+		const corrections: CommonspaceRoutingCorrection[] = assignments.map(
+			(assignment) => ({
+				id: crypto.randomUUID(),
+				fromAssignmentId: prepared.original.id,
+				toAssignmentId: assignment.id,
+				projectIds: prepared.projects.map((project) => project.id),
+				createdAt: now(),
+			}),
 		);
-		const assignment: CommonspaceRoutingAssignment = existingAssignment ?? {
-			id: crypto.randomUUID(),
-			agentId: prepared.target.id,
-			projectIds: prepared.projects.map((project) => project.id),
-		};
-		const correction: CommonspaceRoutingCorrection = {
-			id: crypto.randomUUID(),
-			fromAssignmentId: prepared.original.id,
-			toAssignmentId: assignment.id,
-			createdAt: now(),
-		};
 		const updatedRouting: CommonspaceRoutingDecision = {
 			...prepared.routing,
 			status: "resolved",
 			agentIds: [
-				...new Set([...prepared.routing.agentIds, prepared.target.id]),
+				...new Set([
+					...prepared.routing.agentIds,
+					...prepared.targets.map((target) => target.id),
+				]),
 			],
-			assignments:
-				existingAssignment === undefined
-					? [...prepared.routing.assignments, assignment]
-					: prepared.routing.assignments,
-			corrections: [...prepared.routing.corrections, correction],
+			assignments: [...prepared.routing.assignments, ...newAssignments],
+			corrections: [...prepared.routing.corrections, ...corrections],
 		};
 		const source: CommonspaceMessage = {
 			...prepared.source,
@@ -6876,14 +7081,23 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		};
 		const thread: CommonspaceThread = {
 			...prepared.thread,
-			agentIds: [...new Set([...prepared.thread.agentIds, prepared.target.id])],
+			agentIds: [
+				...new Set([
+					...prepared.thread.agentIds,
+					...prepared.targets.map((target) => target.id),
+				]),
+			],
 		};
 		const correctionCount =
-			activeRoutingCorrectionCount(this.state, prepared.channel.id) + 1;
+			activeRoutingCorrectionCount(this.state, prepared.channel.id) +
+			corrections.length;
 		const channel = {
 			...prepared.channel,
 			agentIds: [
-				...new Set([...prepared.channel.agentIds, prepared.target.id]),
+				...new Set([
+					...prepared.channel.agentIds,
+					...prepared.targets.map((target) => target.id),
+				]),
 			],
 			routingMemory: {
 				...prepared.channel.routingMemory,
@@ -6892,12 +7106,12 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			},
 		};
 		return {
-			assignment,
-			correction,
+			assignments,
+			corrections,
+			newAssignments,
 			source,
 			thread,
 			channel,
-			deliveryNeeded: existingAssignment === undefined,
 		};
 	}
 
@@ -6932,10 +7146,23 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		this.broadcastRevision();
 	}
 
-	private async prepareRerouteDelivery(
+	private async prepareRerouteDeliveries(
 		prepared: PreparedReroute,
 		change: RerouteStateChange,
-	): Promise<PreparedSend> {
+	): Promise<PreparedSend[]> {
+		if (change.newAssignments.length === 0) return [];
+		const routing = change.source.routing;
+		if (routing === undefined) throw new Error("reroute routing is missing");
+		const superseded = new Set(
+			routing.corrections.map((correction) => correction.fromAssignmentId),
+		);
+		const participantAgentIds = [
+			...new Set(
+				routing.assignments
+					.filter((assignment) => !superseded.has(assignment.id))
+					.map((assignment) => assignment.agentId),
+			),
+		];
 		const attachments = await Promise.all(
 			(prepared.source.attachments ?? []).map(async (attachment) => {
 				const { data } = await this.readImageAttachment(attachment.id);
@@ -6948,48 +7175,49 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				return { metadata: file, data };
 			}),
 		);
-		const delivery: PreparedSend = {
-			request: {
-				conversation: prepared.source.conversation,
+		return change.newAssignments.map((assignment) => {
+			const delivery: PreparedSend = {
+				request: {
+					conversation: prepared.source.conversation,
+					text: prepared.source.text,
+					projectIds: assignment.projectIds,
+					threadId: change.thread.id,
+				},
 				text: prepared.source.text,
-				projectIds: change.assignment.projectIds,
-				threadId: change.thread.id,
-			},
-			text: prepared.source.text,
-			attachments,
-			files,
-			agents: prepared.agents,
-			agentIds: [prepared.target.id],
-			agentExecutionRevisions: prepared.agentExecutionRevisions,
-			routing: {
-				source: "explicit",
-				status: "resolved",
-				agentIds: [prepared.target.id],
-				assignments: [change.assignment],
-				corrections: [],
-				inferredProjectIds: [],
-				reason: "User corrected one routing assignment.",
-			},
-			channel: change.channel,
-			projects: prepared.projects,
-			inferProjects: false,
-			projectScopeExplicit: true,
-			thread: change.thread,
-		};
-		if (prepared.projects[0] !== undefined)
-			delivery.project = prepared.projects[0];
-		return delivery;
+				attachments,
+				files,
+				agents: prepared.agents,
+				agentIds: [assignment.agentId],
+				participantAgentIds,
+				agentExecutionRevisions: prepared.agentExecutionRevisions,
+				routing: {
+					source: "explicit",
+					status: "resolved",
+					agentIds: [assignment.agentId],
+					assignments: [assignment],
+					corrections: [],
+					inferredProjectIds: [],
+					reason: "User corrected one routing assignment.",
+				},
+				channel: change.channel,
+				projects: prepared.projects,
+				inferProjects: false,
+				projectScopeExplicit: true,
+				thread: change.thread,
+			};
+			if (prepared.projects[0] !== undefined)
+				delivery.project = prepared.projects[0];
+			return delivery;
+		});
 	}
 
 	private startRerouteOperation(
-		delivery: PreparedSend | undefined,
+		deliveries: readonly PreparedSend[],
 		response: SendMessageResponse,
 		channelId: string,
 	): void {
 		const operation = Promise.all([
-			delivery === undefined
-				? Promise.resolve()
-				: this.processReplies(delivery, response),
+			...deliveries.map((delivery) => this.processReplies(delivery, response)),
 			this.compactRoutingMemory(channelId),
 		]).then(() => undefined);
 		this.backgroundRuns.add(operation);
@@ -7008,21 +7236,19 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	): Promise<RerouteAssignmentResponse> {
 		const prepared = this.prepareReroute(request);
 		const change = this.createRerouteStateChange(prepared);
+		const deliveries = await this.prepareRerouteDeliveries(prepared, change);
 		await this.persistRerouteStateChange(prepared, change);
 		const state = this.publicSnapshot();
-		const delivery = change.deliveryNeeded
-			? await this.prepareRerouteDelivery(prepared, change)
-			: undefined;
 		const response: SendMessageResponse = {
 			accepted: change.source,
 			thread: change.thread,
 			state,
 		};
-		this.startRerouteOperation(delivery, response, change.channel.id);
+		this.startRerouteOperation(deliveries, response, change.channel.id);
 		return {
 			sourceMessageId: prepared.source.id,
-			assignment: change.assignment,
-			correction: change.correction,
+			assignments: change.assignments,
+			corrections: change.corrections,
 			state,
 		};
 	}
@@ -7951,7 +8177,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		const operation = (async () => {
 			let current: PendingFollowup | undefined = initial;
 			while (current !== undefined && !this.closing) {
-				await this.processReplies(current.prepared, current.response);
+				const followup = current;
+				await context.with(followup.telemetryContext, () =>
+					this.processReplies(followup.prepared, followup.response),
+				);
 				const queue = this.pendingFollowups.get(scopeKey);
 				current = queue?.shift();
 				if (queue?.length === 0) this.pendingFollowups.delete(scopeKey);
@@ -10575,11 +10804,51 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	}
 
 	private async runAgent(input: AgentRunInput): Promise<AgentRunResult> {
-		if (this.overrides.runAgent !== undefined) {
-			const result = await this.overrides.runAgent(input);
-			return typeof result === "string" ? { text: result } : result;
-		}
-		return this.runAcpAgent(input);
+		return serverTracer.startActiveSpan(
+			"commonspace.agent.run_attempt",
+			async (span) => {
+				try {
+					const result =
+						this.overrides.runAgent === undefined
+							? await this.runAcpAgent(input)
+							: await this.overrides.runAgent(input);
+					const response =
+						typeof result === "string" ? { text: result } : result;
+					const timeout = agentTimeoutReason(input.signal);
+					if (timeout !== undefined) {
+						span.setAttribute("commonspace.agent.outcome", "timeout");
+						markOperationFailed(span, timeout, "Agent attempt timed out");
+					} else if (input.signal.aborted) {
+						span.setAttribute("commonspace.agent.outcome", "cancelled");
+					} else {
+						span.setAttribute(
+							"commonspace.agent.response_chars",
+							Math.min(response.text.length, MAX_AGENT_RESPONSE_CHARS),
+						);
+						span.setStatus({ code: SpanStatusCode.OK });
+					}
+					return response;
+				} catch (error) {
+					const timeout = agentTimeoutReason(input.signal);
+					if (timeout !== undefined) {
+						span.setAttribute("commonspace.agent.outcome", "timeout");
+						markOperationFailed(span, timeout, "Agent attempt timed out");
+					} else if (input.signal.aborted)
+						span.setAttribute("commonspace.agent.outcome", "cancelled");
+					else {
+						span.setAttribute("commonspace.agent.outcome", "failed");
+						markOperationFailed(
+							span,
+							error instanceof Error ? error : undefined,
+							"Agent attempt failed",
+						);
+					}
+					throw error;
+				} finally {
+					span.end();
+				}
+			},
+		);
 	}
 
 	private beginLiveActivity({
@@ -10946,6 +11215,65 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		input: AgentRunInput,
 		shouldContinue: () => boolean,
 	): Promise<AgentRunResult | null> {
+		return serverTracer.startActiveSpan(
+			"commonspace.agent.run",
+			{
+				attributes: {
+					"commonspace.agent.adapter": input.agent.adapter,
+					"commonspace.agent.session_reused": input.sessionId !== undefined,
+					"commonspace.agent.ephemeral": input.ephemeralSession === true,
+				},
+			},
+			async (span) => {
+				const recordTimeout = (reason: Error) => {
+					span.setAttribute("commonspace.agent.outcome", "timeout");
+					markOperationFailed(span, reason, "Agent run timed out");
+					recordOperationException(reason, {
+						eventName: "commonspace.agent.run.exception",
+						body: "Agent run timed out",
+						severity: SeverityNumber.ERROR,
+					});
+				};
+				try {
+					const result = await this.runAgentWithRecovery(input, shouldContinue);
+					const timeout = agentTimeoutReason(input.signal);
+					if (timeout !== undefined) recordTimeout(timeout);
+					else {
+						const completed = result !== null && shouldContinue();
+						span.setAttribute(
+							"commonspace.agent.outcome",
+							completed ? "completed" : "cancelled",
+						);
+						if (completed) span.setStatus({ code: SpanStatusCode.OK });
+					}
+					return result;
+				} catch (error) {
+					const timeout = agentTimeoutReason(input.signal);
+					if (timeout !== undefined) recordTimeout(timeout);
+					else if (!shouldContinue()) {
+						span.setAttribute("commonspace.agent.outcome", "cancelled");
+					} else {
+						const observedError = error instanceof Error ? error : undefined;
+						span.setAttribute("commonspace.agent.outcome", "failed");
+						markOperationFailed(span, observedError, "Agent run failed");
+						recordOperationException(observedError, {
+							eventName: "commonspace.agent.run.exception",
+							body: "Agent run failed",
+							severity: SeverityNumber.ERROR,
+						});
+					}
+					throw error;
+				} finally {
+					span.end();
+				}
+			},
+		);
+	}
+
+	private async runAgentWithRecovery(
+		input: AgentRunInput,
+		shouldContinue: () => boolean,
+	): Promise<AgentRunResult | null> {
 		try {
 			return await this.runAgent(input);
 		} catch (error) {
@@ -10957,13 +11285,22 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				(!silentPersistedHermesSession && !isMissingNativeSession(error))
 			)
 				throw error;
-			if (!shouldContinue()) return null;
-			this.forgetAgentSession(
-				input.agent.id,
-				input.sessionName,
-				input.sessionId,
-			);
-			if (!shouldContinue()) return null;
+			let recover = shouldContinue();
+			if (recover) {
+				this.forgetAgentSession(
+					input.agent.id,
+					input.sessionName,
+					input.sessionId,
+				);
+				recover = shouldContinue();
+			}
+			recordOperationException(error instanceof Error ? error : undefined, {
+				eventName: "commonspace.agent.run_attempt.exception",
+				body: "Agent session was unavailable",
+				severity: SeverityNumber.WARN,
+				recoveryAction: recover ? "replace_session" : "cancel_run",
+			});
+			if (!recover) return null;
 			const processScopeKey = `${input.agent.id}\u0000${input.processScopeName ?? input.sessionName}`;
 			const processClient = this.acpProcesses.get(processScopeKey);
 			if (processClient !== undefined) {

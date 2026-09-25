@@ -17,6 +17,7 @@ import {
 	PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { AgentAvatar } from "./AgentAvatar";
 
 function routingDurationLabel(durationMs: number | undefined): string | null {
 	if (durationMs === undefined) return null;
@@ -59,11 +60,16 @@ interface RoutingAssignmentView {
 interface RoutingCorrectionView {
 	readonly from: string;
 	readonly id: string;
+	readonly projectNames: readonly string[];
 	readonly to: string;
 }
 
 interface RoutingReceiptView {
-	readonly agents: readonly string[];
+	readonly agents: readonly {
+		id: string;
+		name: string;
+		agent: RoutingAgent | undefined;
+	}[];
 	readonly assignments: readonly RoutingAssignmentView[];
 	readonly channelAgents: readonly RoutingAgent[];
 	readonly corrections: readonly RoutingCorrectionView[];
@@ -159,20 +165,6 @@ function routingSource(
 	return RoutingSource.Local;
 }
 
-function compactRoutingSource(source: RoutingSource): string {
-	switch (source) {
-		case RoutingSource.Ai:
-			return "AI";
-		case RoutingSource.Mention:
-			return "Mention";
-		case RoutingSource.Corrected:
-			return "Corrected";
-		case RoutingSource.AiPending:
-		case RoutingSource.Local:
-			return "Route";
-	}
-}
-
 function deriveRoutingReceipt(
 	message: CommonspaceMessage,
 	bootstrap: CommonspaceBootstrap | null | undefined,
@@ -207,8 +199,12 @@ function deriveRoutingReceipt(
 				];
 	const agentName = (agentId: string) =>
 		agentsById.get(agentId)?.displayName ?? agentId;
-	const agents = currentAgentIds.map(agentName);
-	const destination = agents.join(", ");
+	const agents = currentAgentIds.map((id) => ({
+		id,
+		name: agentName(id),
+		agent: agentsById.get(id),
+	}));
+	const destination = agents.map((agent) => agent.name).join(", ");
 	const source = routingSource(routing, agents.length > 0);
 	const responses = currentRoutingResponses(bootstrap, message.id, superseded);
 	const outcome = routingOutcome({ bootstrap, message, responses, routing });
@@ -243,6 +239,9 @@ function deriveRoutingReceipt(
 						? correction.fromAssignmentId
 						: agentName(from.agentId),
 				id: correction.id,
+				projectNames: correction.projectIds.map(
+					(projectId) => projectsById.get(projectId)?.name ?? projectId,
+				),
 				to:
 					to === undefined ? correction.toAssignmentId : agentName(to.agentId),
 			};
@@ -258,8 +257,8 @@ function deriveRoutingReceipt(
 			routing.status === "pending" || agents.length === 0
 				? receipt
 				: outcome === RoutingOutcome.Completed
-					? `${compactRoutingSource(source)} to ${destination}`
-					: `${outcome} · ${destination}`,
+					? ""
+					: outcome,
 	};
 }
 
@@ -287,27 +286,27 @@ function RoutingCorrectionForm({
 	assignedAgentIds: readonly string[];
 	onCorrectRouting: NonNullable<RoutingReceiptProps["onCorrectRouting"]>;
 }) {
-	const [agentId, setAgentId] = useState(() =>
-		agents.some((agent) => agent.id === assignment.agentId)
-			? assignment.agentId
-			: "",
-	);
+	const [agentIds, setAgentIds] = useState<string[]>([]);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const sourceName =
+		agents.find((agent) => agent.id === assignment.agentId)?.displayName ??
+		assignment.agentId;
 	const alreadyAssignedElsewhere =
-		agentId !== assignment.agentId && assignedAgentIds.includes(agentId);
+		agentIds.length > 0 &&
+		agentIds.every((agentId) => assignedAgentIds.includes(agentId));
 	return (
 		<form
 			onSubmit={async (event) => {
 				event.preventDefault();
-				if (saving || agentId === "" || agentId === assignment.agentId) return;
+				if (saving || agentIds.length === 0) return;
 				setSaving(true);
 				setError(null);
 				try {
 					await onCorrectRouting({
 						sourceMessageId: messageId,
 						assignmentId: assignment.id,
-						agentId,
+						agentIds,
 						projectIds: assignment.projectIds,
 					});
 				} catch {
@@ -319,37 +318,50 @@ function RoutingCorrectionForm({
 		>
 			<fieldset disabled={saving} className="grid gap-2">
 				<legend className="mb-2 font-medium text-foreground">
-					Correct recipient
+					Replace {sourceName} with
 				</legend>
-				<NativeSelect
-					aria-label="Correct routing agent"
-					value={agentId}
-					onChange={(event) => setAgentId(event.target.value)}
-				>
-					<option value="" disabled>
-						Choose recipient…
-					</option>
-					{agents.map((agent) => (
-						<option key={agent.id} value={agent.id}>
-							{agent.displayName}
-						</option>
-					))}
-				</NativeSelect>
+				<div className="grid max-h-48 gap-1 overflow-y-auto">
+					{agents
+						.filter((agent) => agent.id !== assignment.agentId)
+						.map((agent) => (
+							<label
+								key={agent.id}
+								className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-foreground hover:bg-muted/60"
+							>
+								<input
+									type="checkbox"
+									aria-label={`Replace ${sourceName} with ${agent.displayName}`}
+									className="size-4 accent-primary"
+									checked={agentIds.includes(agent.id)}
+									onChange={(event) =>
+										setAgentIds((current) =>
+											event.target.checked
+												? [...current, agent.id]
+												: current.filter((id) => id !== agent.id),
+										)
+									}
+								/>
+								<AgentAvatar agent={agent} size="sm" />
+								<span>{agent.displayName}</span>
+								{assignedAgentIds.includes(agent.id) ? (
+									<span className="ml-auto text-muted-foreground">
+										Already routed
+									</span>
+								) : null}
+							</label>
+						))}
+				</div>
 				<p className="text-muted-foreground">
 					{alreadyAssignedElsewhere
-						? "This agent already received the message. Your correction guides future routing in this Channel."
-						: "Sends the original message to this agent with the same Projects. Your correction guides future routing in this Channel."}
+						? "These agents already received the message. Your correction guides future routing in this Channel."
+						: "New agents receive the original message with the same Projects. Your correction guides future routing in this Channel."}
 				</p>
 				{error === null ? null : (
 					<p role="alert" className="text-destructive">
 						{error}
 					</p>
 				)}
-				<Button
-					type="submit"
-					size="sm"
-					disabled={agentId === "" || agentId === assignment.agentId}
-				>
+				<Button type="submit" size="sm" disabled={agentIds.length === 0}>
 					{saving
 						? "Saving…"
 						: alreadyAssignedElsewhere
@@ -371,6 +383,9 @@ function RoutingCorrectionControls({
 	onCorrectRouting: RoutingReceiptProps["onCorrectRouting"];
 }) {
 	const summaryRef = useRef<HTMLElement>(null);
+	const [selectedAssignmentId, setSelectedAssignmentId] = useState<
+		string | null
+	>(null);
 	const assignments = useMemo(() => {
 		const superseded = new Set(
 			message.routing?.corrections.map(
@@ -383,12 +398,15 @@ function RoutingCorrectionControls({
 			) ?? []
 		);
 	}, [message.routing]);
+	const selectedAssignment =
+		assignments.find((assignment) => assignment.id === selectedAssignmentId) ??
+		assignments[0];
 	if (
 		onCorrectRouting === undefined ||
 		message.deletedAt !== undefined ||
 		view.routingStatus !== "resolved" ||
 		view.channelAgents.length < 2 ||
-		assignments.length === 0
+		selectedAssignment === undefined
 	)
 		return null;
 	return (
@@ -399,20 +417,33 @@ function RoutingCorrectionControls({
 			>
 				Wrong recipient?
 			</summary>
-			<div className="mt-3 grid gap-4">
-				{assignments.map((assignment) => (
-					<RoutingCorrectionForm
-						key={assignment.id}
-						assignment={assignment}
-						messageId={message.id}
-						agents={view.channelAgents}
-						assignedAgentIds={assignments.map((item) => item.agentId)}
-						onCorrectRouting={async (request) => {
-							await onCorrectRouting(request);
-							summaryRef.current?.focus();
-						}}
-					/>
-				))}
+			<div className="mt-3 grid gap-3">
+				{assignments.length > 1 ? (
+					<NativeSelect
+						aria-label="Recipient to replace"
+						value={selectedAssignment.id}
+						onChange={(event) => setSelectedAssignmentId(event.target.value)}
+					>
+						{assignments.map((assignment) => (
+							<option key={assignment.id} value={assignment.id}>
+								{view.channelAgents.find(
+									(agent) => agent.id === assignment.agentId,
+								)?.displayName ?? assignment.agentId}
+							</option>
+						))}
+					</NativeSelect>
+				) : null}
+				<RoutingCorrectionForm
+					key={selectedAssignment.id}
+					assignment={selectedAssignment}
+					messageId={message.id}
+					agents={view.channelAgents}
+					assignedAgentIds={assignments.map((item) => item.agentId)}
+					onCorrectRouting={async (request) => {
+						await onCorrectRouting(request);
+						summaryRef.current?.focus();
+					}}
+				/>
 			</div>
 		</details>
 	);
@@ -420,9 +451,10 @@ function RoutingCorrectionControls({
 
 function RoutingSummary({ view }: { view: RoutingReceiptView }) {
 	return (
-		<div className="ml-auto flex min-w-0 max-w-xs items-center text-[11px] text-muted-foreground">
+		<div className="ml-auto flex min-w-0 items-center text-[11px] text-muted-foreground">
 			<PopoverTrigger
 				aria-label={`Routing details: ${view.receipt}`}
+				title={view.receipt}
 				className={cn(
 					"inline-flex min-h-7 min-w-0 items-center gap-1.5 rounded-md border bg-muted/40 px-2 text-left font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 					view.outcome === RoutingOutcome.Failed && "text-destructive",
@@ -432,7 +464,25 @@ function RoutingSummary({ view }: { view: RoutingReceiptView }) {
 					aria-hidden="true"
 					className="size-3.5 shrink-0 text-primary"
 				/>
-				<span className="truncate">{view.summary}</span>
+				{view.agents.length > 0 ? (
+					<span className="inline-flex items-center pl-1" aria-hidden="true">
+						{view.agents.slice(0, 3).map(({ id, name, agent }) => (
+							<AgentAvatar
+								key={id}
+								agent={agent}
+								fallbackName={name}
+								size="stack"
+								className="-ml-1 ring-1 ring-background first:ml-0"
+							/>
+						))}
+						{view.agents.length > 3 ? (
+							<span className="ml-1">+{view.agents.length - 3}</span>
+						) : null}
+					</span>
+				) : null}
+				{view.summary === "" ? null : (
+					<span className="truncate">{view.summary}</span>
+				)}
 				<ChevronDownIcon aria-hidden="true" className="size-3 shrink-0" />
 			</PopoverTrigger>
 			{view.agents.length > 0 && view.routingStatus !== "pending" ? (
@@ -472,6 +522,9 @@ function RoutingHistory({ view }: { view: RoutingReceiptView }) {
 					{view.corrections.map((correction) => (
 						<li key={correction.id}>
 							Rerouted {correction.from} → {correction.to}
+							{correction.projectNames.length === 0
+								? ""
+								: ` · ${correction.projectNames.join(", ")}`}
 						</li>
 					))}
 				</ul>
@@ -576,7 +629,7 @@ function RoutingDetails({
 	return (
 		<PopoverContent
 			aria-label="Routing details"
-			className="w-[340px] rounded-lg bg-card p-[18px] text-xs leading-relaxed"
+			className="max-h-[calc(100vh-2rem)] w-[340px] overflow-y-auto rounded-lg bg-card p-[18px] text-xs leading-relaxed"
 		>
 			<div className="mb-3 flex items-center justify-between gap-3">
 				<PopoverTitle className="font-semibold text-foreground">

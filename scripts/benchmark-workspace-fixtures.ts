@@ -110,6 +110,7 @@ function addCorrectionAndAttachment(
 		id: `correction-${request.id}`,
 		fromAssignmentId: previousAssignmentId,
 		toAssignmentId: assignment.id,
+		projectIds: assignment.projectIds,
 		createdAt: request.createdAt,
 	});
 	const id = `10000000-0000-4000-8000-${String(threadIndex + 1).padStart(12, "0")}`;

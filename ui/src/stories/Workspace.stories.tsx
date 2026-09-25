@@ -194,6 +194,9 @@ export const AgentProfileDiscoveryRetry: Story = {
 };
 
 export const RoutingCorrection: Story = {
+	beforeEach: ({ msw }) => {
+		msw.use(...createWorkspaceMockApi("routing-correction"));
+	},
 	play: async ({ canvasElement }) => {
 		const page = within(canvasElement.ownerDocument.body);
 		const receipts = await page.findAllByRole("button", {
@@ -203,29 +206,33 @@ export const RoutingCorrection: Story = {
 		if (receipt === undefined) throw new Error("Routing receipt is missing.");
 		await userEvent.click(receipt);
 		await userEvent.click(await page.findByText("Wrong recipient?"));
-		const select = page.getByRole("combobox", {
-			name: "Correct routing agent",
-		});
 		await expect(
 			page.getByRole("button", { name: "Reroute and remember" }),
 		).toBeDisabled();
-		await userEvent.selectOptions(select, "agent-codex");
+		await userEvent.click(
+			page.getByRole("checkbox", { name: "Replace Agentops with Codex" }),
+		);
+		await userEvent.click(
+			page.getByRole("checkbox", { name: "Replace Agentops with Reviewer" }),
+		);
 		await userEvent.click(
 			page.getByRole("button", { name: "Reroute and remember" }),
 		);
 		await expect(
-			await page.findByText("Rerouted Agentops → Codex"),
+			await page.findByText("Rerouted Agentops → Codex · Commonspace"),
 		).toBeVisible();
 		await expect(
-			page.getByRole("combobox", { name: "Correct routing agent" }),
-		).toHaveValue("agent-codex");
-		await expect(
-			page.getByRole("button", { name: "Reroute and remember" }),
-		).toBeDisabled();
+			await page.findByText("Rerouted Agentops → Reviewer · Commonspace"),
+		).toBeVisible();
+		await expect(receipt).toHaveAttribute(
+			"aria-label",
+			expect.stringContaining("Routed to Codex, Reviewer"),
+		);
 	},
 };
 export const RoutingCorrectionFailure: Story = {
 	beforeEach: ({ msw }) => {
+		msw.use(...createWorkspaceMockApi("routing-correction"));
 		msw.use(
 			http.post(
 				"/api/reroute",
@@ -246,17 +253,22 @@ export const RoutingCorrectionFailure: Story = {
 		if (receipt === undefined) throw new Error("Routing receipt is missing.");
 		await userEvent.click(receipt);
 		await userEvent.click(await page.findByText("Wrong recipient?"));
-		const select = page.getByRole("combobox", {
-			name: "Correct routing agent",
+		const codex = page.getByRole("checkbox", {
+			name: "Replace Agentops with Codex",
 		});
-		await userEvent.selectOptions(select, "agent-codex");
+		const reviewer = page.getByRole("checkbox", {
+			name: "Replace Agentops with Reviewer",
+		});
+		await userEvent.click(codex);
+		await userEvent.click(reviewer);
 		await userEvent.click(
 			page.getByRole("button", { name: "Reroute and remember" }),
 		);
 		await expect(
 			await page.findByText("Could not save the correction. Try again."),
 		).toBeVisible();
-		await expect(select).toHaveValue("agent-codex");
+		await expect(codex).toBeChecked();
+		await expect(reviewer).toBeChecked();
 		await expect(
 			page.getByRole("button", { name: "Reroute and remember" }),
 		).toBeEnabled();
@@ -264,7 +276,10 @@ export const RoutingCorrectionFailure: Story = {
 			page.getByRole("button", { name: "Reroute and remember" }),
 		);
 		await expect(
-			await page.findByText("Rerouted Agentops → Codex"),
+			await page.findByText("Rerouted Agentops → Codex · Commonspace"),
+		).toBeVisible();
+		await expect(
+			await page.findByText("Rerouted Agentops → Reviewer · Commonspace"),
 		).toBeVisible();
 		await expect(page.getByText("Wrong recipient?")).toHaveFocus();
 	},

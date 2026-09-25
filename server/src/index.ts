@@ -5,6 +5,7 @@ import {
 	type AgentAdapterKind,
 	isAgentAdapterKind,
 } from "@commonspace/shared";
+import { context, trace } from "@opentelemetry/api";
 import pino from "pino";
 import { createCommonspaceApp } from "./app.js";
 import { CommonspaceMcpGateway } from "./commonspace-mcp.js";
@@ -15,6 +16,7 @@ import {
 	type CommonspaceHostDependencies,
 	CommonspaceHostService,
 } from "./service.js";
+import { shutdownTelemetry, startTelemetry } from "./telemetry.js";
 
 interface CommonspaceLogger {
 	info(message: string): void;
@@ -37,7 +39,17 @@ export interface RunningCommonspaceServer {
 }
 
 function defaultLogger(): CommonspaceLogger {
-	const logger = pino({ level: process.env.COMMONSPACE_LOG_LEVEL ?? "info" });
+	const logger = pino({
+		level: process.env.COMMONSPACE_LOG_LEVEL ?? "info",
+		mixin: () => {
+			const span = trace.getSpan(context.active());
+			if (span === undefined) return {};
+			const spanContext = span.spanContext();
+			if (!trace.isSpanContextValid(spanContext)) return {};
+			const { traceId, spanId } = spanContext;
+			return { trace_id: traceId, span_id: spanId };
+		},
+	});
 	return {
 		info: (message) => logger.info(message),
 		warn: (message) =>
@@ -205,20 +217,44 @@ export async function runCommonspaceCli(
 		};
 	}
 	options.signal?.throwIfAborted();
-	const running = await startCommonspaceServer(serverOptions);
+	const telemetry = await startTelemetry(process.env.COMMONSPACE_OTLP_ENDPOINT);
+	let telemetryClose: Promise<void> | undefined;
+	const closeTelemetry = () =>
+		(telemetryClose ??= shutdownTelemetry(telemetry));
+	let running: RunningCommonspaceServer;
+	try {
+		running = await startCommonspaceServer(serverOptions);
+	} catch (error) {
+		await closeTelemetry();
+		throw error;
+	}
 	if (options.signal?.aborted === true) {
 		try {
 			await running.close();
 		} finally {
-			await options.classifier?.close();
+			try {
+				await options.classifier?.close();
+			} finally {
+				await closeTelemetry();
+			}
 		}
 		options.signal.throwIfAborted();
 	}
 	process.stdout.write(`Commonspace is running at ${running.url}\n`);
 	let finalized = false;
 	const finalize = (operation: Promise<void>) => {
-		void operation
-			.finally(() => options.classifier?.close())
+		const finish = async () => {
+			try {
+				await operation;
+			} finally {
+				try {
+					await options.classifier?.close();
+				} finally {
+					await closeTelemetry();
+				}
+			}
+		};
+		void finish()
 			.then(() => {
 				if (finalized) return;
 				finalized = true;

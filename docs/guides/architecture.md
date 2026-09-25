@@ -17,6 +17,8 @@ The pnpm workspace has four packages:
 
 The product consists of Projects, Channels, Direct Messages, Agents, messages, Threads, and their shared context. Keep feature logic near its owner and use `packages/shared` as the single source for cross-process types.
 
+The server can optionally export OpenTelemetry operation spans and exception logs to a loopback OTLP collector. This operational telemetry is distinct from persisted Agent activity traces and contains no conversation content. See [Operations](operations.md#opentelemetry) for configuration and field policy.
+
 Two protocols connect agent work to the workspace. Agent Client Protocol (ACP) carries native session requests, responses, activity, and permission choices over local child-process input/output. Model Context Protocol (MCP) exposes scoped Commonspace context and progress tools over authenticated loopback HTTP.
 
 ## Where changes belong
@@ -111,9 +113,9 @@ Server-sent events carry durable state revisions, routing configuration invalida
 
 ### Native capability inventory
 
-Native capability browsing uses `GET /api/agents/:agentId/capabilities` for an added agent. The shared `HarnessCapabilityInventory` contract contains only display metadata. Each adapter owns native inventory extraction; the service applies host redaction, and the endpoint is same-origin with `Cache-Control: no-store`. Inspection is lazy and separate from bootstrap, saved agent profiles, and portable exports.
+Native capability browsing uses `GET /api/agents/:agentId/capabilities` for an added agent. The shared `HarnessCapabilityInventory` contract contains only display metadata, including native OAuth status when the adapter can report it. Each adapter owns native inventory extraction; the service applies host redaction, and the endpoint is same-origin with `Cache-Control: no-store`. Inspection is lazy and separate from bootstrap, saved agent profiles, and portable exports.
 
-Per-category failures do not erase categories that were successfully inspected. The browser owns loading, refresh, and unavailable states; it has no native capability editing controls.
+Per-category failures do not erase categories that were successfully inspected. The browser owns loading, refresh, and unavailable states. `POST /api/agents/:agentId/mcp-authentication` is an explicit same-origin native sign-in action for supported MCP servers. The adapter rechecks the server's current OAuth status before invoking native login with an argument array. Commonspace does not receive or persist credentials or infer that OAuth is required when the harness only reports a missing login.
 
 ### Package and service lifecycle
 
@@ -196,7 +198,7 @@ Project scope is inferred unless the user supplies visible `@@project` reference
 
 ## Persistence
 
-The current internal state version is 33, defined by `COMMONSPACE_STATE_VERSION`. Versions 1–32 migrate during load through structural validation and sanitization.
+The current internal state version is 34, defined by `COMMONSPACE_STATE_VERSION`. Versions 1–33 migrate during load through structural validation and sanitization. Version 34 preserves multiple correction links from one assignment and the explicitly chosen Project scope on each correction; older corrections inherit the target assignment's saved scope during migration.
 
 Persisted state includes the roster, appearance, workspace coordination defaults, host-private native sessions, bounded activity, Inbox read/unread/saved state, notification preferences, attachments, routing decisions and memory, Project references, Channel/Thread context, pins, message versions, deletion markers, permissions, and execution state. Native model and reasoning settings are not Commonspace state.
 
@@ -223,7 +225,7 @@ Execution completion and attention evidence stay separate. Text-only explicit re
 
 Notification links identify conversations, Threads, and messages by their workspace IDs. The client accepts them only when they match current state on the loopback origin.
 
-Portable archive version 1 is independent of internal state version 33. Export contains sanitized workspace records and exact attachment bytes, replaces Project roots with counts, and omits native sessions and pending attachment cleanup. Import requires an empty workspace and explicit existing local roots, and validates all structure, mapping, attachment, and size constraints before writes. Retention requires an owner-triggered, revision-bound preview for one inactive conversation. See [Workspace archive format](../specs/workspace-archive-format.md) for the contract.
+Portable archive version 2 is independent of internal state version 34. Export contains sanitized workspace records and exact attachment bytes, replaces Project roots with counts, and omits native sessions and pending attachment cleanup. Version 2 includes each routing correction's chosen Project scope; import still accepts version 1 and derives missing correction scopes from their target assignments. Import requires an empty workspace and explicit existing local roots, and validates all structure, mapping, attachment, and size constraints before writes. Retention requires an owner-triggered, revision-bound preview for one inactive conversation. See [Workspace archive format](../specs/workspace-archive-format.md) for the contract.
 
 ## Routing inference
 
@@ -243,11 +245,11 @@ During an active Channel run, `commonspace_handoff` may register one target and 
 
 For a new root without `@@project` tags, inference may select from all configured Projects. The message and Thread retain the union of the selected references. Explicit valid tags constrain the available set, including replacing inherited scope on an edited branch. Explicit `@agent` addressing always remains authoritative.
 
-A correction through `/api/reroute` replaces the Agent of one participant delivery. The target Agent must already belong to the Channel, with an explicitly supplied Project subset. Commonspace retains both attempts, binds replies to their assignment IDs, and does not restart unrelated Agents. `routing-memory.ts` supplies bounded correction examples while their summary is pending or failed, excluding deleted or superseded records. The host uses durable correction history to require inference-Agent routing even when examples do not fit the prompt, except for standalone greetings with unambiguous current addressing. Such greetings can resolve locally without consuming or changing historical corrections; a correction arriving during classification still forces a fresh inference decision.
+A correction through `/api/reroute` replaces one participant delivery with one or more Channel Agents and an explicitly supplied Project subset. It records one correction link with that scope per chosen Agent and delivers the original request to each newly assigned Agent. An Agent with another active assignment is linked without a second delivery; its earlier delivery scope remains unchanged. Commonspace retains the attempts, binds replies to their assignment IDs, and does not restart unrelated Agents. `routing-memory.ts` supplies bounded correction examples while their summary is pending or failed, excluding deleted or superseded records. The host uses durable correction history to require inference-Agent routing even when examples do not fit the prompt, except for standalone greetings with unambiguous current addressing. Such greetings can resolve locally without consuming or changing historical corrections; a correction arriving during classification still forces a fresh inference decision.
 
 ### Receipts and failures
 
-Routing stores its own start time, resolution time, and duration separately from harness execution. Compact conversation receipts show destinations, selection source, and outcomes; expanding a receipt reveals stored assignments, Project references, reasons, timings, and correction history. Resolved assignments offer **Wrong recipient? → Reroute and remember**, preserving the original request and Project scope. A failed decision marks the accepted source failed, creates a durable retryable Inbox item, and exposes controls to retry inference or select a Channel Agent manually without duplicating the original message; it never silently broadcasts the message.
+Routing stores its own start time, resolution time, and duration separately from harness execution. Compact conversation receipts show destination Agent icons and unresolved status; the accessible label and expanded receipt provide destinations, selection source, outcomes, assignments, Project references, reasons, timings, and correction history. Resolved assignments offer **Wrong recipient? → Reroute and remember**, preserving the original request and Project scope. A failed decision marks the accepted source failed, creates a durable retryable Inbox item, and exposes controls to retry inference or select a Channel Agent manually without duplicating the original message; it never silently broadcasts the message.
 
 ### Inference Agent and validation
 

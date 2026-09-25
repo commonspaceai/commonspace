@@ -42,6 +42,8 @@ export interface NativeAgentAdapter {
 	inspectCapabilities(
 		agent: CommonspaceAgentDefinition,
 	): Promise<HarnessCapabilityGroup[]>;
+	/** Run a native login only when the named MCP server supports it. */
+	authenticateMcp?(serverName: string): Promise<boolean>;
 	launch(
 		agent: CommonspaceAgentProfile,
 		fullAccess: boolean,
