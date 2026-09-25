@@ -286,21 +286,35 @@ function SidebarDialog({
 				closeLabel={`Close ${title}`}
 				aria-describedby={undefined}
 				className={cn(
-					"top-[10vh] max-h-[80vh] -translate-y-0",
+					size === "wide"
+						? "top-1/2 max-h-[90vh] -translate-y-1/2"
+						: "top-[10vh] max-h-[80vh] -translate-y-0",
 					size === "compact"
 						? "sm:max-w-[440px]"
 						: size === "wide"
-							? "sm:max-w-[640px]"
+							? "sm:max-w-[800px]"
 							: "sm:max-w-[520px]",
 				)}
 			>
-				<DialogHeader className="border-b px-6 py-5">
+				<DialogHeader
+					className={cn(
+						"border-b",
+						size === "wide" ? "px-8 py-6" : "px-6 py-5",
+					)}
+				>
 					<DialogTitle>{title}</DialogTitle>
 					{description === undefined ? null : (
 						<DialogDescription>{description}</DialogDescription>
 					)}
 				</DialogHeader>
-				<div className="min-h-0 overflow-y-auto p-6">{children}</div>
+				<div
+					className={cn(
+						"min-h-0 overflow-y-auto",
+						size === "wide" ? "p-8" : "p-6",
+					)}
+				>
+					{children}
+				</div>
 			</DialogContent>
 		</Dialog>
 	);
@@ -2634,14 +2648,14 @@ export function CommonspaceSidebar({
 								setForm(null);
 							}}
 						>
-							<fieldset className="grid grid-cols-4 gap-2.5 border-0 p-0 md:grid-cols-6">
+							<fieldset className="grid grid-cols-4 gap-4 border-0 p-0 md:grid-cols-6">
 								<legend className="sr-only">Coding agents</legend>
 								{AGENT_ADAPTER_KINDS.map((adapter, index) => (
 									<button
 										key={adapter}
 										type="button"
 										className={cn(
-											"col-span-2 grid min-h-16 grid-cols-[40px_minmax(0,1fr)_16px] items-center gap-2.5 rounded-xl border border-transparent bg-muted/50 px-3 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring aria-pressed:border-border aria-pressed:bg-selection",
+											"col-span-2 grid min-h-20 grid-cols-[48px_minmax(0,1fr)_20px] items-center gap-4 rounded-xl border border-transparent bg-muted/50 px-4 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring aria-pressed:border-border aria-pressed:bg-selection",
 											index === AGENT_ADAPTER_KINDS.length - 2 &&
 												AGENT_ADAPTER_KINDS.length % 3 === 2 &&
 												"md:col-start-2",
@@ -2657,7 +2671,7 @@ export function CommonspaceSidebar({
 									>
 										<img
 											className={cn(
-												"size-10 object-contain",
+												"size-12 object-contain",
 												(adapter === "hermes" || adapter === "opencode") &&
 													"dark:invert",
 											)}
@@ -2669,11 +2683,11 @@ export function CommonspaceSidebar({
 											{runtimeLabel(adapter)}
 										</span>
 										<span
-											className="flex size-4 items-center justify-center text-primary"
+											className="flex size-5 items-center justify-center text-primary"
 											aria-hidden="true"
 										>
 											{agentAdapter === adapter ? (
-												<CheckIcon className="size-4" />
+												<CheckIcon className="size-5" />
 											) : null}
 										</span>
 									</button>
@@ -2681,10 +2695,10 @@ export function CommonspaceSidebar({
 							</fieldset>
 							{agentAdapter !== null && (
 								<section
-									className="mt-4 grid gap-3 border-t pt-4"
+									className="mt-6 grid gap-4 border-t pt-6"
 									aria-label={`${runtimeLabel(agentAdapter)} agent discovery`}
 								>
-									<div className="grid gap-3">
+									<div className="grid gap-4">
 										{discovery?.status === AgentDiscoveryStatus.Pending ? (
 											<p
 												role="status"
@@ -2734,12 +2748,14 @@ export function CommonspaceSidebar({
 												</div>
 											)}
 										{availableDiscoveredAgents.length > 0 && (
-											<div className="grid gap-2.5">
-												<h3 className="text-sm font-semibold">Found agents</h3>
-												<label className="flex items-start gap-2.5 py-1 text-left">
+											<div className="grid gap-4">
+												<h3 className="text-base font-semibold">
+													Found agents
+												</h3>
+												<label className="flex cursor-pointer items-start gap-3 rounded-lg border bg-muted/30 p-4 text-left transition-colors hover:bg-muted/50">
 													<input
 														type="checkbox"
-														className="mt-0.5 size-4"
+														className="mt-1 size-4 shrink-0"
 														checked={agentFullAccess}
 														onChange={(event) => {
 															setAgentFullAccess(event.target.checked);
@@ -2749,7 +2765,7 @@ export function CommonspaceSidebar({
 														<strong className="block text-sm">
 															Full access
 														</strong>
-														<small className="block text-xs leading-5 text-muted-foreground">
+														<small className="block text-sm leading-5 text-muted-foreground">
 															Skip approval prompts for its Commonspace runs.
 														</small>
 													</span>
@@ -2758,7 +2774,7 @@ export function CommonspaceSidebar({
 													<button
 														key={agent.id}
 														type="button"
-														className="grid min-h-14 grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border bg-background px-3 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+														className="grid min-h-16 grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-4 rounded-lg border bg-background px-4 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
 														aria-label={`Add discovered agent ${agent.displayName}`}
 														onClick={() => {
 															void store.mutate({
@@ -2788,7 +2804,7 @@ export function CommonspaceSidebar({
 									</div>
 								</section>
 							)}
-							<div className="mt-3 flex justify-end border-t pt-3">
+							<div className="mt-5 flex justify-end border-t pt-4">
 								<button
 									type="button"
 									className="min-h-11 rounded-sm border px-4"
