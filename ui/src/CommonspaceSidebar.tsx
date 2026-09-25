@@ -2752,7 +2752,7 @@ export function CommonspaceSidebar({
 												<h3 className="text-base font-semibold">
 													Found agents
 												</h3>
-												<label className="flex cursor-pointer items-start gap-4 rounded-lg border bg-muted/30 p-4 text-left transition-colors hover:bg-muted/50">
+												<label className="flex cursor-pointer items-start gap-5 rounded-lg border bg-muted/30 p-6 text-left transition-colors hover:bg-muted/50">
 													<input
 														type="checkbox"
 														className="mt-1 size-4 shrink-0"
@@ -2761,11 +2761,9 @@ export function CommonspaceSidebar({
 															setAgentFullAccess(event.target.checked);
 														}}
 													/>
-													<span>
-														<strong className="block text-sm">
-															Full access
-														</strong>
-														<small className="block text-sm leading-5 text-muted-foreground">
+													<span className="grid gap-2">
+														<strong className="text-sm">Full access</strong>
+														<small className="text-sm leading-6 text-muted-foreground">
 															Skip approval prompts for its Commonspace runs.
 														</small>
 													</span>
