@@ -217,9 +217,16 @@ export const OnboardingAddAgent: Story = {
 	args: { store: createStoryStore(onboardingWithoutAgent) },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const page = within(canvasElement.ownerDocument.body);
 		await expect(
 			await canvas.findByRole("main", { name: "Workspace setup" }),
 		).toBeVisible();
+		await expect(
+			canvas.queryByRole("button", {
+				name: "Search messages, channels, and agents",
+			}),
+		).not.toBeInTheDocument();
+		await expect(canvas.queryByRole("complementary")).not.toBeInTheDocument();
 		await expect(
 			canvas.getByRole("heading", {
 				name: "Bring an agent. Give the workspace a mind.",
@@ -231,6 +238,21 @@ export const OnboardingAddAgent: Story = {
 		await expect(
 			canvas.getByRole("button", { name: "Use selected agent" }),
 		).toBeDisabled();
+		await userEvent.click(canvas.getByRole("button", { name: "Add an agent" }));
+		await waitFor(() => {
+			expect(page.getByRole("dialog", { name: "Add an agent" })).toBeVisible();
+		});
+		await userEvent.click(page.getByRole("button", { name: "Cancel" }));
+		await waitFor(() => {
+			expect(
+				page.queryByRole("dialog", { name: "Add an agent" }),
+			).not.toBeInTheDocument();
+		});
+		await expect(
+			canvas.getByRole("button", { name: "Add an agent" }),
+		).toHaveFocus();
+		await userEvent.keyboard("{Meta>}k{/Meta}");
+		await expect(page.queryByRole("dialog")).not.toBeInTheDocument();
 	},
 };
 
@@ -252,6 +274,12 @@ export const OnboardingChooseInferenceAgent: Story = {
 				name: "Choose the workspace inference agent",
 			}),
 		).toBeVisible();
+		await expect(
+			canvas.queryByRole("button", {
+				name: "Search messages, channels, and agents",
+			}),
+		).not.toBeInTheDocument();
+		await expect(canvas.queryByRole("complementary")).not.toBeInTheDocument();
 		const submit = canvas.getByRole("button", { name: "Use selected agent" });
 		await expect(submit).toBeDisabled();
 		const codex = canvas.getByRole("radio", { name: /Build Smith/iu });
@@ -289,6 +317,18 @@ export const OnboardingInferenceSavePending: Story = {
 
 export const Loading: Story = {
 	args: { store: createStoryStore(null, { loading: true }) },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("main", { name: "Workspace connection" }),
+		).toBeVisible();
+		await expect(canvas.queryByRole("complementary")).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByRole("button", {
+				name: "Search messages, channels, and agents",
+			}),
+		).not.toBeInTheDocument();
+	},
 };
 
 export const ErrorBanner: Story = {
