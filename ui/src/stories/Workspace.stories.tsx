@@ -337,6 +337,89 @@ export const WritingScopeShortcut: Story = {
 };
 export const Inbox: Story = { args: { initialPath: "/" } };
 export const Threads: Story = { args: { initialPath: "/threads" } };
+export const Scheduled: Story = {
+	args: { initialPath: "/scheduled" },
+	beforeEach: ({ msw }) => {
+		msw.use(...createWorkspaceMockApi("scheduled"));
+	},
+};
+export const ScheduledEmpty: Story = { args: { initialPath: "/scheduled" } };
+export const ScheduledCreation: Story = {
+	args: { initialPath: "/scheduled" },
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		await userEvent.click(
+			await page.findByRole("button", { name: "Create a schedule" }),
+		);
+		const editor = within(
+			await page.findByRole("dialog", { name: "New schedule" }),
+		);
+		await userEvent.type(
+			editor.getByRole("textbox", { name: "Title" }),
+			"Review the build",
+		);
+		await userEvent.type(
+			editor.getByRole("textbox", { name: "Message" }),
+			"Check the latest build and summarize any failures.",
+		);
+		await userEvent.selectOptions(
+			editor.getByRole("combobox", { name: "Frequency" }),
+			"cron",
+		);
+		await userEvent.click(
+			editor.getByRole("button", { name: "Save schedule" }),
+		);
+		await expect(
+			await page.findByRole("button", {
+				name: "Edit schedule Review the build",
+			}),
+		).toBeVisible();
+	},
+};
+export const ScheduledManagement: Story = {
+	args: { initialPath: "/scheduled" },
+	beforeEach: ({ msw }) => {
+		msw.use(...createWorkspaceMockApi("scheduled"));
+	},
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		await userEvent.click(
+			await page.findByRole("button", {
+				name: "Edit schedule Review the release",
+			}),
+		);
+		const editor = within(
+			await page.findByRole("dialog", { name: "Edit schedule" }),
+		);
+		await userEvent.clear(editor.getByRole("textbox", { name: "Title" }));
+		await userEvent.type(
+			editor.getByRole("textbox", { name: "Title" }),
+			"Review the launch",
+		);
+		await userEvent.click(
+			editor.getByRole("button", { name: "Save schedule" }),
+		);
+		await expect(
+			await page.findByRole("button", {
+				name: "Edit schedule Review the launch",
+			}),
+		).toBeVisible();
+		await userEvent.click(page.getByRole("button", { name: "Pause" }));
+		await waitFor(() =>
+			expect(
+				page.getByRole("button", { name: "Edit schedule Review the launch" }),
+			).toHaveTextContent("Paused"),
+		);
+		const resume = page.getAllByRole("button", { name: "Resume" })[0];
+		if (resume === undefined) throw new Error("Resume action is missing.");
+		await userEvent.click(resume);
+		await waitFor(() =>
+			expect(
+				page.getByRole("button", { name: "Edit schedule Review the launch" }),
+			).toHaveTextContent("Next run"),
+		);
+	},
+};
 export const DirectMessage: Story = {
 	args: { initialPath: "/agents/agent-hermes" },
 };

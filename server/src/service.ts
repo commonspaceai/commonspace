@@ -46,6 +46,7 @@ import type {
 	CommonspaceRunAttribution,
 	CommonspaceRunFileChange,
 	CommonspaceRunRootAttribution,
+	CommonspaceSchedule,
 	CommonspaceState,
 	CommonspaceThread,
 	CommonspaceThreadContext,
@@ -176,6 +177,7 @@ import {
 	completeRunAttribution,
 	type RunSnapshot,
 } from "./run-attribution.js";
+import { nextCronRun, validatedScheduleTiming } from "./schedules.js";
 import type { HistoryEmbedder } from "./semantic-history.js";
 import {
 	addDiscoveredAgent,
@@ -496,6 +498,7 @@ interface PreparedSend {
 		branchPointMessageId: string;
 		channelSnapshot: CommonspaceThread["context"]["channelSnapshot"];
 	};
+	schedule?: CommonspaceSchedule;
 }
 
 interface PreparedChannelAdmission {
@@ -3285,6 +3288,79 @@ function loadedAttachmentDeletions(
 	return pending;
 }
 
+function sanitizeSchedules(
+	value: JsonValue | undefined,
+	channelIds: ReadonlySet<string>,
+): CommonspaceSchedule[] {
+	if (!Array.isArray(value)) return [];
+	const seen = new Set<string>();
+	return value.flatMap((candidate) => {
+		const record = plainRecord(candidate);
+		const timingRecord = plainRecord(record?.timing);
+		const id = loadedId(record?.id);
+		const channelId = loadedId(record?.channelId);
+		const title = loadedString(record?.title, 120).trim();
+		const text = loadedString(record?.text, 16_000).trim();
+		const createdAt = loadedIsoTimestamp(record?.createdAt);
+		const nextRunAt = loadedIsoTimestamp(record?.nextRunAt);
+		const lastRunAt = loadedIsoTimestamp(record?.lastRunAt);
+		if (
+			record === null ||
+			id === null ||
+			seen.has(id) ||
+			channelId === null ||
+			!channelIds.has(channelId) ||
+			title === "" ||
+			text === "" ||
+			createdAt === null ||
+			typeof record.paused !== "boolean" ||
+			(record.nextRunAt !== null && nextRunAt === null) ||
+			(record.lastRunAt !== null && lastRunAt === null) ||
+			timingRecord === null
+		)
+			return [];
+		let timing: CommonspaceSchedule["timing"];
+		try {
+			if (
+				timingRecord.kind === "once" &&
+				typeof timingRecord.runAt === "string"
+			)
+				timing = validatedScheduleTiming({
+					kind: "once",
+					runAt: timingRecord.runAt,
+				});
+			else if (
+				timingRecord.kind === "cron" &&
+				typeof timingRecord.expression === "string" &&
+				typeof timingRecord.timeZone === "string"
+			)
+				timing = validatedScheduleTiming({
+					kind: "cron",
+					expression: timingRecord.expression,
+					timeZone: timingRecord.timeZone,
+				});
+			else return [];
+		} catch {
+			return [];
+		}
+		if (timing.kind === "cron" && nextRunAt === null) return [];
+		seen.add(id);
+		return [
+			{
+				id,
+				title,
+				channelId,
+				text,
+				timing,
+				paused: record.paused,
+				nextRunAt,
+				lastRunAt,
+				createdAt,
+			},
+		];
+	});
+}
+
 function sanitizeLoadedState(value: JsonValue): CommonspaceState {
 	const { record, version } = loadedStateSource(value);
 	const defaults = sanitizeLoadedDefaults(record.defaults);
@@ -3297,6 +3373,7 @@ function sanitizeLoadedState(value: JsonValue): CommonspaceState {
 		agentIds: channel.agentIds.filter((agentId) => agentIds.has(agentId)),
 	}));
 	const channelIds = new Set(channels.map((channel) => channel.id));
+	const schedules = sanitizeSchedules(record.schedules, channelIds);
 	let threads = sanitizeThreads(record.threads, channels, projectIds).map(
 		(thread) => ({
 			...thread,
@@ -3386,6 +3463,7 @@ function sanitizeLoadedState(value: JsonValue): CommonspaceState {
 		projects,
 		channels,
 		threads,
+		schedules,
 		pins,
 		permissions,
 		messages,
@@ -3452,6 +3530,7 @@ function assertWorkspaceImportTargetEmpty(state: CommonspaceState): void {
 		state.projects.length > 0 ||
 		state.channels.length > 0 ||
 		state.threads.length > 0 ||
+		state.schedules.length > 0 ||
 		Object.values(state.messages).some((messages) => messages.length > 0)
 	)
 		throw new Error("workspace import requires an empty workspace");
@@ -3616,6 +3695,8 @@ function sanitizeImportedWorkspace(
 		permissions: imported.permissions,
 		messages: imported.messages,
 	};
+	if (decoded.workspace.schedules !== undefined)
+		canonicalWorkspace.schedules = imported.schedules;
 	if (decoded.workspace.inboxUnreadMessageIds !== undefined)
 		canonicalWorkspace.inboxUnreadMessageIds =
 			imported.inboxUnreadMessageIds ?? [];
@@ -3995,6 +4076,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private readonly inferenceShutdown = new AbortController();
 	private readonly activeConversationRuns = new Map<string, Promise<void>>();
 	private readonly pendingFollowups = new Map<string, PendingFollowup[]>();
+	private scheduleTimer: ReturnType<typeof setTimeout> | undefined;
+	private scheduleRun: Promise<void> | undefined;
 	private activeAdmissions = 0;
 	private exclusiveAdmission = false;
 	private readonly admissionIdleWaiters = new Set<() => void>();
@@ -4367,6 +4450,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 
 	async close(): Promise<void> {
 		this.closing = true;
+		if (this.scheduleTimer !== undefined) clearTimeout(this.scheduleTimer);
+		this.scheduleTimer = undefined;
 		this.inferenceShutdown.abort(new Error("Commonspace is shutting down"));
 		this.routingIndexes.clear();
 		this.historyIndexes.clear();
@@ -4430,6 +4515,91 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		url.search = "";
 		url.hash = "";
 		this.clientUrl = url.href;
+		this.armScheduleTimer();
+	}
+
+	private armScheduleTimer(minimumDelay = 0): void {
+		if (this.scheduleTimer !== undefined) clearTimeout(this.scheduleTimer);
+		this.scheduleTimer = undefined;
+		if (this.clientUrl === undefined || this.closing || this.draining) return;
+		let delay = 60_000;
+		let hasActiveSchedule = false;
+		const currentTime = Date.now();
+		for (const schedule of this.state.schedules) {
+			if (schedule.paused || schedule.nextRunAt === null) continue;
+			hasActiveSchedule = true;
+			const untilRun = Date.parse(schedule.nextRunAt) - currentTime;
+			delay = Math.min(delay, untilRun <= 0 ? minimumDelay : untilRun);
+		}
+		if (!hasActiveSchedule) return;
+		this.scheduleTimer = setTimeout(() => {
+			void this.runDueSchedules().catch((error) => {
+				this.environment.logger?.warn(
+					error instanceof Error ? error : String(error),
+				);
+			});
+		}, delay);
+		this.scheduleTimer.unref();
+	}
+
+	private scheduleIsDue(schedule: CommonspaceSchedule): boolean {
+		return (
+			this.state.schedules.find((item) => item.id === schedule.id) ===
+				schedule &&
+			!schedule.paused &&
+			schedule.nextRunAt !== null &&
+			Date.parse(schedule.nextRunAt) <= Date.now()
+		);
+	}
+
+	/** Admit every due schedule once; missed cron occurrences coalesce into one send. */
+	runDueSchedules(): Promise<void> {
+		if (this.scheduleRun !== undefined) return this.scheduleRun;
+		const operation = (async () => {
+			let failed = false;
+			const due = this.state.schedules
+				.filter(
+					(schedule) =>
+						!schedule.paused &&
+						schedule.nextRunAt !== null &&
+						Date.parse(schedule.nextRunAt) <= Date.now(),
+				)
+				.toSorted((left, right) =>
+					(left.nextRunAt ?? "").localeCompare(right.nextRunAt ?? ""),
+				);
+			for (const schedule of due) {
+				if (this.closing || this.draining) break;
+				if (!this.scheduleIsDue(schedule)) continue;
+				try {
+					await this.withMessageSubmissionTelemetry(
+						"scheduled",
+						"channel",
+						"queue",
+						(markAccepted) =>
+							this.withAdmission(async () => {
+								const prepared = await this.prepareSend({
+									conversation: { kind: "channel", id: schedule.channelId },
+									text: schedule.text,
+								});
+								prepared.schedule = schedule;
+								return this.acceptPreparedSend(prepared, markAccepted);
+							}),
+					);
+				} catch (error) {
+					failed = true;
+					this.environment.logger?.warn(
+						error instanceof Error ? error : String(error),
+					);
+				}
+			}
+			return failed;
+		})();
+		this.scheduleRun = operation
+			.then((failed) => this.armScheduleTimer(failed ? 60_000 : 0))
+			.finally(() => {
+				this.scheduleRun = undefined;
+			});
+		return this.scheduleRun;
 	}
 
 	private mcpPinViews(scoped: ResolvedMcpScope): McpPinView[] {
@@ -4909,6 +5079,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			})),
 			channels: state.channels,
 			threads: state.threads,
+			schedules: state.schedules,
 			pins: state.pins,
 			permissions: state.permissions.map((permission) =>
 				permission.status === "pending"
@@ -4961,6 +5132,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				(path) => this.validDirectory(path),
 			);
 			await this.commitWorkspaceImport(plan);
+			this.armScheduleTimer();
 			this.revokeInvalidMcpCredentials();
 			this.synchronizeNotificationBaseline();
 			this.broadcastRevision();
@@ -6348,6 +6520,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		await this.applyMutationState(mutation);
 		this.invalidateChangedContextEvidence(prepared.previousState);
 		await this.persistMutation(prepared);
+		this.armScheduleTimer();
 		this.activateMutationRoutingConfiguration(prepared);
 		await this.invalidateMutationRuns(mutation);
 		this.revokeInvalidMcpCredentials();
@@ -6368,7 +6541,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	}
 
 	private withMessageSubmissionTelemetry(
-		source: "send" | "edit",
+		source: "send" | "edit" | "scheduled",
 		conversationKind: SendMessageRequest["conversation"]["kind"],
 		deliveryMode: NonNullable<SendMessageRequest["delivery"]>,
 		operation: (markAccepted: () => void) => Promise<SendMessageResponse>,
@@ -8573,6 +8746,11 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private async acceptSend(
 		prepared: PreparedSend,
 	): Promise<SendMessageResponse> {
+		if (
+			prepared.schedule !== undefined &&
+			!this.scheduleIsDue(prepared.schedule)
+		)
+			throw new Error("Schedule changed before message acceptance.");
 		if (!this.preparedSendIsCurrent(prepared, prepared.thread)) {
 			throw new Error("conversation changed before message acceptance");
 		}
@@ -8582,6 +8760,11 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			if (!this.preparedSendIsCurrent(prepared, prepared.thread)) {
 				throw new Error("conversation changed before message acceptance");
 			}
+			if (
+				prepared.schedule !== undefined &&
+				!this.scheduleIsDue(prepared.schedule)
+			)
+				throw new Error("Schedule changed before message acceptance.");
 		} catch (error) {
 			await this.removePersistedSendAttachments(prepared);
 			throw error;
@@ -8589,6 +8772,10 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		const previousState = this.state;
 		const mutationStartedAt = this.performancePhaseStartedAt();
 		const createdAt = now();
+		const scheduledNextRunAt =
+			prepared.schedule?.timing.kind === "cron"
+				? nextCronRun(prepared.schedule.timing, createdAt)
+				: null;
 		const acceptedId = messageId();
 		let thread = this.createAcceptedThread(prepared, acceptedId, createdAt);
 		const accepted = this.createAcceptedMessage(
@@ -8598,6 +8785,20 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			createdAt,
 		);
 		thread = this.applyAcceptedSendState(prepared, accepted, thread);
+		if (prepared.schedule !== undefined) {
+			this.state = {
+				...this.state,
+				schedules: this.state.schedules.map((schedule) =>
+					schedule.id === prepared.schedule?.id
+						? {
+								...schedule,
+								lastRunAt: createdAt,
+								nextRunAt: scheduledNextRunAt,
+							}
+						: schedule,
+				),
+			};
+		}
 		this.recordPerformanceMeasurement(
 			CommonspaceHostPerformancePhase.AcceptanceStateMutation,
 			mutationStartedAt,

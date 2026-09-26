@@ -25,6 +25,7 @@ type CommonspaceDestination =
 	| "directory"
 	| "inbox"
 	| "threads"
+	| "scheduled"
 	| "project";
 
 interface ConversationTarget {
@@ -213,6 +214,10 @@ export function useCommonspaceNavigation(
 			}
 			if (route.kind === "threads") {
 				setActiveDestination("threads");
+				return true;
+			}
+			if (route.kind === "scheduled") {
+				setActiveDestination("scheduled");
 				return true;
 			}
 			setInboxViewRequest({ view: route.view, token: Date.now() });
@@ -452,6 +457,7 @@ export function useCommonspaceNavigation(
 		openSearchResult,
 		openTarget,
 		openThreads: () => navigate({ kind: "threads" }),
+		openScheduled: () => navigate({ kind: "scheduled" }),
 		requestCreate,
 		searchOpen,
 		settingsRequest,

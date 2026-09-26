@@ -60,6 +60,7 @@ The URL is authoritative on direct loads and browser back/forward navigation:
 | `/` | Inbox |
 | `/inbox/sessions` | Inbox session view |
 | `/threads` | Threads |
+| `/scheduled` | Scheduled Channel messages |
 | `/projects`, `/channels`, `/agents` | Directories |
 | `/projects/:id` | Project, with encoded file detail when selected |
 | `/channels/:id` | Channel, with Thread and message detail when selected |
@@ -98,6 +99,7 @@ Server-sent events carry durable state revisions, routing configuration invalida
 - It resolves zero, one, or many Project references per message and Thread. Canonical roots stay private; browser responses use folder labels and root indexes.
 - It stores native-session mappings, resumes exact sessions, and recovers sessions only when a harness explicitly reports them missing.
 - It accepts work immediately, coordinates independent sessions concurrently, and serializes work targeting the same native session.
+- It holds a timer for the next active schedule while the host is running. A due schedule uses the normal Channel send path, then persists its next occurrence together with the accepted message and Thread. A missed repeating schedule runs once on restart and advances to its next future cron occurrence; failed preparation remains due for retry.
 - It retains routing assignments and corrections, binds replies to those assignments, and preserves prior attempts.
 - It stores bounded image and general-file attachments, rejects known credential-bearing source, resolved, and display names before reading bytes, and imports harness artifacts only from permitted canonical roots. Harness files are opened without following the final symlink, rechecked by canonical path and file identity, then read through the same descriptor with a validated-size-plus-one ceiling so replacement or growth cannot bypass limits.
 - Message deletion and retention atomically save private attachment cleanup intent with the changed conversation state. Cleanup is idempotent and retried at startup or on deletion retry; failures never discard the IDs needed to finish removing bytes.
@@ -198,15 +200,16 @@ Project scope is inferred unless the user supplies visible `@@project` reference
 
 ## Persistence
 
-The current internal state version is 34, defined by `COMMONSPACE_STATE_VERSION`. Versions 1–33 migrate during load through structural validation and sanitization. Version 34 preserves multiple correction links from one assignment and the explicitly chosen Project scope on each correction; older corrections inherit the target assignment's saved scope during migration.
+Persisted workspace state includes scheduled Channel messages and the chosen Project scope on each routing correction. Multiple corrections from one assignment are preserved. Older corrections inherit the scope from their target assignment.
 
-Persisted state includes the roster, appearance, workspace coordination defaults, host-private native sessions, bounded activity, Inbox read/unread/saved state, notification preferences, attachments, routing decisions and memory, Project references, Channel/Thread context, pins, message versions, deletion markers, permissions, and execution state. Native model and reasoning settings are not Commonspace state.
+Persisted state includes the roster, appearance, workspace coordination defaults, host-private native sessions, bounded activity, Inbox read/unread/saved state, notification preferences, attachments, routing decisions and memory, Project references, Channel/Thread context, schedules, pins, message versions, deletion markers, permissions, and execution state. Native model and reasoning settings are not Commonspace state.
 
 Migration preserves conversation history while supplying explicit defaults for older shapes:
 
-- Older routing receives deterministic delivery references. Version 30 migrates prior assignment wording to optional `legacySubRequest`, retaining IDs, scopes, corrections, replies, and private native sessions. Historical wording is never used for delivery and is cleared with deleted content.
+- Older routing receives deterministic delivery references. Prior assignment wording is retained as optional `legacySubRequest`, never used for delivery, and cleared with deleted content. Migration retains IDs, scopes, corrections, replies, and private native sessions.
 - Older Threads receive an empty inherited snapshot and current memory derived from their transcript, rather than an invented historical snapshot.
 - Workspaces without pin, permission, or notification fields receive empty history and opt-in notification defaults.
+- Workspaces without saved schedules load with an empty schedule list.
 - Loaded pending permissions become interrupted because their native requests do not survive a process restart.
 
 ### Durability and privacy
@@ -225,7 +228,7 @@ Execution completion and attention evidence stay separate. Text-only explicit re
 
 Notification links identify conversations, Threads, and messages by their workspace IDs. The client accepts them only when they match current state on the loopback origin.
 
-Portable archive version 2 is independent of internal state version 34. Export contains sanitized workspace records and exact attachment bytes, replaces Project roots with counts, and omits native sessions and pending attachment cleanup. Version 2 includes each routing correction's chosen Project scope; import still accepts version 1 and derives missing correction scopes from their target assignments. Import requires an empty workspace and explicit existing local roots, and validates all structure, mapping, attachment, and size constraints before writes. Retention requires an owner-triggered, revision-bound preview for one inactive conversation. See [Workspace archive format](../specs/workspace-archive-format.md) for the contract.
+The portable archive format has its own versioned contract. Export contains sanitized workspace records and exact attachment bytes, replaces Project roots with counts, and omits native sessions and pending attachment cleanup. It includes schedules when present. Archive version 2 records each routing correction's chosen Project scope; import still accepts version 1, defaults missing schedules to an empty list, and derives missing correction scopes from their target assignments. Import requires an empty workspace and explicit existing local roots, and validates all structure, mapping, attachment, and size constraints before writes. Retention requires an owner-triggered, revision-bound preview for one inactive conversation. See [Workspace archive format](../specs/workspace-archive-format.md) for the contract.
 
 ## Routing inference
 

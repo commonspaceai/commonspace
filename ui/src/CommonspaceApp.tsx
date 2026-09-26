@@ -86,6 +86,7 @@ function CommonspaceAppShell({
 		openSearchResult,
 		openTarget,
 		openThreads,
+		openScheduled,
 		searchOpen,
 		toggleNavigation,
 	} = navigation;
@@ -140,6 +141,7 @@ function CommonspaceAppShell({
 						onSettingsOpenChange={setWorkspaceSettingsOpen}
 						inboxActive={activeDestination === "inbox"}
 						threadsActive={activeDestination === "threads"}
+						scheduledActive={activeDestination === "scheduled"}
 						conversationActive={activeDestination === "conversation"}
 						directoryActive={activeDestination === "directory"}
 						activeProjectViewId={activeProjectViewId}
@@ -148,6 +150,7 @@ function CommonspaceAppShell({
 						onOpenSearch={openSearch}
 						onOpenInbox={() => openInbox()}
 						onOpenThreads={openThreads}
+						onOpenScheduled={openScheduled}
 						onOpenDirectory={openDirectory}
 						onOpenContextSettings={openContextSettings}
 						onOpenAgentSessions={() => openInbox("sessions")}

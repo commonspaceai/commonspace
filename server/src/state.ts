@@ -14,6 +14,7 @@ import {
 } from "@commonspace/shared";
 import type { JsonValue } from "./json.js";
 import { projectChannelMemory } from "./memory.js";
+import { nextCronRun, validatedScheduleTiming } from "./schedules.js";
 import { applyProjectMutation } from "./state/project-mutations.js";
 
 export const DM_SESSION_BOUNDARY_AUTHOR_ID = "dm-session-boundary";
@@ -236,6 +237,7 @@ export function createInitialState(): CommonspaceState {
 		projects: [],
 		channels: [],
 		threads: [],
+		schedules: [],
 		pins: [],
 		permissions: [],
 		messages: {},
@@ -855,6 +857,9 @@ function removeChannel(
 		threads: state.threads.filter(
 			(thread) => thread.channelId !== mutation.channelId,
 		),
+		schedules: state.schedules.filter(
+			(schedule) => schedule.channelId !== mutation.channelId,
+		),
 		pins: state.pins.map((pin) =>
 			pin.removedAt === null &&
 			((pin.scope.kind === "channel" && pin.scope.id === mutation.channelId) ||
@@ -867,6 +872,117 @@ function removeChannel(
 			Object.entries(state.messages).filter(
 				([key]) => key !== `channel:${mutation.channelId}`,
 			),
+		),
+	};
+}
+
+function changeSchedule(
+	state: CommonspaceState,
+	mutation: Extract<
+		CommonspaceMutation,
+		{ action: "create-schedule" | "update-schedule" }
+	>,
+	dependencies: StateDependencies,
+): CommonspaceState {
+	if (!state.channels.some((channel) => channel.id === mutation.channelId))
+		throw new Error("Choose an existing Channel.");
+	const title = mutation.title.normalize("NFKC").trim();
+	const text = mutation.text.normalize("NFKC").trim();
+	if (title.length === 0 || title.length > 120)
+		throw new Error("Schedule title must fit 120 characters.");
+	if (text.length === 0 || text.length > 16_000)
+		throw new Error("Schedule message must fit 16,000 characters.");
+	const timing = validatedScheduleTiming(mutation.timing);
+	const existing =
+		mutation.action === "update-schedule"
+			? state.schedules.find((schedule) => schedule.id === mutation.id)
+			: undefined;
+	if (mutation.action === "update-schedule" && existing === undefined)
+		throw new Error("Schedule no longer exists.");
+	const timingUnchanged =
+		existing !== undefined &&
+		((timing.kind === "once" &&
+			existing.timing.kind === "once" &&
+			timing.runAt === existing.timing.runAt) ||
+			(timing.kind === "cron" &&
+				existing.timing.kind === "cron" &&
+				timing.expression === existing.timing.expression &&
+				timing.timeZone === existing.timing.timeZone));
+	const currentTime = dependencies.now();
+	const nextRunAt =
+		timingUnchanged && existing !== undefined
+			? existing.nextRunAt
+			: timing.kind === "once"
+				? timing.runAt
+				: nextCronRun(timing, currentTime);
+	if (
+		timing.kind === "once" &&
+		!timingUnchanged &&
+		nextRunAt !== null &&
+		nextRunAt <= currentTime
+	)
+		throw new Error("Choose a future send time.");
+	if (mutation.action === "create-schedule") {
+		return {
+			...state,
+			revision: nextRevision(state),
+			schedules: [
+				...state.schedules,
+				{
+					id: dependencies.ids(),
+					title,
+					channelId: mutation.channelId,
+					text,
+					timing,
+					paused: false,
+					nextRunAt,
+					lastRunAt: null,
+					createdAt: currentTime,
+				},
+			],
+		};
+	}
+	return {
+		...state,
+		revision: nextRevision(state),
+		schedules: state.schedules.map((schedule) =>
+			schedule.id === mutation.id
+				? {
+						...schedule,
+						title,
+						channelId: mutation.channelId,
+						text,
+						timing,
+						nextRunAt,
+					}
+				: schedule,
+		),
+	};
+}
+
+function setSchedulePaused(
+	state: CommonspaceState,
+	mutation: Extract<CommonspaceMutation, { action: "set-schedule-paused" }>,
+	dependencies: StateDependencies,
+): CommonspaceState {
+	const schedule = state.schedules.find((item) => item.id === mutation.id);
+	if (schedule === undefined) throw new Error("Schedule no longer exists.");
+	if (schedule.nextRunAt === null)
+		throw new Error("This schedule already ran.");
+	return {
+		...state,
+		revision: nextRevision(state),
+		schedules: state.schedules.map((item) =>
+			item.id === schedule.id
+				? {
+						...item,
+						paused: mutation.paused,
+						nextRunAt:
+							!mutation.paused && item.timing.kind === "cron"
+								? nextCronRun(item.timing, dependencies.now())
+								: item.nextRunAt,
+					}
+				: item,
 		),
 	};
 }
@@ -920,6 +1036,21 @@ export function applyMutation(
 			return resetDirectMessage(state, mutation, dependencies);
 		case "remove-channel":
 			return removeChannel(state, mutation, dependencies);
+		case "create-schedule":
+		case "update-schedule":
+			return changeSchedule(state, mutation, dependencies);
+		case "set-schedule-paused":
+			return setSchedulePaused(state, mutation, dependencies);
+		case "delete-schedule":
+			if (!state.schedules.some((schedule) => schedule.id === mutation.id))
+				throw new Error("Schedule no longer exists.");
+			return {
+				...state,
+				revision: nextRevision(state),
+				schedules: state.schedules.filter(
+					(schedule) => schedule.id !== mutation.id,
+				),
+			};
 		default: {
 			const neverMutation: never = mutation;
 			throw new Error(`unknown mutation ${JSON.stringify(neverMutation)}`);
