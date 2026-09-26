@@ -67,16 +67,18 @@ export const AgentDiscoveryFailure = {
 			await page.findByRole("dialog", { name: "Add an agent" }),
 		);
 		await userEvent.click(
-			dialog.getByRole("button", { name: "Choose Hermes harness" }),
+			dialog.getByRole("button", { name: "Choose Hermes" }),
 		);
 		await expect(await dialog.findByRole("alert")).toHaveTextContent(
 			"Agent discovery temporarily unavailable",
 		);
 		await expect(
-			dialog.queryByText("Hermes is not available or is already added."),
+			dialog.queryByText(
+				"No Hermes agents found. Make sure it is installed and signed in.",
+			),
 		).not.toBeInTheDocument();
 		await expect(
-			dialog.getByRole("button", { name: "Retry Hermes discovery" }),
+			dialog.getByRole("button", { name: "Retry Hermes search" }),
 		).toBeEnabled();
 	},
 } satisfies Story;
@@ -88,7 +90,7 @@ export const AgentDiscoveryRetry: Story = {
 		const page = within(context.canvasElement.ownerDocument.body);
 		const dialog = within(page.getByRole("dialog", { name: "Add an agent" }));
 		await userEvent.click(
-			dialog.getByRole("button", { name: "Retry Hermes discovery" }),
+			dialog.getByRole("button", { name: "Retry Hermes search" }),
 		);
 		await expect(
 			await dialog.findByRole("button", {
@@ -116,15 +118,17 @@ export const AgentDiscoveryEmpty: Story = {
 			await page.findByRole("dialog", { name: "Add an agent" }),
 		);
 		await userEvent.click(
-			dialog.getByRole("button", { name: "Choose Hermes harness" }),
+			dialog.getByRole("button", { name: "Choose Hermes" }),
 		);
 		await expect(
-			await dialog.findByText("Hermes is not available or is already added."),
+			await dialog.findByText(
+				"No Hermes agents found. Make sure it is installed and signed in.",
+			),
 		).toBeVisible();
 		await expect(dialog.queryByRole("alert")).not.toBeInTheDocument();
 		await expect(
-			dialog.queryByRole("button", { name: "Retry Hermes discovery" }),
-		).not.toBeInTheDocument();
+			dialog.getByRole("button", { name: "Retry Hermes search" }),
+		).toBeEnabled();
 	},
 };
 

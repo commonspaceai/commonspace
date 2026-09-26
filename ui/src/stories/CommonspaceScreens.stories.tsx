@@ -766,8 +766,22 @@ export const AddAgent: Story = {
 	play: async ({ canvasElement }) => {
 		const page = within(canvasElement.ownerDocument.body);
 		await userEvent.click(page.getByRole("button", { name: "Add agent" }));
-		const dialog = page.getByRole("dialog", { name: "Add an agent" });
-		await waitFor(() => expect(dialog).toBeVisible());
+		const dialog = within(
+			await page.findByRole("dialog", { name: "Add an agent" }),
+		);
+		const choices = dialog.getByRole("group", { name: "Coding agents" });
+		for (const label of [
+			"Codex",
+			"Hermes",
+			"Claude Code",
+			"Gemini CLI",
+			"OpenCode",
+		]) {
+			await expect(
+				within(choices).getByRole("button", { name: `Choose ${label}` }),
+			).toHaveAttribute("aria-pressed", "false");
+		}
+		await expect(dialog.queryByRole("region")).toBeNull();
 	},
 };
 
@@ -776,7 +790,7 @@ export const AddAgentDiscoveredResults: Story = {
 	play: async ({ canvasElement }) => {
 		const page = within(canvasElement.ownerDocument.body);
 		await userEvent.click(page.getByRole("button", { name: "Add agent" }));
-		await userEvent.click(page.getByRole("button", { name: /Hermes/iu }));
+		await userEvent.click(page.getByRole("button", { name: "Choose Hermes" }));
 		await waitFor(() =>
 			expect(
 				page.getByRole("button", {
@@ -784,6 +798,16 @@ export const AddAgentDiscoveredResults: Story = {
 				}),
 			).toBeVisible(),
 		);
+		const dialog = within(page.getByRole("dialog", { name: "Add an agent" }));
+		await expect(
+			dialog.getByRole("region", { name: "Hermes agent discovery" }),
+		).toBeVisible();
+		await expect(
+			dialog.getByRole("heading", { name: "Found agents" }),
+		).toBeVisible();
+		await expect(
+			dialog.getByRole("checkbox", { name: /Full access/u }),
+		).toBeVisible();
 	},
 };
 
@@ -794,7 +818,7 @@ function discoveredHarnessStory(label: string): Story {
 			const page = within(canvasElement.ownerDocument.body);
 			await userEvent.click(page.getByRole("button", { name: "Add agent" }));
 			await userEvent.click(
-				page.getByRole("button", { name: `Choose ${label} harness` }),
+				page.getByRole("button", { name: `Choose ${label}` }),
 			);
 			await waitFor(() =>
 				expect(
