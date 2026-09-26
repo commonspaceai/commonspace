@@ -341,7 +341,7 @@ Replace `YYYYMMDD` with your backup date, and adjust the source if using `COMMON
 
 ### Automatic state recovery
 
-On startup, the host loads persisted state versions 1–34 into the current shape. Version 34 adds Channel schedules and per-correction Project scopes while preserving multiple correction links from one assignment. Older corrections inherit their target assignment's scope; missing schedule lists default to empty. Version 33 added private pending attachment cleanup IDs. Older workspaces retain their conversations and native-session mappings without creating cleanup work.
+On startup, the host migrates persisted workspaces into the format supported by the running release. Migration preserves conversations, native-session mappings, and routing history. Older corrections inherit their target assignment's Project scope, and workspaces without schedule data load with no scheduled messages.
 
 Each write retains the previous valid primary as `state.backup.json`. On startup:
 
