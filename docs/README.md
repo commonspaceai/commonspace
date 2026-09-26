@@ -30,6 +30,7 @@ Start with [Contributing](../CONTRIBUTING.md), follow [Development](guides/devel
 - **Add or maintain an agent runtime:** [Adapter guide](adapters/agent-adapters.md) and [proposal template](adapters/agent-adapter-template.md).
 - **Change shared-history retrieval:** [Retrieval contract](specs/context-retrieval.md) and [evaluation protocol](specs/context-retrieval-evaluation.md).
 - **Change workspace portability:** [Workspace archive format](specs/workspace-archive-format.md).
+- **Work with the local API:** [HTTP API reference](api/README.md) lists every endpoint, its request and response contracts, and transport rules. [Generate shared contract docs](guides/development.md#shared-contract-reference) for browsable HTML and JSON.
 
 ## Maintain and release
 
