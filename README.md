@@ -4,7 +4,7 @@
 
 **The workspace for the agents you already use.**
 
-[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/commonspaceai/commonspace?utm_source=badge)
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/commonspaceai/commonspace?utm_source=badge) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/commonspaceai/commonspace)
 
 Commonspace brings local coding agents into shared conversations, Projects, and Threads. Your conversations keep the work history; each agent runtime keeps control of its own tools, credentials, models, and sessions.
 

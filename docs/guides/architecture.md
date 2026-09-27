@@ -69,21 +69,22 @@ Unknown or stale detail routes return to Inbox instead of restoring unrelated sa
 
 ### API groups
 
-The HTTP boundary is implemented in [`server/src/app.ts`](../../server/src/app.ts). The following groups locate the main capabilities; request and response shapes live in `packages/shared`.
+The HTTP boundary is implemented in [`server/src/app.ts`](../../server/src/app.ts). The [HTTP API reference](../api/README.md) lists every route with its request and response shape. The following groups link to the relevant shared contracts. Inline payloads and the MCP protocol are identified in the reference.
 
-| Capability | Endpoints |
-| --- | --- |
-| Health and state | `GET /api/health`, `GET /api/bootstrap`, `GET /api/diagnostics`, `GET /api/events` |
-| Conversation | `POST /api/send`, `POST /api/mutate`, `POST /api/stop`, `POST /api/reroute`, `POST /api/routing/retry` |
-| Message history | `POST /api/messages/:messageId/edit`, `POST /api/messages/:messageId/delete` |
-| Context | `GET` and `PUT /api/channels/:channelId/context`, `GET` and `PUT /api/threads/:threadId/context`; `POST` to either path with `/compact` |
-| Routing configuration | `GET` and `PUT /api/routing` |
-| Pins and permissions | `POST /api/pins`, `POST /api/pins/:pinId/remove`, `POST /api/permissions/:permissionId/respond` |
-| Projects | `GET /api/projects/:projectId/files`, `/file`, `/changes`, `/diff` |
-| Attachments | `GET /api/attachments/:attachmentId`, `GET /api/files/:fileId` |
-| Workspace data | `GET /api/export`, `POST /api/import`, `POST /api/retention/preview`, `POST /api/retention/apply` |
-| Local discovery | `POST /api/discover-agents`, `POST /api/select-directory` |
-| Agent context tools | `POST /api/mcp`, restricted to bearer-scoped ACP clients |
+| Capability | Reference | Shared payload contract |
+| --- | --- | --- |
+| Health, state, notifications, and events | [State](../api/state.md) | [CommonspaceBootstrap](../../packages/shared/src/contracts.ts), [CommonspaceDiagnostics](../../packages/shared/src/contracts.ts) |
+| Conversation and run control | [Conversation](../api/conversation.md) | [SendMessageRequest](../../packages/shared/src/contracts.ts), [SendMessageResponse](../../packages/shared/src/contracts.ts) |
+| Message history | [Messages](../api/messages.md) | [EditMessageRequest](../../packages/shared/src/contracts.ts), [CommonspaceMessage](../../packages/shared/src/contracts.ts) |
+| Channel and Thread context | [Context](../api/context.md) | [UpdateChannelContextRequest](../../packages/shared/src/contracts.ts), [CommonspaceThreadContext](../../packages/shared/src/contracts.ts) |
+| Routing configuration | [Routing](../api/routing.md) | [UpdateRoutingConfigurationRequest](../../packages/shared/src/contracts.ts), [CommonspaceRoutingConfiguration](../../packages/shared/src/contracts.ts) |
+| Pins and permissions | [Pins and permissions](../api/pins-permissions.md) | [AddPinRequest](../../packages/shared/src/contracts.ts), [CommonspacePermissionRequest](../../packages/shared/src/contracts.ts) |
+| Projects | [Project files](../api/projects.md) | [ProjectDirectoryResponse](../../packages/shared/src/project-files.ts), [ProjectGitStatusResponse](../../packages/shared/src/project-files.ts) |
+| Attachments | [Attachments](../api/attachments.md) | [CommonspaceImageAttachment](../../packages/shared/src/contracts.ts), [CommonspaceFileAttachment](../../packages/shared/src/contracts.ts) |
+| Workspace data | [Portability and retention](../api/workspace-data.md) | [CommonspaceWorkspaceArchive](../../packages/shared/src/contracts.ts), [CommonspaceRetentionPreview](../../packages/shared/src/contracts.ts) |
+| Search | [Search](../api/search.md) | [CommonspaceSearchRequest](../../packages/shared/src/search.ts), [CommonspaceSearchResponse](../../packages/shared/src/search.ts) |
+| Local agent discovery and capabilities | [Agents](../api/agents.md) | [DiscoverAgentsRequest](../../packages/shared/src/contracts.ts), [HarnessCapabilityInventory](../../packages/shared/src/harness-capabilities.ts) |
+| Agent context tools | [MCP](../api/mcp.md) | [CommonspaceMcpScope](../../server/src/commonspace-mcp.ts) (server-owned MCP contract) |
 
 Routing configuration has one shared variant: the ID of an added harness Agent. Current requests and version-3 saved files reject unknown fields; unsupported saved files are removed instead of migrated. Commonspace owns no inference credential fields. Settings saves retain their pending state and submitted draft across closing and reopening the panel, and disable edits until the request settles.
 

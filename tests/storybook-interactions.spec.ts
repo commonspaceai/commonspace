@@ -12,11 +12,23 @@ test("long confirmation details scroll by keyboard while actions remain visible"
 		name: "Long Content",
 	});
 	const dialog = page.getByRole("alertdialog");
+	await dialog.evaluate(async (element) => {
+		await Promise.all(
+			element.getAnimations().map((animation) => animation.finished),
+		);
+	});
 	const cancel = dialog.getByRole("button", { name: "Cancel" });
 	await cancel.focus();
 	await page.keyboard.press("Shift+Tab");
 	const details = dialog.getByRole("region", { name: "Confirmation details" });
 	await expect(details).toBeFocused();
+	await expect
+		.poll(() =>
+			details.evaluate(
+				(element) => element.scrollHeight - element.clientHeight,
+			),
+		)
+		.toBeGreaterThan(0);
 	await page.keyboard.press("PageDown");
 	await expect
 		.poll(() => details.evaluate((element) => element.scrollTop))

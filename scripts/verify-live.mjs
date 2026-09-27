@@ -1098,7 +1098,7 @@ try {
 		.waitFor({ state: "visible" });
 	await installedPage
 		.getByLabel("Commonspace browser")
-		.waitFor({ state: "visible" });
+		.waitFor({ state: "hidden" });
 	if (installedPageErrors.length > 0)
 		throw new Error(
 			`installed browser errors: ${installedPageErrors.join(" | ")}`,
@@ -1112,7 +1112,7 @@ try {
 			health: healthBody,
 			apiServer: true,
 			browserMounted: true,
-			installedBrowserMounted: true,
+			installedNavigationHidden: true,
 			installedOnboardingMounted: true,
 			keyboardNavigation: true,
 			lightDarkPalettes: true,
