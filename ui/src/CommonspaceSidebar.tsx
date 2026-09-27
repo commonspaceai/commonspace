@@ -2648,7 +2648,7 @@ export function CommonspaceSidebar({
 								setForm(null);
 							}}
 						>
-							<fieldset className="grid grid-cols-4 gap-4 border-0 p-0 md:grid-cols-6">
+							<fieldset className="grid grid-cols-2 gap-4 border-0 p-0 md:grid-cols-6">
 								<legend className="sr-only">Coding agents</legend>
 								{AGENT_ADAPTER_KINDS.map((adapter, index) => (
 									<button
@@ -2661,7 +2661,7 @@ export function CommonspaceSidebar({
 												"md:col-start-2",
 											index === AGENT_ADAPTER_KINDS.length - 1 &&
 												AGENT_ADAPTER_KINDS.length % 2 === 1 &&
-												"col-start-2 md:col-start-4",
+												"md:col-start-4",
 										)}
 										aria-label={`Choose ${runtimeLabel(adapter)}`}
 										aria-pressed={agentAdapter === adapter}
