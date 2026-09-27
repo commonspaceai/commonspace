@@ -192,6 +192,7 @@ describe("Commonspace host authority", () => {
 			projects: [],
 			channels: [],
 			threads: [],
+			schedules: [],
 			messages: {},
 		});
 		await writeFile(statePath, original);
@@ -226,6 +227,7 @@ describe("Commonspace host authority", () => {
 			projects: [],
 			channels: [],
 			threads: [],
+			schedules: [],
 			messages: {},
 		});
 		await writeFile(join(root, "state.json"), '{"version":');
@@ -1194,6 +1196,7 @@ esac
 				projects: [],
 				channels: [],
 				threads: [],
+				schedules: [],
 				messages: {},
 			}),
 		);

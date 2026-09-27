@@ -320,6 +320,7 @@ describe("scheduled Channel messages", () => {
 			},
 		});
 		const archive = await service.exportWorkspace();
+		expect(archive.version).toBe(3);
 		expect(archive.workspace.schedules).toHaveLength(1);
 		const importedRoot = await mkdtemp(
 			join(tmpdir(), "commonspace-schedule-import-"),
@@ -331,8 +332,8 @@ describe("scheduled Channel messages", () => {
 		await imported.importWorkspace(archive, {});
 		expect(imported.snapshot().schedules[0]?.title).toBe("Portable check");
 
-		const legacy = structuredClone(archive);
-		delete legacy.workspace.schedules;
+		const incomplete = structuredClone(archive);
+		delete incomplete.workspace.schedules;
 		const legacyRoot = await mkdtemp(
 			join(tmpdir(), "commonspace-schedule-legacy-"),
 		);
@@ -340,6 +341,10 @@ describe("scheduled Channel messages", () => {
 		const older = new CommonspaceHostService({}, { root: legacyRoot });
 		services.push(older);
 		await older.initialize();
+		await expect(older.importWorkspace(incomplete, {})).rejects.toThrow(
+			"invalid schedules",
+		);
+		const legacy = { ...incomplete, version: 2 };
 		await older.importWorkspace(legacy, {});
 		expect(older.snapshot().schedules).toEqual([]);
 	});

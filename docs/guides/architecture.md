@@ -209,7 +209,7 @@ Migration preserves conversation history while supplying explicit defaults for o
 - Older routing receives deterministic delivery references. Prior assignment wording is retained as optional `legacySubRequest`, never used for delivery, and cleared with deleted content. Migration retains IDs, scopes, corrections, replies, and private native sessions.
 - Older Threads receive an empty inherited snapshot and current memory derived from their transcript, rather than an invented historical snapshot.
 - Workspaces without pin, permission, or notification fields receive empty history and opt-in notification defaults.
-- Workspaces without saved schedules load with an empty schedule list.
+- Older workspaces without saved schedules load with an empty schedule list. Current-version workspaces require canonical schedules; a damaged primary recovers from its valid backup.
 - Loaded pending permissions become interrupted because their native requests do not survive a process restart.
 
 ### Durability and privacy
@@ -228,7 +228,7 @@ Execution completion and attention evidence stay separate. Text-only explicit re
 
 Notification links identify conversations, Threads, and messages by their workspace IDs. The client accepts them only when they match current state on the loopback origin.
 
-The portable archive format has its own versioned contract. Export contains sanitized workspace records and exact attachment bytes, replaces Project roots with counts, and omits native sessions and pending attachment cleanup. It includes schedules when present. Archive version 2 records each routing correction's chosen Project scope; import still accepts version 1, defaults missing schedules to an empty list, and derives missing correction scopes from their target assignments. Import requires an empty workspace and explicit existing local roots, and validates all structure, mapping, attachment, and size constraints before writes. Retention requires an owner-triggered, revision-bound preview for one inactive conversation. See [Workspace archive format](../specs/workspace-archive-format.md) for the contract.
+The portable archive format has its own versioned contract. Export contains sanitized workspace records and exact attachment bytes, replaces Project roots with counts, and omits native sessions and pending attachment cleanup. Archive version 3 requires schedules. Version 2 records each routing correction's chosen Project scope. Import still accepts versions 1 and 2, defaults their missing schedules to an empty list, and derives missing correction scopes from their target assignments. Import requires an empty workspace and explicit existing local roots, and validates all structure, mapping, attachment, and size constraints before writes. Retention requires an owner-triggered, revision-bound preview for one inactive conversation. See [Workspace archive format](../specs/workspace-archive-format.md) for the contract.
 
 ## Routing inference
 

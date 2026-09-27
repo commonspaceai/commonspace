@@ -2,8 +2,8 @@ import type { AgentAdapterKind } from "./agent-adapters.js";
 
 export type { AgentAdapterKind } from "./agent-adapters.js";
 
-export const COMMONSPACE_STATE_VERSION = 34 as const;
-export const COMMONSPACE_EXPORT_VERSION = 2 as const;
+export const COMMONSPACE_STATE_VERSION = 35 as const;
+export const COMMONSPACE_EXPORT_VERSION = 3 as const;
 
 export interface CommonspaceDefaults {
 	maxAgentsPerTurn: number;
@@ -116,8 +116,7 @@ export type CommonspacePortableWorkspace = Omit<
 	| "schedules"
 > & {
 	projects: CommonspacePortableProject[];
-	/** Pre-schedule version-1 archives omit schedules. */
-	schedules?: CommonspaceSchedule[];
+	schedules: CommonspaceSchedule[];
 };
 
 export interface CommonspaceArchiveAttachment {

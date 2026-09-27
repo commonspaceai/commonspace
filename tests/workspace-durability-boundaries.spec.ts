@@ -86,6 +86,55 @@ async function archiveFixture(text = "Imported conversation.") {
 }
 
 describe("workspace recovery boundaries", () => {
+	it.each(["missing", "invalid", "noncanonical"] as const)(
+		"recovers schedules from backup when current state has %s schedules",
+		async (damage) => {
+			const root = await workspaceRoot();
+			const saved = applyMutation(savedConversation("Keep this work."), {
+				action: "create-channel",
+				name: "updates",
+				agentIds: [],
+			});
+			const channel = saved.channels[0];
+			if (channel === undefined) throw new Error("missing test Channel");
+			saved.schedules.push({
+				id: "schedule-1",
+				title: "Daily update",
+				channelId: channel.id,
+				text: "Check the build.",
+				timing: { kind: "once", runAt: "2030-01-01T00:00:00.000Z" },
+				paused: false,
+				nextRunAt: "2030-01-01T00:00:00.000Z",
+				lastRunAt: null,
+				createdAt: timestamp,
+			});
+			const backup = JSON.stringify(saved);
+			const primary = JSON.stringify({
+				...saved,
+				schedules:
+					damage === "missing"
+						? undefined
+						: damage === "invalid"
+							? {}
+							: saved.schedules.map((schedule) => ({
+									...schedule,
+									title: ` ${schedule.title} `,
+								})),
+			});
+			await writeFile(join(root, "state.json"), primary);
+			await writeFile(join(root, "state.backup.json"), backup);
+
+			const service = await openWorkspace(root);
+			expect(service.snapshot().schedules).toEqual(saved.schedules);
+			expect(await readFile(join(root, "state.corrupt.json"), "utf8")).toBe(
+				primary,
+			);
+			expect(await readFile(join(root, "state.backup.json"), "utf8")).toBe(
+				backup,
+			);
+		},
+	);
+
 	it("restores a missing primary from its backup after an interrupted recovery", async () => {
 		const root = await workspaceRoot();
 		const saved = savedConversation("Preserve the recovered conversation.");

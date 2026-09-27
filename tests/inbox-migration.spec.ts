@@ -67,6 +67,7 @@ async function loadState({
 			],
 		},
 	};
+	if (version >= 35) persisted.schedules = [];
 	if (inboxReadAt !== undefined) persisted.inboxReadAt = inboxReadAt;
 	if (inboxReadMessageIds !== undefined)
 		persisted.inboxReadMessageIds = inboxReadMessageIds;

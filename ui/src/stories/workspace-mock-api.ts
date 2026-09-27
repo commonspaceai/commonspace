@@ -1306,7 +1306,7 @@ class WorkspaceMockApi {
 		http.post("/api/import", async ({ request }) => {
 			const input = await trustedRequestJson<{
 				archive: Omit<CommonspaceWorkspaceArchive, "version"> & {
-					version: 1 | typeof COMMONSPACE_EXPORT_VERSION;
+					version: 1 | 2 | typeof COMMONSPACE_EXPORT_VERSION;
 				};
 				projectMappings: Record<string, string[]>;
 			}>(request);
@@ -1326,13 +1326,17 @@ class WorkspaceMockApi {
 			const saved = input.archive;
 			if (
 				saved?.format !== "commonspace-workspace" ||
-				(saved.version !== 1 && saved.version !== COMMONSPACE_EXPORT_VERSION) ||
+				(saved.version !== 1 &&
+					saved.version !== 2 &&
+					saved.version !== COMMONSPACE_EXPORT_VERSION) ||
 				!saved.workspace ||
 				!Array.isArray(saved.attachments) ||
 				!Array.isArray(saved.workspace.projects) ||
 				!Array.isArray(saved.workspace.agents) ||
 				!Array.isArray(saved.workspace.channels) ||
 				!Array.isArray(saved.workspace.threads) ||
+				(saved.version === COMMONSPACE_EXPORT_VERSION &&
+					!Array.isArray(saved.workspace.schedules)) ||
 				!saved.workspace.messages
 			)
 				return HttpResponse.json(

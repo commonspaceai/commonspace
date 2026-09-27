@@ -3374,6 +3374,8 @@ function sanitizeLoadedState(value: JsonValue): CommonspaceState {
 	}));
 	const channelIds = new Set(channels.map((channel) => channel.id));
 	const schedules = sanitizeSchedules(record.schedules, channelIds);
+	if (version >= 35 && !isDeepStrictEqual(record.schedules, schedules))
+		throw new Error("Commonspace state has invalid schedules");
 	let threads = sanitizeThreads(record.threads, channels, projectIds).map(
 		(thread) => ({
 			...thread,
@@ -3506,7 +3508,7 @@ function collectArchiveAttachments(
 }
 
 interface DecodedWorkspaceArchive {
-	readonly version: 1 | typeof COMMONSPACE_EXPORT_VERSION;
+	readonly version: 1 | 2 | typeof COMMONSPACE_EXPORT_VERSION;
 	readonly workspace: JsonObject;
 	readonly importedWorkspace: JsonObject;
 	readonly projects: JsonValue[];
@@ -3546,7 +3548,9 @@ function decodeWorkspaceArchive(
 		archive === null ||
 		workspace === null ||
 		archive.format !== "commonspace-workspace" ||
-		(archive.version !== 1 && archive.version !== COMMONSPACE_EXPORT_VERSION)
+		(archive.version !== 1 &&
+			archive.version !== 2 &&
+			archive.version !== COMMONSPACE_EXPORT_VERSION)
 	)
 		throw new Error("unsupported Commonspace workspace archive");
 	if (
@@ -3637,7 +3641,7 @@ function fillLegacyArchiveCorrectionScopes(
 
 function withLegacyArchiveCorrectionScopes(
 	workspace: JsonObject,
-	canonical: CommonspaceWorkspaceArchive["workspace"],
+	canonical: Pick<CommonspaceWorkspaceArchive["workspace"], "messages">,
 ): JsonObject {
 	const comparable = structuredClone(workspace);
 	const messages = archiveRecordReference(comparable.messages);
@@ -3669,12 +3673,19 @@ function sanitizeImportedWorkspace(
 			projects,
 			dmSessions: {},
 			agentSessions: {},
+			schedules:
+				decoded.version < 3 && decoded.workspace.schedules === undefined
+					? []
+					: decoded.workspace.schedules,
 		}),
 	);
 	const imported = sanitizeLoadedState(importedValue);
 	if (imported.projects.length !== projects.length)
 		throw new Error("workspace archive Project validation failed");
-	const canonicalWorkspace: CommonspaceWorkspaceArchive["workspace"] = {
+	const canonicalWorkspace: Omit<
+		CommonspaceWorkspaceArchive["workspace"],
+		"schedules"
+	> & { schedules?: CommonspaceSchedule[] } = {
 		inboxReadAt: imported.inboxReadAt,
 		inboxReadMessageIds: imported.inboxReadMessageIds,
 		inboxSavedItemIds: imported.inboxSavedItemIds,

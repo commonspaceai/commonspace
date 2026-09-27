@@ -41,6 +41,17 @@ describe("workspace import manifest decoding", () => {
 				},
 			],
 		});
+		const priorArchive = { ...archive, version: 2 };
+		expect(parseWorkspaceImport(JSON.stringify(priorArchive))).toEqual({
+			source: { value: priorArchive },
+			projects: [
+				{
+					id: "project-commonspace",
+					name: "Commonspace",
+					rootCount: 2,
+				},
+			],
+		});
 	});
 
 	it("rejects malformed and duplicate Project mapping metadata", () => {
