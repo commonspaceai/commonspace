@@ -4089,6 +4089,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private readonly pendingFollowups = new Map<string, PendingFollowup[]>();
 	private scheduleTimer: ReturnType<typeof setTimeout> | undefined;
 	private scheduleRun: Promise<void> | undefined;
+	private readonly scheduleRetryAt = new WeakMap<CommonspaceSchedule, number>();
 	private activeAdmissions = 0;
 	private exclusiveAdmission = false;
 	private readonly admissionIdleWaiters = new Set<() => void>();
@@ -4529,7 +4530,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		this.armScheduleTimer();
 	}
 
-	private armScheduleTimer(minimumDelay = 0): void {
+	private armScheduleTimer(): void {
 		if (this.scheduleTimer !== undefined) clearTimeout(this.scheduleTimer);
 		this.scheduleTimer = undefined;
 		if (this.clientUrl === undefined || this.closing || this.draining) return;
@@ -4540,7 +4541,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			if (schedule.paused || schedule.nextRunAt === null) continue;
 			hasActiveSchedule = true;
 			const untilRun = Date.parse(schedule.nextRunAt) - currentTime;
-			delay = Math.min(delay, untilRun <= 0 ? minimumDelay : untilRun);
+			const untilRetry =
+				(this.scheduleRetryAt.get(schedule) ?? 0) - currentTime;
+			delay = Math.min(delay, Math.max(0, untilRun, untilRetry));
 		}
 		if (!hasActiveSchedule) return;
 		this.scheduleTimer = setTimeout(() => {
@@ -4559,7 +4562,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				schedule &&
 			!schedule.paused &&
 			schedule.nextRunAt !== null &&
-			Date.parse(schedule.nextRunAt) <= Date.now()
+			Date.parse(schedule.nextRunAt) <= Date.now() &&
+			(this.scheduleRetryAt.get(schedule) ?? 0) <= Date.now()
 		);
 	}
 
@@ -4567,7 +4571,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	runDueSchedules(): Promise<void> {
 		if (this.scheduleRun !== undefined) return this.scheduleRun;
 		const operation = (async () => {
-			let failed = false;
 			const due = this.state.schedules
 				.filter(
 					(schedule) =>
@@ -4597,19 +4600,17 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 							}),
 					);
 				} catch (error) {
-					failed = true;
+					this.scheduleRetryAt.set(schedule, Date.now() + 60_000);
 					this.environment.logger?.warn(
 						error instanceof Error ? error : String(error),
 					);
 				}
 			}
-			return failed;
 		})();
-		this.scheduleRun = operation
-			.then((failed) => this.armScheduleTimer(failed ? 60_000 : 0))
-			.finally(() => {
-				this.scheduleRun = undefined;
-			});
+		this.scheduleRun = operation.finally(() => {
+			this.scheduleRun = undefined;
+			this.armScheduleTimer();
+		});
 		return this.scheduleRun;
 	}
 

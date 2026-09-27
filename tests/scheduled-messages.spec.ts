@@ -270,11 +270,18 @@ describe("scheduled Channel messages", () => {
 		expect(service.snapshot().schedules[0]?.nextRunAt).toBeNull();
 	});
 
-	it("a failed due schedule does not delay another upcoming message", async () => {
+	it("a failed due schedule does not delay one that becomes due during preparation", async () => {
+		vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+		vi.setSystemTime(new Date("2026-09-24T10:00:00.000Z"));
+		const workingAt = new Date(Date.now() + 600).toISOString();
+		let failedAttempts = 0;
 		const { service, channel } = await workspace({
 			beforeAcceptSend: async (prepared) => {
-				if (prepared.request.text.includes("Fail this send"))
+				if (prepared.request.text.includes("Fail this send")) {
+					failedAttempts += 1;
+					vi.setSystemTime(new Date(workingAt));
 					throw new Error("Synthetic preparation failure");
+				}
 			},
 		});
 		for (const [title, text, delay] of [
@@ -293,14 +300,13 @@ describe("scheduled Channel messages", () => {
 			});
 		}
 		service.attachClientUrl("http://127.0.0.1:3100");
-		await vi.waitFor(
-			() => {
-				expect(
-					service.snapshot().messages[`channel:${channel.id}`]?.[0]?.text,
-				).toBe("@Codex Send this message.");
-			},
-			{ timeout: 3_000 },
-		);
+		await vi.advanceTimersByTimeAsync(200);
+		await vi.advanceTimersByTimeAsync(1);
+		await service.whenIdle();
+		expect(
+			service.snapshot().messages[`channel:${channel.id}`]?.[0]?.text,
+		).toBe("@Codex Send this message.");
+		expect(failedAttempts).toBe(1);
 		expect(
 			service.snapshot().schedules.find((item) => item.title === "Failing")
 				?.nextRunAt,
