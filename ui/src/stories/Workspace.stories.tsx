@@ -67,16 +67,18 @@ export const AgentDiscoveryFailure = {
 			await page.findByRole("dialog", { name: "Add an agent" }),
 		);
 		await userEvent.click(
-			dialog.getByRole("button", { name: "Choose Hermes harness" }),
+			dialog.getByRole("button", { name: "Choose Hermes" }),
 		);
 		await expect(await dialog.findByRole("alert")).toHaveTextContent(
 			"Agent discovery temporarily unavailable",
 		);
 		await expect(
-			dialog.queryByText("Hermes is not available or is already added."),
+			dialog.queryByText(
+				"No Hermes agents found. Make sure it is installed and signed in.",
+			),
 		).not.toBeInTheDocument();
 		await expect(
-			dialog.getByRole("button", { name: "Retry Hermes discovery" }),
+			dialog.getByRole("button", { name: "Retry Hermes search" }),
 		).toBeEnabled();
 	},
 } satisfies Story;
@@ -88,7 +90,7 @@ export const AgentDiscoveryRetry: Story = {
 		const page = within(context.canvasElement.ownerDocument.body);
 		const dialog = within(page.getByRole("dialog", { name: "Add an agent" }));
 		await userEvent.click(
-			dialog.getByRole("button", { name: "Retry Hermes discovery" }),
+			dialog.getByRole("button", { name: "Retry Hermes search" }),
 		);
 		await expect(
 			await dialog.findByRole("button", {
@@ -116,15 +118,17 @@ export const AgentDiscoveryEmpty: Story = {
 			await page.findByRole("dialog", { name: "Add an agent" }),
 		);
 		await userEvent.click(
-			dialog.getByRole("button", { name: "Choose Hermes harness" }),
+			dialog.getByRole("button", { name: "Choose Hermes" }),
 		);
 		await expect(
-			await dialog.findByText("Hermes is not available or is already added."),
+			await dialog.findByText(
+				"No Hermes agents found. Make sure it is installed and signed in.",
+			),
 		).toBeVisible();
 		await expect(dialog.queryByRole("alert")).not.toBeInTheDocument();
 		await expect(
-			dialog.queryByRole("button", { name: "Retry Hermes discovery" }),
-		).not.toBeInTheDocument();
+			dialog.getByRole("button", { name: "Retry Hermes search" }),
+		).toBeEnabled();
 	},
 };
 
@@ -434,6 +438,73 @@ export const EmptyWorkspace: Story = {
 	args: { initialPath: "/" },
 	beforeEach: ({ msw }) => {
 		msw.use(...createWorkspaceMockApi("empty"));
+	},
+};
+export const OnboardingCompletion: Story = {
+	args: { initialPath: "/" },
+	beforeEach: ({ msw }) => {
+		msw.use(...createWorkspaceMockApi("empty"));
+	},
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		await expect(
+			await page.findByRole("main", { name: "Workspace setup" }),
+		).toBeVisible();
+		await userEvent.keyboard("{Meta>}k{/Meta}");
+		await expect(page.queryByRole("dialog")).not.toBeInTheDocument();
+
+		await userEvent.click(page.getByRole("button", { name: "Add an agent" }));
+		const dialog = within(
+			await page.findByRole("dialog", { name: "Add an agent" }),
+		);
+		await userEvent.click(
+			dialog.getByRole("button", { name: "Choose Hermes" }),
+		);
+		await userEvent.click(
+			await dialog.findByRole("button", {
+				name: "Add discovered agent Hermes Reviewer",
+			}),
+		);
+		await userEvent.click(
+			await page.findByRole("radio", { name: /Hermes Reviewer/iu }),
+		);
+		await userEvent.click(
+			page.getByRole("button", { name: "Use selected agent" }),
+		);
+		await expect(
+			await page.findByRole("button", {
+				name: "Search messages, channels, and agents",
+			}),
+		).toBeVisible();
+		await expect(page.queryByRole("dialog")).not.toBeInTheDocument();
+
+		await userEvent.click(
+			page.getByRole("button", {
+				name: "More actions for Hermes Reviewer",
+			}),
+		);
+		await userEvent.click(
+			await page.findByRole("menuitem", {
+				name: /Remove from Commonspace/iu,
+			}),
+		);
+		await waitFor(() =>
+			expect(
+				page.getByRole("alertdialog", {
+					name: "Remove Hermes Reviewer?",
+				}),
+			).toBeVisible(),
+		);
+		await userEvent.click(page.getByRole("button", { name: /^Remove$/u }));
+		await waitFor(() =>
+			expect(page.getByRole("main", { name: "Workspace setup" })).toBeVisible(),
+		);
+		await expect(page.queryByRole("complementary")).not.toBeInTheDocument();
+		await expect(
+			page.queryByRole("button", {
+				name: "Search messages, channels, and agents",
+			}),
+		).not.toBeInTheDocument();
 	},
 };
 export const RoutingFailed: Story = {

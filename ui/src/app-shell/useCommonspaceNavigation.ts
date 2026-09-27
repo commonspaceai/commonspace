@@ -120,6 +120,7 @@ function routeAvailable(
 export function useCommonspaceNavigation(
 	store: CommonspaceStore,
 	snapshot: CommonspaceClientSnapshot,
+	enabled = true,
 ) {
 	const router = useRouter();
 	const routeMatches = useRouterState({ select: (state) => state.matches });
@@ -304,6 +305,11 @@ export function useCommonspaceNavigation(
 	]);
 
 	useEffect(() => {
+		if (!enabled) {
+			setNavigationOpen(false);
+			setSearchOpen(false);
+			return;
+		}
 		const handleKeyboardNavigation = (event: KeyboardEvent) => {
 			if (event.key === "Escape") setNavigationOpen(false);
 			if (
@@ -318,7 +324,7 @@ export function useCommonspaceNavigation(
 		return () => {
 			window.removeEventListener("keydown", handleKeyboardNavigation);
 		};
-	}, []);
+	}, [enabled]);
 
 	const openConversation = (
 		conversation?: ConversationRef,

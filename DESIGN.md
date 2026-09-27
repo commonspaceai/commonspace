@@ -8,6 +8,8 @@ This document defines visual requirements and product-surface rules. [Design sys
 
 The desktop shell has a stable navigation rail and a flexible working area. Use these dimensions when changing its composition:
 
+Required onboarding fills the window without the workspace top bar or navigation rail.
+
 | Element | Dimension | Purpose |
 | --- | --- | --- |
 | Title bar | 64px high | Keep workspace identity and global controls in one predictable place. |

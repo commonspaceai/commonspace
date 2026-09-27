@@ -29,6 +29,7 @@ import type {
 	CommonspaceStore,
 } from "../commonspace-store.ts";
 import { AgentAvatar } from "../design-system/AgentAvatar.tsx";
+import { CommonspaceLogo } from "../design-system/CommonspaceLogo.tsx";
 import {
 	type SettingsOperation,
 	SettingsOperationStatus,
@@ -37,6 +38,7 @@ import type { CommonspaceNavigation } from "./useCommonspaceNavigation.ts";
 
 interface CommonspaceWorkspaceProps {
 	navigation: CommonspaceNavigation;
+	onboarding: boolean;
 	projectFetcher?: typeof globalThis.fetch;
 	snapshot: CommonspaceClientSnapshot;
 	store: CommonspaceStore;
@@ -100,24 +102,25 @@ function WorkspaceOnboarding({
 	return (
 		<main
 			aria-label="Workspace setup"
-			className="h-full min-h-0 overflow-y-auto bg-background px-8 py-12 @container/onboarding"
+			className="h-full min-h-0 overflow-y-auto bg-background px-6 py-8 @container/onboarding"
 		>
-			<div className="mx-auto grid min-h-full max-w-[1040px] content-center gap-14 py-8 @min-[860px]/onboarding:grid-cols-[minmax(0,0.8fr)_minmax(460px,1.2fr)] @min-[860px]/onboarding:items-center">
+			<div className="mx-auto grid min-h-full max-w-[720px] content-center gap-8">
 				<header className="max-w-md">
-					<div className="mb-8 flex size-14 items-center justify-center rounded-md border bg-card font-heading text-xl font-semibold">
-						CS
-					</div>
+					<CommonspaceLogo className="mb-6 size-8" />
 					<h1 className="font-heading text-4xl leading-[1.05] font-semibold tracking-[-0.035em] text-balance">
 						Bring an agent. Give the workspace a mind.
 					</h1>
-					<p className="mt-5 max-w-[42ch] text-base leading-7 text-muted-foreground">
+					<p className="mt-4 max-w-[42ch] text-base leading-7 text-muted-foreground">
 						Commonspace runs on the harnesses you already use. Two choices make
 						the workspace ready—no separate model account or API key.
 					</p>
 				</header>
 
-				<section aria-label="Required setup steps" className="border-y bg-card">
-					<div className="grid grid-cols-[40px_minmax(0,1fr)] gap-4 py-6">
+				<section
+					aria-label="Required setup steps"
+					className="overflow-hidden rounded-md border bg-card"
+				>
+					<div className="grid grid-cols-[32px_minmax(0,1fr)] gap-3 px-4 py-4">
 						<div
 							className="grid size-8 place-items-center rounded-full border text-sm font-semibold"
 							aria-hidden="true"
@@ -135,7 +138,7 @@ function WorkspaceOnboarding({
 								authentication, tools, models, and sessions.
 							</p>
 							{bootstrap.agents.length === 0 ? (
-								<Button className="mt-4" onClick={onAddAgent}>
+								<Button className="mt-3" onClick={onAddAgent}>
 									Add an agent
 								</Button>
 							) : (
@@ -144,7 +147,7 @@ function WorkspaceOnboarding({
 						</div>
 					</div>
 
-					<div className="grid grid-cols-[40px_minmax(0,1fr)] gap-4 border-t py-6">
+					<div className="grid grid-cols-[32px_minmax(0,1fr)] gap-3 border-t px-4 py-4">
 						<div
 							className="grid size-8 place-items-center rounded-full border text-sm font-semibold"
 							aria-hidden="true"
@@ -164,11 +167,11 @@ function WorkspaceOnboarding({
 								shared context in the background.
 							</p>
 							{bootstrap.agents.length === 0 ? (
-								<p className="mt-4 text-sm text-muted-foreground">
+								<p className="mt-3 text-sm text-muted-foreground">
 									Add an agent to unlock this step.
 								</p>
 							) : (
-								<fieldset className="mt-4 grid overflow-hidden rounded-md border">
+								<fieldset className="mt-3 grid overflow-hidden rounded-md border">
 									<legend className="sr-only">Workspace inference agent</legend>
 									{bootstrap.agents.map((agent, index) => (
 										<label
@@ -203,7 +206,7 @@ function WorkspaceOnboarding({
 								</p>
 							) : null}
 							<Button
-								className="mt-4"
+								className="mt-3"
 								disabled={selectedAgent === undefined || saving}
 								onClick={() => void saveInferenceAgent()}
 							>
@@ -272,6 +275,7 @@ function WorkspaceConnection({
 
 export function CommonspaceWorkspace({
 	navigation,
+	onboarding,
 	projectFetcher,
 	snapshot,
 	store,
@@ -308,13 +312,7 @@ export function CommonspaceWorkspace({
 			/>
 		);
 	}
-	const routing = snapshot.bootstrap.routing;
-	const inferenceReady =
-		routing?.provider === CommonspaceRoutingProvider.Harness &&
-		snapshot.bootstrap.agents.some(
-			(agent) => agent.id === routing?.harnessAgentId,
-		);
-	if (snapshot.bootstrap.agents.length === 0 || !inferenceReady) {
+	if (onboarding) {
 		return (
 			<WorkspaceOnboarding
 				bootstrap={snapshot.bootstrap}
