@@ -25,6 +25,10 @@ pnpm exec playwright install chromium
 
 Read [Architecture](architecture.md) for package ownership before a change that crosses boundaries.
 
+## Shared contract reference
+
+Run `pnpm docs:contracts` from the repository root to generate TypeDoc for the public exports of `packages/shared/src/index.ts`. Browse `artifacts/docs/contracts/index.html`, or use `artifacts/docs/contracts.json` as a machine-readable TypeDoc reflection. Both outputs are local build artifacts and are not committed. The [HTTP API reference](../api/README.md) maps routes to these contracts and to server-owned request validation where no shared type exists. The TypeDoc JSON describes exported code types; it is not an OpenAPI specification or a runtime validator.
+
 ## Verification commands
 
 ### Focused iteration
