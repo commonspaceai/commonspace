@@ -1,4 +1,7 @@
-import type { CommonspaceMutation } from "@commonspace/shared";
+import {
+	type CommonspaceMutation,
+	CommonspaceMutationSchema,
+} from "@commonspace/shared";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
 	addDiscoveredAgent,
@@ -7,6 +10,129 @@ import {
 } from "../server/src/state.ts";
 
 describe("Commonspace local state", () => {
+	it("saves chosen emoji for channels and projects without changing their names", () => {
+		const withProject = applyMutation(
+			createInitialState(),
+			{
+				action: "create-project",
+				name: "Launch",
+				paths: ["/tmp/launch"],
+				emoji: "🈁",
+			},
+			{ ids: () => "project-1", now: () => "now" },
+		);
+		const withChannel = applyMutation(
+			withProject,
+			{ action: "create-channel", name: "design", agentIds: [], emoji: "™️" },
+			{ ids: () => "channel-1", now: () => "now" },
+		);
+		const updated = applyMutation(withChannel, {
+			action: "set-channel-agents",
+			channelId: "channel-1",
+			agentIds: [],
+			emoji: "🧭",
+		});
+		const cleared = applyMutation(updated, {
+			action: "set-project-emoji",
+			projectId: "project-1",
+			emoji: "",
+		});
+
+		expect(withChannel.projects[0]).toMatchObject({
+			name: "Launch",
+			emoji: "🈁",
+		});
+		expect(withChannel.channels[0]?.emoji).toBe("™️");
+		expect(updated.channels[0]).toMatchObject({ name: "design", emoji: "🧭" });
+		expect(cleared.projects[0]).not.toHaveProperty("emoji");
+		expect(cleared.revision).toBe(4);
+	});
+
+	it("renames projects without changing their identity or conversation references", () => {
+		const firstProject = applyMutation(
+			createInitialState(),
+			{
+				action: "create-project",
+				name: "First Project",
+				paths: ["/tmp/first"],
+			},
+			{ ids: () => "project-1", now: () => "now" },
+		);
+		const twoProjects = applyMutation(
+			firstProject,
+			{ action: "create-project", name: "Launch", paths: ["/tmp/launch"] },
+			{ ids: () => "project-2", now: () => "now" },
+		);
+		const rename = CommonspaceMutationSchema.parse({
+			action: "rename-project",
+			projectId: "project-1",
+			name: "  Product   Work  ",
+		});
+		const renamed = applyMutation(twoProjects, rename);
+
+		expect(renamed.projects[0]).toMatchObject({
+			id: "project-1",
+			name: "Product Work",
+			paths: ["/tmp/first"],
+		});
+		expect(renamed.threads).toBe(twoProjects.threads);
+		expect(renamed.messages).toBe(twoProjects.messages);
+		expect(renamed.revision).toBe(twoProjects.revision + 1);
+		expect(() =>
+			applyMutation(renamed, {
+				action: "rename-project",
+				projectId: "project-1",
+				name: "launch",
+			}),
+		).toThrow("project name already exists");
+		expect(() =>
+			applyMutation(renamed, {
+				action: "rename-project",
+				projectId: "missing-project",
+				name: "Unknown",
+			}),
+		).toThrow("unknown project");
+	});
+
+	it("renames channels without changing their identity or conversation records", () => {
+		const firstChannel = applyMutation(
+			createInitialState(),
+			{ action: "create-channel", name: "planning", agentIds: [] },
+			{ ids: () => "channel-1", now: () => "now" },
+		);
+		const twoChannels = applyMutation(
+			firstChannel,
+			{ action: "create-channel", name: "design", agentIds: [] },
+			{ ids: () => "channel-2", now: () => "now" },
+		);
+		const renamed = applyMutation(twoChannels, {
+			action: "rename-channel",
+			channelId: "channel-1",
+			name: "# Product Room",
+		});
+
+		expect(renamed.channels[0]).toMatchObject({
+			id: "channel-1",
+			name: "product-room",
+		});
+		expect(renamed.messages).toBe(twoChannels.messages);
+		expect(renamed.threads).toBe(twoChannels.threads);
+		const savedFromSettings = applyMutation(renamed, {
+			action: "set-channel-agents",
+			channelId: "channel-1",
+			agentIds: [],
+			name: "Review Room",
+		});
+		expect(savedFromSettings.channels[0]?.name).toBe("review-room");
+		expect(() =>
+			applyMutation(savedFromSettings, {
+				action: "rename-channel",
+				channelId: "channel-1",
+				name: "design",
+			}),
+		).toThrow("channel #design already exists");
+	});
+
 	it("rejects unknown Agents in Channel membership", () => {
 		expect(() =>
 			applyMutation(

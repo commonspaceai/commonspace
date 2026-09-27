@@ -5,9 +5,11 @@ import {
 	type CommonspaceAgentProfile,
 	type CommonspaceArchiveAttachment,
 	type CommonspaceBootstrap,
+	type CommonspaceChannel,
 	type CommonspaceMessage,
 	type CommonspaceMutation,
 	CommonspaceMutationSchema,
+	type CommonspaceProject,
 	type CommonspaceRetentionPreview,
 	type CommonspaceRoutingAssignment,
 	CommonspaceRoutingProvider,
@@ -429,14 +431,34 @@ class WorkspaceMockApi {
 					state.defaults.memoryThreads = mutation.memoryThreads;
 				break;
 			}
-			case "create-project":
-				state.projects.push({
+			case "create-project": {
+				const project: CommonspaceProject = {
 					id: id(),
 					name: mutation.name,
 					paths: mutation.paths,
 					createdAt: now(),
-				});
+				};
+				if (mutation.emoji) project.emoji = mutation.emoji;
+				state.projects.push(project);
 				break;
+			}
+			case "set-project-emoji": {
+				const project = state.projects.find(
+					(item) => item.id === mutation.projectId,
+				);
+				if (project === undefined) throw new Error("Project not found.");
+				if (mutation.emoji) project.emoji = mutation.emoji;
+				else delete project.emoji;
+				break;
+			}
+			case "rename-project": {
+				const project = state.projects.find(
+					(item) => item.id === mutation.projectId,
+				);
+				if (project === undefined) throw new Error("Project not found.");
+				project.name = mutation.name;
+				break;
+			}
 			case "add-project-path":
 				state.projects
 					.find((project) => project.id === mutation.projectId)
@@ -446,7 +468,7 @@ class WorkspaceMockApi {
 				this.removeProject(mutation.projectId);
 				break;
 			case "create-channel":
-				this.createChannel(mutation.name, mutation.agentIds);
+				this.createChannel(mutation.name, mutation.agentIds, mutation.emoji);
 				break;
 			case "remove-channel":
 				state.channels = state.channels.filter(
@@ -460,11 +482,25 @@ class WorkspaceMockApi {
 					(thread) => thread.channelId !== mutation.channelId,
 				);
 				break;
+			case "rename-channel": {
+				const channel = state.channels.find(
+					(item) => item.id === mutation.channelId,
+				);
+				if (channel) channel.name = mutation.name;
+				break;
+			}
 			case "set-channel-agents": {
 				const channel = state.channels.find(
 					(item) => item.id === mutation.channelId,
 				);
-				if (channel) channel.agentIds = this.channelAgentIds(mutation.agentIds);
+				if (channel) {
+					channel.agentIds = this.channelAgentIds(mutation.agentIds);
+					if (mutation.name !== undefined) channel.name = mutation.name;
+					if (mutation.emoji !== undefined) {
+						if (mutation.emoji) channel.emoji = mutation.emoji;
+						else delete channel.emoji;
+					}
+				}
 				break;
 			}
 			case "set-channel-context": {
@@ -563,9 +599,9 @@ class WorkspaceMockApi {
 		);
 	}
 
-	private createChannel(name: string, agentIds: string[]) {
+	private createChannel(name: string, agentIds: string[], emoji?: string) {
 		const state = this.data.state;
-		state.channels.push({
+		const channel: CommonspaceChannel = {
 			id: id(),
 			name,
 			agentIds: this.channelAgentIds(agentIds),
@@ -579,7 +615,9 @@ class WorkspaceMockApi {
 				updatedAt: null,
 			},
 			createdAt: now(),
-		});
+		};
+		if (emoji) channel.emoji = emoji;
+		state.channels.push(channel);
 	}
 
 	private configureChannel(
@@ -1306,7 +1344,7 @@ class WorkspaceMockApi {
 		http.post("/api/import", async ({ request }) => {
 			const input = await trustedRequestJson<{
 				archive: Omit<CommonspaceWorkspaceArchive, "version"> & {
-					version: 1 | 2 | typeof COMMONSPACE_EXPORT_VERSION;
+					version: 1 | 2 | 3 | typeof COMMONSPACE_EXPORT_VERSION;
 				};
 				projectMappings: Record<string, string[]>;
 			}>(request);
@@ -1328,6 +1366,7 @@ class WorkspaceMockApi {
 				saved?.format !== "commonspace-workspace" ||
 				(saved.version !== 1 &&
 					saved.version !== 2 &&
+					saved.version !== 3 &&
 					saved.version !== COMMONSPACE_EXPORT_VERSION) ||
 				!saved.workspace ||
 				!Array.isArray(saved.attachments) ||
@@ -1335,8 +1374,7 @@ class WorkspaceMockApi {
 				!Array.isArray(saved.workspace.agents) ||
 				!Array.isArray(saved.workspace.channels) ||
 				!Array.isArray(saved.workspace.threads) ||
-				(saved.version === COMMONSPACE_EXPORT_VERSION &&
-					!Array.isArray(saved.workspace.schedules)) ||
+				(saved.version >= 3 && !Array.isArray(saved.workspace.schedules)) ||
 				!saved.workspace.messages
 			)
 				return HttpResponse.json(
@@ -1352,12 +1390,16 @@ class WorkspaceMockApi {
 						{ status: 400 },
 					);
 			const imported = structuredClone(saved.workspace);
-			const projects = imported.projects.map((project) => ({
-				id: project.id,
-				name: project.name,
-				createdAt: project.createdAt,
-				paths: input.projectMappings[project.id] ?? [],
-			}));
+			const projects = imported.projects.map((project) => {
+				const restored: CommonspaceProject = {
+					id: project.id,
+					name: project.name,
+					createdAt: project.createdAt,
+					paths: input.projectMappings[project.id] ?? [],
+				};
+				if (project.emoji !== undefined) restored.emoji = project.emoji;
+				return restored;
+			});
 			this.data.state = {
 				...imported,
 				schedules: imported.schedules ?? [],

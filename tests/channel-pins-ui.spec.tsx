@@ -56,6 +56,41 @@ it("shows a context brief without instruction configuration and saves membership
 	);
 });
 
+it("clears a Channel emoji when saving settings", async () => {
+	const bootstrap = structuredClone(storyBootstrap);
+	const channel = bootstrap.state.channels.find(
+		(item) => item.id === "channel-design",
+	);
+	if (channel === undefined) throw new Error("Story channel is missing");
+	channel.emoji = "🚀";
+	const mutate = vi.fn(async () => undefined);
+	render(
+		<ChannelSettingsPane
+			bootstrap={bootstrap}
+			id={channel.id}
+			store={createStoryStore(bootstrap, { mutate })}
+			onClose={vi.fn()}
+		/>,
+	);
+	const user = userEvent.setup();
+	await user.click(
+		screen.getByRole("button", { name: "Choose channel emoji" }),
+	);
+	const picker = within(
+		await screen.findByRole("dialog", { name: "Choose emoji" }),
+	);
+	await user.click(picker.getByRole("button", { name: "Use default icon" }));
+	await user.click(screen.getByRole("button", { name: "Save changes" }));
+	await waitFor(() =>
+		expect(mutate).toHaveBeenCalledWith({
+			action: "set-channel-agents",
+			channelId: channel.id,
+			agentIds: channel.agentIds,
+			emoji: "",
+		}),
+	);
+});
+
 it("pins a Channel root to the Channel even while its Thread is open", async () => {
 	const addPin = vi.fn(async () => undefined);
 	render(

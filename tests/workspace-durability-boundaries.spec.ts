@@ -86,7 +86,7 @@ async function archiveFixture(text = "Imported conversation.") {
 }
 
 describe("workspace recovery boundaries", () => {
-	it.each(["missing", "invalid", "noncanonical"] as const)(
+	it.each(["invalid", "noncanonical"] as const)(
 		"recovers schedules from backup when current state has %s schedules",
 		async (damage) => {
 			const root = await workspaceRoot();
@@ -112,14 +112,12 @@ describe("workspace recovery boundaries", () => {
 			const primary = JSON.stringify({
 				...saved,
 				schedules:
-					damage === "missing"
-						? undefined
-						: damage === "invalid"
-							? {}
-							: saved.schedules.map((schedule) => ({
-									...schedule,
-									title: ` ${schedule.title} `,
-								})),
+					damage === "invalid"
+						? {}
+						: saved.schedules.map((schedule) => ({
+								...schedule,
+								title: ` ${schedule.title} `,
+							})),
 			});
 			await writeFile(join(root, "state.json"), primary);
 			await writeFile(join(root, "state.backup.json"), backup);
@@ -134,6 +132,220 @@ describe("workspace recovery boundaries", () => {
 			);
 		},
 	);
+
+	it("migrates a dual emoji-version-35 pair from the newer primary without losing native sessions", async () => {
+		const root = await workspaceRoot();
+		const scope = "Commonspace DM: 00000000-0000-4000-8000-000000000001";
+		const saved = applyMutation(
+			savedConversation("Newer primary conversation."),
+			{
+				action: "create-channel",
+				name: "updates",
+				agentIds: ["codex"],
+			},
+		);
+		saved.projects = [
+			{
+				id: "project-1",
+				name: "Work",
+				emoji: "🧭",
+				paths: [root],
+				createdAt: timestamp,
+			},
+		];
+		const channel = saved.channels[0];
+		if (channel === undefined) throw new Error("missing test Channel");
+		channel.emoji = "🧩";
+		saved.dmSessions = { codex: scope };
+		saved.agentSessions = { codex: { [scope]: "native-session-1" } };
+		const primary = JSON.stringify({
+			...saved,
+			version: 35,
+			schedules: undefined,
+		});
+		const prior = structuredClone(saved);
+		const priorMessage = prior.messages["dm:codex"]?.[0];
+		if (priorMessage === undefined) throw new Error("missing test message");
+		priorMessage.text = "Older backup conversation.";
+		const backup = JSON.stringify({
+			...prior,
+			version: 35,
+			schedules: undefined,
+		});
+		await writeFile(join(root, "state.json"), primary);
+		await writeFile(join(root, "state.backup.json"), backup);
+
+		const service = await openWorkspace(root);
+		const state = service.snapshot();
+		expect(state.version).toBe(36);
+		expect(state.schedules).toEqual([]);
+		expect(state.projects[0]?.emoji).toBe("🧭");
+		expect(state.channels[0]?.emoji).toBe("🧩");
+		expect(state.messages["dm:codex"]?.[0]?.text).toBe(
+			"Newer primary conversation.",
+		);
+		expect(state.dmSessions).toEqual({ codex: scope });
+		expect(state.agentSessions).toEqual({
+			codex: { [scope]: "native-session-1" },
+		});
+		expect(await readFile(join(root, "state.backup.json"), "utf8")).toBe(
+			primary,
+		);
+		await service.close();
+		services.splice(services.indexOf(service), 1);
+		const restarted = await openWorkspace(root);
+		expect(restarted.snapshot().messages["dm:codex"]?.[0]?.text).toBe(
+			"Newer primary conversation.",
+		);
+		expect(restarted.snapshot().agentSessions).toEqual({
+			codex: { [scope]: "native-session-1" },
+		});
+	});
+
+	it.each(["primary", "backup"] as const)(
+		"migrates a sole marked emoji-version-35 %s",
+		async (location) => {
+			const root = await workspaceRoot();
+			const saved = savedConversation("Keep this sole conversation.");
+			saved.projects = [
+				{
+					id: "project-1",
+					name: "Work",
+					emoji: "🧭",
+					paths: [root],
+					createdAt: timestamp,
+				},
+			];
+			const raw = JSON.stringify({
+				...saved,
+				version: 35,
+				schedules: undefined,
+			});
+			await writeFile(
+				join(root, location === "primary" ? "state.json" : "state.backup.json"),
+				raw,
+			);
+
+			const service = await openWorkspace(root);
+			expect(service.snapshot().version).toBe(36);
+			expect(service.snapshot().schedules).toEqual([]);
+			expect(service.snapshot().projects[0]?.emoji).toBe("🧭");
+			expect(service.snapshot().messages["dm:codex"]?.[0]?.text).toBe(
+				"Keep this sole conversation.",
+			);
+			expect(await readFile(join(root, "state.backup.json"), "utf8")).toBe(raw);
+		},
+	);
+
+	it.each(["mixed", "unmarked"] as const)(
+		"preserves both raw files when version-35 recovery is %s",
+		async (kind) => {
+			const root = await workspaceRoot();
+			const saved = savedConversation("Newer primary conversation.");
+			if (kind === "mixed") {
+				saved.projects = [
+					{
+						id: "project-1",
+						name: "Work",
+						emoji: "🧭",
+						paths: [root],
+						createdAt: timestamp,
+					},
+				];
+			}
+			const primary = JSON.stringify({
+				...saved,
+				version: 35,
+				schedules: undefined,
+			});
+			const backupState = structuredClone(saved);
+			const backupMessage = backupState.messages["dm:codex"]?.[0];
+			if (backupMessage === undefined) throw new Error("missing test message");
+			backupMessage.text = "Older backup conversation.";
+			const backup = JSON.stringify({
+				...backupState,
+				version: 35,
+				schedules: [],
+			});
+			await writeFile(join(root, "state.json"), primary);
+			await writeFile(join(root, "state.backup.json"), backup);
+
+			await expect(openWorkspace(root)).rejects.toThrow(
+				"version-35 state without schedules requires manual recovery",
+			);
+			expect(await readFile(join(root, "state.json"), "utf8")).toBe(primary);
+			expect(await readFile(join(root, "state.backup.json"), "utf8")).toBe(
+				backup,
+			);
+			await expect(
+				readFile(join(root, "state.corrupt.json")),
+			).rejects.toMatchObject({
+				code: "ENOENT",
+			});
+		},
+	);
+
+	it("preserves an invalid strict primary and an emoji-version-35 backup", async () => {
+		const root = await workspaceRoot();
+		const saved = savedConversation("Newer primary conversation.");
+		const primary = JSON.stringify({ ...saved, version: 35, schedules: {} });
+		const older = savedConversation("Older backup conversation.");
+		older.projects = [
+			{
+				id: "project-1",
+				name: "Work",
+				emoji: "🧭",
+				paths: [root],
+				createdAt: timestamp,
+			},
+		];
+		const backup = JSON.stringify({
+			...older,
+			version: 35,
+			schedules: undefined,
+		});
+		await writeFile(join(root, "state.json"), primary);
+		await writeFile(join(root, "state.backup.json"), backup);
+
+		await expect(openWorkspace(root)).rejects.toThrow(
+			"version-35 state without schedules requires manual recovery",
+		);
+		expect(await readFile(join(root, "state.json"), "utf8")).toBe(primary);
+		expect(await readFile(join(root, "state.backup.json"), "utf8")).toBe(
+			backup,
+		);
+	});
+
+	it("loads the newer version-36 primary when cosmetic emoji needs normalization", async () => {
+		const root = await workspaceRoot();
+		const saved = savedConversation("Newer primary conversation.");
+		saved.projects = [
+			{
+				id: "project-1",
+				name: "Work",
+				emoji: " 🧭 ",
+				paths: [root],
+				createdAt: timestamp,
+			},
+		];
+		const primary = JSON.stringify(saved);
+		const backup = JSON.stringify(
+			savedConversation("Older backup conversation."),
+		);
+		await writeFile(join(root, "state.json"), primary);
+		await writeFile(join(root, "state.backup.json"), backup);
+
+		const service = await openWorkspace(root);
+		expect(service.snapshot().messages["dm:codex"]?.[0]?.text).toBe(
+			"Newer primary conversation.",
+		);
+		expect(service.snapshot().projects[0]?.emoji).toBe("🧭");
+		await expect(
+			readFile(join(root, "state.corrupt.json")),
+		).rejects.toMatchObject({
+			code: "ENOENT",
+		});
+	});
 
 	it("restores a missing primary from its backup after an interrupted recovery", async () => {
 		const root = await workspaceRoot();

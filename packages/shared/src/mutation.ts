@@ -56,6 +56,17 @@ export const CommonspaceMutationSchema = z.discriminatedUnion(
 			action: z.literal("create-project"),
 			name: z.string(),
 			paths: z.array(z.string()),
+			emoji: z.string().max(32).optional(),
+		}),
+		z.strictObject({
+			action: z.literal("set-project-emoji"),
+			projectId: z.string(),
+			emoji: z.string().max(32),
+		}),
+		z.strictObject({
+			action: z.literal("rename-project"),
+			projectId: z.string(),
+			name: z.string(),
 		}),
 		z.strictObject({
 			action: z.literal("add-project-path"),
@@ -70,11 +81,14 @@ export const CommonspaceMutationSchema = z.discriminatedUnion(
 			action: z.literal("create-channel"),
 			name: z.string(),
 			agentIds: z.array(z.string()),
+			emoji: z.string().max(32).optional(),
 		}),
 		z.strictObject({
 			action: z.literal("set-channel-agents"),
 			channelId: z.string(),
 			agentIds: z.array(z.string()),
+			name: z.string().optional(),
+			emoji: z.string().max(32).optional(),
 		}),
 		z.strictObject({
 			action: z.literal("set-channel-context"),
@@ -112,7 +126,7 @@ export const CommonspaceMutationSchema = z.discriminatedUnion(
 			action: z.literal("update-agent-profile"),
 			agentId: z.string(),
 			displayName: z.string(),
-			avatarEmoji: z.string().optional(),
+			avatarEmoji: z.string().max(32).optional(),
 			accentColor: z.string().optional(),
 			fullAccess: z.boolean().optional(),
 		}),
@@ -121,6 +135,11 @@ export const CommonspaceMutationSchema = z.discriminatedUnion(
 		z.strictObject({
 			action: z.literal("remove-channel"),
 			channelId: z.string(),
+		}),
+		z.strictObject({
+			action: z.literal("rename-channel"),
+			channelId: z.string(),
+			name: z.string(),
 		}),
 		z.strictObject({
 			action: z.literal("create-schedule"),

@@ -12,7 +12,15 @@ import {
 	SquarePenIcon,
 	Trash2Icon,
 } from "lucide-react";
-import { type ComponentProps, Fragment, useState } from "react";
+import { type ComponentProps, type FormEvent, Fragment, useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -69,6 +77,7 @@ export interface CollectionActionMenuProps {
 	onOpen: () => void;
 	onTogglePinned?: () => void;
 	onSettings?: () => void;
+	onRename?: (name: string) => void | Promise<void>;
 	onAddFolder?: () => void;
 	unread?: boolean;
 	onMarkRead?: () => void;
@@ -122,6 +131,7 @@ type CollectionMenuActionId =
 	| "open"
 	| "pin"
 	| "read-state"
+	| "rename"
 	| "sessions"
 	| "settings";
 
@@ -185,35 +195,61 @@ function agentMenuActions(
 
 function channelMenuActions(
 	props: CollectionActionMenuProps,
+	requestRename: () => void,
 ): CollectionMenuAction[] {
 	const onClick = props.unread ? props.onMarkRead : props.onMarkUnread;
-	if (onClick === undefined) return [];
-	return [
-		{
+	const actions: CollectionMenuAction[] = [];
+	if (onClick !== undefined) {
+		actions.push({
 			id: "read-state",
 			icon: CheckCheckIcon,
 			label: props.unread ? "Mark read" : "Mark unread",
 			onClick,
 			presentation: "plain",
 			separatorBefore: false,
-		},
-	];
+		});
+	}
+	if (props.onRename !== undefined) {
+		actions.push({
+			description: undefined,
+			id: "rename",
+			icon: SquarePenIcon,
+			label: "Rename channel",
+			onClick: requestRename,
+			presentation: "copy",
+			separatorBefore: false,
+		});
+	}
+	return actions;
 }
 
 function projectMenuActions(
 	props: CollectionActionMenuProps,
+	requestRename: () => void,
 ): CollectionMenuAction[] {
-	if (props.onAddFolder === undefined) return [];
-	return [
-		{
+	const actions: CollectionMenuAction[] = [];
+	if (props.onRename !== undefined) {
+		actions.push({
+			description: "Change the project name",
+			id: "rename",
+			icon: SquarePenIcon,
+			label: "Rename project",
+			onClick: requestRename,
+			presentation: "copy",
+			separatorBefore: false,
+		});
+	}
+	if (props.onAddFolder !== undefined) {
+		actions.push({
 			id: "add-folder",
 			icon: FolderPlusIcon,
 			label: "Add local folder",
 			onClick: props.onAddFolder,
 			presentation: "plain",
 			separatorBefore: false,
-		},
-	];
+		});
+	}
+	return actions;
 }
 
 function commonMenuActions(
@@ -267,6 +303,7 @@ function commonMenuActions(
 function collectionMenuActions(
 	props: CollectionActionMenuProps,
 	requestFreshChat: () => void,
+	requestRename: () => void,
 ): CollectionMenuAction[] {
 	let kindActions: CollectionMenuAction[];
 	const kind = props.kind;
@@ -275,10 +312,10 @@ function collectionMenuActions(
 			kindActions = agentMenuActions(props, requestFreshChat);
 			break;
 		case "channel":
-			kindActions = channelMenuActions(props);
+			kindActions = channelMenuActions(props, requestRename);
 			break;
 		case "project":
-			kindActions = projectMenuActions(props);
+			kindActions = projectMenuActions(props, requestRename);
 			break;
 		default:
 			return unsupportedCollectionKind(kind);
@@ -325,12 +362,111 @@ function CollectionMenuActionItem({
 	);
 }
 
+function RenameCollectionDialog({
+	open,
+	kind,
+	label,
+	name,
+	error,
+	saving,
+	onNameChange,
+	onOpenChange,
+	onSubmit,
+}: {
+	open: boolean;
+	kind: CommonspaceCollectionKind;
+	label: string;
+	name: string;
+	error: string | null;
+	saving: boolean;
+	onNameChange: (name: string) => void;
+	onOpenChange: (open: boolean) => void;
+	onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+	return (
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			<DialogContent
+				closeLabel={`Close rename ${kind}`}
+				className="rounded-md p-0 sm:max-w-[440px]"
+			>
+				<DialogHeader className="border-b px-5 py-4">
+					<DialogTitle>Rename {kind}</DialogTitle>
+					<DialogDescription>
+						Choose a new name for {kind === "channel" ? `#${label}` : label}.
+					</DialogDescription>
+				</DialogHeader>
+				<form className="grid gap-5 p-5" onSubmit={onSubmit}>
+					<label className="grid gap-1.5 text-sm font-medium">
+						<span>{kind === "channel" ? "Channel" : "Project"} name</span>
+						<input
+							autoComplete="off"
+							autoFocus
+							maxLength={kind === "channel" ? 48 : 80}
+							required
+							value={name}
+							onChange={(event) => {
+								onNameChange(event.target.value);
+							}}
+							className="min-h-10 w-full rounded-sm border bg-background px-3 text-sm font-normal"
+						/>
+					</label>
+					{error !== null && (
+						<p className="text-xs text-destructive" role="alert">
+							{error}
+						</p>
+					)}
+					<footer className="-mx-5 -mb-5 flex justify-end gap-2 border-t bg-muted px-5 py-3">
+						<Button
+							type="button"
+							variant="outline"
+							onClick={() => {
+								onOpenChange(false);
+							}}
+						>
+							Cancel
+						</Button>
+						<Button type="submit" disabled={saving}>
+							{saving ? "Saving…" : "Save"}
+						</Button>
+					</footer>
+				</form>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
 export function CollectionActionMenu(props: CollectionActionMenuProps) {
 	const [confirmOpen, setConfirmOpen] = useState(false);
 	const [freshConfirmOpen, setFreshConfirmOpen] = useState(false);
-	const actions = collectionMenuActions(props, () => {
-		setFreshConfirmOpen(true);
-	});
+	const [renameOpen, setRenameOpen] = useState(false);
+	const [renameName, setRenameName] = useState(props.label);
+	const [renameError, setRenameError] = useState<string | null>(null);
+	const [renameSaving, setRenameSaving] = useState(false);
+	const actions = collectionMenuActions(
+		props,
+		() => {
+			setFreshConfirmOpen(true);
+		},
+		() => {
+			setRenameName(props.label);
+			setRenameError(null);
+			setRenameOpen(true);
+		},
+	);
+	const saveRename = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (renameSaving || props.onRename === undefined) return;
+		setRenameSaving(true);
+		setRenameError(null);
+		try {
+			await props.onRename(renameName);
+			setRenameOpen(false);
+		} catch (error) {
+			setRenameError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setRenameSaving(false);
+		}
+	};
 
 	return (
 		<>
@@ -411,6 +547,24 @@ export function CollectionActionMenu(props: CollectionActionMenuProps) {
 					actionLabel="Start fresh"
 					onOpenChange={setFreshConfirmOpen}
 					onConfirm={props.onStartFreshChat}
+				/>
+			)}
+			{props.onRename !== undefined && (
+				<RenameCollectionDialog
+					open={renameOpen}
+					kind={props.kind}
+					label={props.label}
+					name={renameName}
+					error={renameError}
+					saving={renameSaving}
+					onNameChange={(name) => {
+						setRenameName(name);
+						setRenameError(null);
+					}}
+					onOpenChange={setRenameOpen}
+					onSubmit={(event) => {
+						void saveRename(event);
+					}}
 				/>
 			)}
 		</>

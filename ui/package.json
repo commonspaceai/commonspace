@@ -18,9 +18,12 @@
 	"dependencies": {
 		"@base-ui/react": "1.8.0",
 		"@commonspace/shared": "workspace:*",
+		"@fontsource/noto-color-emoji": "5.3.2",
 		"@tanstack/react-router": "1.170.35",
 		"class-variance-authority": "0.7.1",
 		"clsx": "2.1.1",
+		"emojibase": "17.0.0",
+		"emojibase-data": "17.0.0",
 		"lucide-react": "1.45.0",
 		"react": "19.3.0",
 		"react-dom": "19.3.0",

@@ -32,6 +32,7 @@ import {
 	type FormEvent,
 	type DragEvent as ReactDragEvent,
 	type KeyboardEvent as ReactKeyboardEvent,
+	type MouseEvent as ReactMouseEvent,
 	useCallback,
 	useEffect,
 	useMemo,
@@ -60,6 +61,7 @@ import {
 	type CommonspaceCollectionKind,
 } from "@/design-system/CollectionActionMenu";
 import { CommonspaceLogo } from "@/design-system/CommonspaceLogo";
+import { EmojiPicker } from "@/design-system/EmojiPicker";
 import {
 	NavigationItem,
 	NavigationItemGroup,
@@ -417,7 +419,8 @@ function AgentProfileEditor({
 		displayName: draft.displayName || agent.displayName,
 		accentColor: draft.accentColor,
 	};
-	if (draft.avatarEmoji !== "") previewAgent.avatarEmoji = draft.avatarEmoji;
+	if (draft.avatarEmoji === "") delete previewAgent.avatarEmoji;
+	else previewAgent.avatarEmoji = draft.avatarEmoji;
 	const saveAgentProfile = async (event: FormEvent) => {
 		event.preventDefault();
 		await store.mutate({ action: "update-agent-profile", ...draft });
@@ -449,20 +452,14 @@ function AgentProfileEditor({
 						}}
 					/>
 				</label>
-				<label>
-					Avatar emoji
-					<input
-						aria-label="Avatar emoji"
+				<div className="grid gap-1.5 text-xs font-semibold">
+					<span>Avatar emoji</span>
+					<EmojiPicker
 						value={draft.avatarEmoji}
-						onChange={(event) => {
-							onDraftChange({ avatarEmoji: event.target.value });
-						}}
-						placeholder={(draft.displayName || agent.displayName)
-							.slice(0, 1)
-							.toLocaleUpperCase()}
-						maxLength={16}
+						label="Choose avatar emoji"
+						onChange={(avatarEmoji) => onDraftChange({ avatarEmoji })}
 					/>
-				</label>
+				</div>
 				<label>
 					Accent color
 					<input
@@ -563,6 +560,7 @@ export function CommonspaceSidebar({
 	const creationRevision = useRef(0);
 	const [formError, setFormError] = useState<string | null>(null);
 	const [name, setName] = useState("");
+	const [creationEmoji, setCreationEmoji] = useState("");
 	const [path, setPath] = useState("");
 	const [selectingPath, setSelectingPath] = useState(false);
 	const [pathProjectId, setPathProjectId] = useState<string | null>(null);
@@ -677,6 +675,7 @@ export function CommonspaceSidebar({
 		setForm(kind);
 		setFormError(null);
 		setName("");
+		setCreationEmoji("");
 		setPath("");
 		setAgentIds([]);
 		setChannelAgentQuery("");
@@ -1142,7 +1141,12 @@ export function CommonspaceSidebar({
 				setFormError("Project name and local folder are required.");
 				return;
 			}
-			mutation = { action: "create-project", name, paths: [path] };
+			mutation = {
+				action: "create-project",
+				name,
+				paths: [path],
+				emoji: creationEmoji,
+			};
 		} else if (form === "channel") {
 			if (name.trim() === "") {
 				setFormError("Channel name is required.");
@@ -1152,6 +1156,7 @@ export function CommonspaceSidebar({
 				action: "create-channel",
 				name,
 				agentIds,
+				emoji: creationEmoji,
 			};
 		} else return;
 		const submittedRevision = creationRevision.current;
@@ -1167,6 +1172,7 @@ export function CommonspaceSidebar({
 		setForm(null);
 		setFormError(null);
 		setName("");
+		setCreationEmoji("");
 		setPath("");
 		setAgentIds([]);
 	};
@@ -2209,6 +2215,14 @@ export function CommonspaceSidebar({
 										}}
 									/>
 								</label>
+								<div className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
+									<span>Channel emoji</span>
+									<EmojiPicker
+										value={creationEmoji}
+										label="Choose channel emoji"
+										onChange={setCreationEmoji}
+									/>
+								</div>
 								<fieldset className="min-w-0 border-0 p-0">
 									<legend className="px-1 font-heading text-sm font-bold">
 										Agents
@@ -2332,7 +2346,19 @@ export function CommonspaceSidebar({
 										"rounded-md bg-sidebar-accent/70",
 								)}
 							>
-								<NavigationItemGroup>
+								<NavigationItemGroup
+									onContextMenu={(event: ReactMouseEvent<HTMLDivElement>) => {
+										if (onOpenContextSettings === undefined) return;
+										const trigger =
+											event.currentTarget.querySelector<HTMLButtonElement>(
+												'[data-slot="dropdown-menu-trigger"]',
+											);
+										if (trigger === null) return;
+										event.preventDefault();
+										if (trigger.getAttribute("aria-expanded") !== "true")
+											trigger.click();
+									}}
+								>
 									<NavigationItem
 										type="button"
 										{...sortableCollectionButtonProps("channel", channel.id)}
@@ -2361,13 +2387,16 @@ export function CommonspaceSidebar({
 									>
 										<span
 											className={cn(
-												"grid size-5 place-items-center rounded-sm font-mono text-base text-sidebar-foreground/55",
+												"grid size-5 place-items-center rounded-sm font-mono text-base",
+												channel.emoji
+													? "emoji-glyph text-sidebar-foreground"
+													: "text-sidebar-foreground/55",
 												preferences.sortModes.channel === "custom" &&
 													"group-hover:opacity-0 group-focus-within:opacity-0",
 											)}
 											aria-hidden="true"
 										>
-											{"#"}
+											{channel.emoji ?? "#"}
 										</span>
 										<span className="min-w-0">
 											<strong
@@ -2428,6 +2457,13 @@ export function CommonspaceSidebar({
 											onSettings={() => {
 												onOpenContextSettings("channel", channel.id);
 											}}
+											onRename={(name: string) =>
+												store.mutate({
+													action: "rename-channel",
+													channelId: channel.id,
+													name,
+												})
+											}
 											onMarkRead={() => {
 												for (const item of inboxItems) {
 													if (
@@ -3064,6 +3100,14 @@ export function CommonspaceSidebar({
 										}}
 									/>
 								</label>
+								<div className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
+									<span>Project emoji</span>
+									<EmojiPicker
+										value={creationEmoji}
+										label="Choose project emoji"
+										onChange={setCreationEmoji}
+									/>
+								</div>
 								<label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
 									Local folder
 									<span className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
@@ -3136,7 +3180,19 @@ export function CommonspaceSidebar({
 										"rounded-md bg-sidebar-accent/70",
 								)}
 							>
-								<NavigationItemGroup>
+								<NavigationItemGroup
+									onContextMenu={(event: ReactMouseEvent<HTMLDivElement>) => {
+										if (onOpenContextSettings === undefined) return;
+										const trigger =
+											event.currentTarget.querySelector<HTMLButtonElement>(
+												'[data-slot="dropdown-menu-trigger"]',
+											);
+										if (trigger === null) return;
+										event.preventDefault();
+										if (trigger.getAttribute("aria-expanded") !== "true")
+											trigger.click();
+									}}
+								>
 									<NavigationItem
 										type="button"
 										{...sortableCollectionButtonProps("project", project.id)}
@@ -3155,10 +3211,20 @@ export function CommonspaceSidebar({
 										}}
 									>
 										<span
-											className="grid size-5 place-items-center rounded-sm font-mono text-xs text-sidebar-foreground/55"
+											className={cn(
+												"grid size-5 place-items-center rounded-sm font-mono text-xs",
+												project.emoji
+													? "emoji-glyph text-sidebar-foreground"
+													: "text-sidebar-foreground/55",
+											)}
 											aria-hidden="true"
 										>
-											<FolderIcon className="size-[18px]" aria-hidden="true" />
+											{project.emoji ?? (
+												<FolderIcon
+													className="size-[18px]"
+													aria-hidden="true"
+												/>
+											)}
 										</span>
 										<span className="min-w-0">
 											<strong className="block truncate text-sm font-medium">
@@ -3201,6 +3267,13 @@ export function CommonspaceSidebar({
 											onAddFolder={() => {
 												void addProjectFolder(project.id);
 											}}
+											onRename={(name: string) =>
+												store.mutate({
+													action: "rename-project",
+													projectId: project.id,
+													name,
+												})
+											}
 											onCopy={() => copyText(project.name)}
 											copyLabel="Copy project name"
 											onTogglePinned={() => {

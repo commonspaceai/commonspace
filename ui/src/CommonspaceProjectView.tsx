@@ -8,6 +8,7 @@ import { referencedProjectIds } from "@commonspace/shared";
 import { ArrowLeftIcon, FolderPlusIcon, SettingsIcon } from "lucide-react";
 import {
 	type CSSProperties,
+	type FormEvent,
 	useEffect,
 	useMemo,
 	useRef,
@@ -18,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CommonspaceLogo } from "@/design-system/CommonspaceLogo";
 import { ConfirmActionDialog } from "@/design-system/ConfirmActionDialog";
+import { EmojiPicker } from "@/design-system/EmojiPicker";
 import { ResizablePanelHandle } from "@/design-system/ResizablePanelHandle";
 import {
 	COMMONSPACE_RESIZABLE_PANEL,
@@ -113,13 +115,21 @@ function ProjectConversations({
 							}
 						>
 							<span
-								className="grid size-[34px] place-items-center rounded-lg bg-muted text-muted-foreground"
+								className={cn(
+									"grid size-[34px] place-items-center rounded-lg bg-muted text-muted-foreground",
+									channel.emoji && "emoji-glyph",
+								)}
 								aria-hidden="true"
 							>
-								#
+								{channel.emoji ?? "#"}
 							</span>
 							<span className="min-w-0">
-								<strong className="block truncate"># {channel.name}</strong>
+								<strong className="block truncate">
+									<span className={channel.emoji ? "emoji-glyph" : undefined}>
+										{channel.emoji ?? "#"}
+									</span>{" "}
+									{channel.name}
+								</strong>
 								<small className="block truncate text-xs text-muted-foreground">
 									Channel
 								</small>
@@ -182,6 +192,11 @@ export function CommonspaceProjectView({
 }: CommonspaceProjectViewProps) {
 	const [activeTab, setActiveTab] = useState<ProjectTab>("files");
 	const [addingFolder, setAddingFolder] = useState(false);
+	const [projectName, setProjectName] = useState("");
+	const [savingName, setSavingName] = useState(false);
+	const [nameError, setNameError] = useState<string | null>(null);
+	const [savingEmoji, setSavingEmoji] = useState(false);
+	const [emojiError, setEmojiError] = useState<string | null>(null);
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
 	const projectLayout = useRef<HTMLElement>(null);
@@ -206,6 +221,7 @@ export function CommonspaceProjectView({
 	const channels = state?.channels;
 	const messages = state?.messages;
 	const resolvedProjectId = project?.id;
+	const currentProjectName = project?.name;
 	const conversations = useMemo(
 		() =>
 			agents === undefined ||
@@ -228,6 +244,12 @@ export function CommonspaceProjectView({
 		setSettingsOpen(settingsRequest !== undefined);
 	}, [navigationToken, projectId, settingsRequest]);
 
+	useEffect(() => {
+		if (currentProjectName === undefined) return;
+		setProjectName(currentProjectName);
+		setNameError(null);
+	}, [currentProjectName]);
+
 	const addLocalFolder = async () => {
 		setAddingFolder(true);
 		try {
@@ -238,6 +260,24 @@ export function CommonspaceProjectView({
 			// Store exposes picker and mutation failures through its shared error state.
 		} finally {
 			setAddingFolder(false);
+		}
+	};
+
+	const saveProjectName = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (savingName || project === undefined) return;
+		setSavingName(true);
+		setNameError(null);
+		try {
+			await store.mutate({
+				action: "rename-project",
+				projectId: project.id,
+				name: projectName,
+			});
+		} catch (error) {
+			setNameError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setSavingName(false);
 		}
 	};
 
@@ -301,7 +341,9 @@ export function CommonspaceProjectView({
 					title={project.name}
 					subtitle={`${String(conversationCount)} ${conversationCount === 1 ? "conversation" : "conversations"} · ${folderSummary}`}
 					mark={
-						project.name.toLocaleLowerCase() === "commonspace" ? (
+						project.emoji ? (
+							<span className="emoji-glyph">{project.emoji}</span>
+						) : project.name.toLocaleLowerCase() === "commonspace" ? (
 							<CommonspaceLogo decorative className="size-5" />
 						) : (
 							project.name.slice(0, 1).toLocaleUpperCase()
@@ -427,6 +469,81 @@ export function CommonspaceProjectView({
 							</button>
 						</header>
 						<div className="min-h-0 flex-1 overflow-y-auto p-5">
+							<section className="mb-7">
+								<h3 className="mb-3 font-heading text-sm font-bold">
+									Project name
+								</h3>
+								<form
+									className="grid gap-2"
+									onSubmit={(event) => {
+										void saveProjectName(event);
+									}}
+								>
+									<label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
+										Name
+										<input
+											autoComplete="off"
+											maxLength={80}
+											required
+											value={projectName}
+											disabled={savingName}
+											className="min-h-10 rounded-sm border bg-background px-3 text-sm font-normal text-foreground"
+											onChange={(event) => {
+												setProjectName(event.target.value);
+												setNameError(null);
+											}}
+										/>
+									</label>
+									{nameError !== null && (
+										<p role="alert" className="text-xs text-destructive">
+											{nameError}
+										</p>
+									)}
+									<Button
+										type="submit"
+										variant="outline"
+										disabled={
+											savingName ||
+											projectName.trim() === "" ||
+											projectName === project.name
+										}
+									>
+										{savingName ? "Saving…" : "Save name"}
+									</Button>
+								</form>
+							</section>
+							<section className="mb-7">
+								<h3 className="mb-2 font-heading text-sm font-bold">
+									Project emoji
+								</h3>
+								<EmojiPicker
+									value={project.emoji ?? ""}
+									label="Choose project emoji"
+									disabled={savingEmoji}
+									onChange={async (emoji) => {
+										setSavingEmoji(true);
+										setEmojiError(null);
+										try {
+											await store.mutate({
+												action: "set-project-emoji",
+												projectId,
+												emoji,
+											});
+										} catch (error) {
+											setEmojiError(
+												error instanceof Error ? error.message : String(error),
+											);
+										} finally {
+											setSavingEmoji(false);
+										}
+									}}
+								/>
+								{emojiError !== null && (
+									<p role="alert" className="mt-2 text-xs text-destructive">
+										{emojiError}
+									</p>
+								)}
+							</section>
 							<section>
 								<h3 className="mb-3 font-heading text-sm font-bold">
 									Local context

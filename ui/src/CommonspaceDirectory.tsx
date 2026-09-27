@@ -50,6 +50,7 @@ interface DirectoryItem {
 	readonly description: string;
 	readonly meta: string;
 	readonly mark: string;
+	readonly emoji?: string | undefined;
 	readonly unread: number;
 	readonly agent?: CommonspaceAgentProfile;
 }
@@ -60,6 +61,7 @@ type DirectoryItemActions = Pick<
 	| "onCopy"
 	| "onMarkRead"
 	| "onMarkUnread"
+	| "onRename"
 	| "onStartFreshChat"
 	| "onViewSessions"
 >;
@@ -112,6 +114,7 @@ function directoryItems(
 			description: project.paths[0] ?? "No local folder connected",
 			meta: `${String(project.paths.length)} ${project.paths.length === 1 ? "folder" : "folders"}`,
 			mark: project.name.slice(0, 1).toLocaleUpperCase(),
+			emoji: project.emoji,
 			unread: 0,
 		}));
 	if (kind === "channels") {
@@ -132,6 +135,7 @@ function directoryItems(
 				description: `${String(channel.agentIds.length)} ${channel.agentIds.length === 1 ? "agent" : "agents"} available`,
 				meta: unread === 0 ? "Channel" : `${String(unread)} unread`,
 				mark: "#",
+				emoji: channel.emoji,
 				unread,
 			};
 		});
@@ -387,6 +391,14 @@ export function CommonspaceDirectory({
 								actions.copyLabel =
 									item.kind === "agent" ? "Copy mention" : "Copy project name";
 							}
+							if (item.kind === "project") {
+								actions.onRename = (name) =>
+									store.mutate({
+										action: "rename-project",
+										projectId: item.id,
+										name,
+									});
+							}
 							return (
 								<li
 									key={item.id}
@@ -407,7 +419,9 @@ export function CommonspaceDirectory({
 												className="grid size-9 place-items-center rounded-lg bg-muted text-muted-foreground"
 												aria-hidden="true"
 											>
-												{item.kind === "project" ? (
+												{item.emoji ? (
+													<span className="emoji-glyph">{item.emoji}</span>
+												) : item.kind === "project" ? (
 													<FolderIcon className="size-[18px]" />
 												) : (
 													<HashIcon className="size-[18px]" />

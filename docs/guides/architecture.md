@@ -201,7 +201,7 @@ Project scope is inferred unless the user supplies visible `@@project` reference
 
 ## Persistence
 
-Persisted workspace state includes scheduled Channel messages and the chosen Project scope on each routing correction. Multiple corrections from one assignment are preserved. Older corrections inherit the scope from their target assignment.
+The current internal state version is 36 (`COMMONSPACE_STATE_VERSION`). Persisted workspace state includes scheduled Channel messages, optional Project and Channel emoji, and the chosen Project scope on each routing correction. Multiple corrections from one assignment are preserved. Older corrections inherit the scope from their target assignment.
 
 Persisted state includes the roster, appearance, workspace coordination defaults, host-private native sessions, bounded activity, Inbox read/unread/saved state, notification preferences, attachments, routing decisions and memory, Project references, Channel/Thread context, schedules, pins, message versions, deletion markers, permissions, and execution state. Native model and reasoning settings are not Commonspace state.
 
@@ -210,7 +210,7 @@ Migration preserves conversation history while supplying explicit defaults for o
 - Older routing receives deterministic delivery references. Prior assignment wording is retained as optional `legacySubRequest`, never used for delivery, and cleared with deleted content. Migration retains IDs, scopes, corrections, replies, and private native sessions.
 - Older Threads receive an empty inherited snapshot and current memory derived from their transcript, rather than an invented historical snapshot.
 - Workspaces without pin, permission, or notification fields receive empty history and opt-in notification defaults.
-- Older workspaces without saved schedules load with an empty schedule list. Current-version workspaces require canonical schedules; a damaged primary recovers from its valid backup.
+- Versions before 35 without saved schedules load with an empty schedule list. Versions 35 and 36 require canonical schedules, except for the narrowly identified version-35 work-in-progress recovery path described in [Automatic state recovery](operations.md#automatic-state-recovery).
 - Loaded pending permissions become interrupted because their native requests do not survive a process restart.
 
 ### Durability and privacy
@@ -229,7 +229,7 @@ Execution completion and attention evidence stay separate. Text-only explicit re
 
 Notification links identify conversations, Threads, and messages by their workspace IDs. The client accepts them only when they match current state on the loopback origin.
 
-The portable archive format has its own versioned contract. Export contains sanitized workspace records and exact attachment bytes, replaces Project roots with counts, and omits native sessions and pending attachment cleanup. Archive version 3 requires schedules. Version 2 records each routing correction's chosen Project scope. Import still accepts versions 1 and 2, defaults their missing schedules to an empty list, and derives missing correction scopes from their target assignments. Import requires an empty workspace and explicit existing local roots, and validates all structure, mapping, attachment, and size constraints before writes. Retention requires an owner-triggered, revision-bound preview for one inactive conversation. See [Workspace archive format](../specs/workspace-archive-format.md) for the contract.
+The portable archive format has its own versioned contract. Export contains sanitized workspace records and exact attachment bytes, replaces Project roots with counts, preserves optional Project and Channel emoji, and omits native sessions and pending attachment cleanup. Archive version 4 adds the emoji fields. Versions 3 and 4 require schedules. Version 2 records each routing correction's chosen Project scope. Import accepts versions 1 through 4, defaults missing schedules in versions 1 and 2 to an empty list, and derives missing correction scopes from their target assignments. Import requires an empty workspace and explicit existing local roots, and validates all structure, mapping, attachment, and size constraints before writes. Retention requires an owner-triggered, revision-bound preview for one inactive conversation. See [Workspace archive format](../specs/workspace-archive-format.md) for the contract.
 
 ## Routing inference
 

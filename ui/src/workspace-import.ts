@@ -31,6 +31,7 @@ export function parseWorkspaceImport(
 			!("version" in value) ||
 			(value.version !== 1 &&
 				value.version !== 2 &&
+				value.version !== 3 &&
 				value.version !== COMMONSPACE_EXPORT_VERSION) ||
 			!("workspace" in value) ||
 			!isObject(value.workspace) ||

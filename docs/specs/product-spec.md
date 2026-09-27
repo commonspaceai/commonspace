@@ -153,7 +153,7 @@ Refresh does not run a model turn, change native configuration, or persist inven
 2. The workspace starts without silently importing every installed Agent.
 3. When the user chooses **Add Agent**, Commonspace scans only for supported ACP harnesses.
 4. The user explicitly selects the harness identity to add.
-5. Commonspace may assign a local display name, emoji/avatar, and accent color without renaming or altering the harness identity or configuration.
+5. Commonspace may assign a local display name, emoji/avatar, and accent color without renaming or altering the harness identity or configuration. The emoji picker opens on all base emoji through Unicode Emoji 17 and supports search, categories, recent choices, and skin tones.
 6. The Agent becomes available for DMs, Channel membership, mentions, and routing.
 7. The user selects one added Agent as the workspace inference Agent.
 8. The workspace is ready only after both requirements are satisfied: at least one Agent is added and an added Agent is selected for inference. The same Agent may satisfy both.
@@ -165,6 +165,8 @@ Refresh does not run a model turn, change native configuration, or persist inven
 3. Commonspace canonicalizes and validates every folder locally.
 4. Creating a Project does not create a Channel, task, or Project-specific Agent copy.
 5. The Project is available as a visible reference in any Channel, Thread, or DM.
+6. The user may choose or clear a Project emoji at creation or in Project settings. It changes the Project's display icon only.
+7. The user may rename a Project in Project settings or from its collection menu; its folders and ID-based conversation references stay attached.
 
 ### 5.3 Unaddressed Channel message
 
@@ -290,12 +292,13 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | PRJ-06 | Current | Let Thread references evolve prospectively. | A reply can supply `@@project` context for that turn and future defaults without a separate Project picker or rewriting earlier deliveries. |
 | PRJ-07 | Current | Keep projectless conversation genuinely projectless. | An Agent in a no-Project turn receives no Project filesystem roots and starts in a neutral configured working directory. |
 | PRJ-08 | Later | Add non-folder Project resource kinds. | New resource kinds extend the Project resource contract without turning Projects into tasks. |
+| PRJ-09 | Current | Allow Project names to change from settings and collection menus. | Renaming preserves the Project's folders and ID-based references; names remain unique. |
 
 ### 6.4 Channels, DMs, messages, and Threads
 
 | ID | Target | Requirement | Acceptance condition |
 | --- | --- | --- | --- |
-| CON-01 | Current | Allow universal/projectless Channels with explicit Agent rosters. | Channel creation does not require a Project or Agent. |
+| CON-01 | Current | Allow universal/projectless Channels with explicit Agent rosters and an optional display emoji. | Channel creation does not require a Project or Agent. The user can choose or clear its emoji during creation or in Channel settings without changing membership or context. |
 | CON-02 | Current | Persist every accepted message before inference or execution. | A routing or harness failure cannot erase the human's request. |
 | CON-03 | Current | Create one Thread from every Channel root message. | All participant deliveries, replies, handoffs, and activity remain navigable from that root. |
 | CON-04 | Current | Map one native session per participating Agent per Thread. | The same Agent resumes the same Thread session and uses a different session in another Thread. |
@@ -307,6 +310,7 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | CON-10 | Current | Preserve queued follow-ups while a native session is busy. | The user can inspect, reorder, remove, steer where supported, or stop-and-send queued input. A bounded tray shows delivery status and expandable message previews; compact icon actions have accessible names and tooltips in both DMs and Threads. Queue changes preserve keyboard focus, returning to the composer after the final removal. Unsupported delivery controls are absent. |
 | CON-11 | Current | Preserve each runtime's native model and reasoning configuration. | Commonspace does not persist or send workspace or Channel model/reasoning overrides. Reported model and reasoning metadata is reflective and read-only. |
 | CON-12 | Current | Schedule a message to a Channel once or with a five-field cron expression and time zone. | Scheduled appears beside Inbox and Threads. The user can create, edit, pause, resume, and delete schedules. Edits with unchanged timing retain a pending occurrence, including one overdue after failed acceptance. Each due message is durably accepted as a new Channel Thread before routing; a failure keeps the accepted request visible. A completed one-time schedule stays visible until deleted. While Commonspace is closed, missed occurrences coalesce into one send when it reopens. |
+| CON-13 | Current | Allow Channel names to change from settings and collection menus. | Renaming keeps the Channel ID, roster, messages, and Threads attached; normalized names remain unique. |
 
 ### 6.5 Commonspace inference, routing, and correction
 

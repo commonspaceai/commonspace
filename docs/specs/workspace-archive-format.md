@@ -4,14 +4,14 @@ A Commonspace workspace archive is a self-contained JSON export of conversation 
 
 This is the developer reference for archive validation. For export, import, and cleanup steps, see [Operations](../guides/operations.md#export-import-and-retention).
 
-## Version 3 envelope
+## Version 4 envelope
 
 The following example shows the envelope and workspace field names. Empty settings objects abbreviate the full contracts; use an application-generated export for a complete importable document.
 
 ```json
 {
   "format": "commonspace-workspace",
-  "version": 3,
+  "version": 4,
   "exportedAt": "2026-08-31T00:00:00.000Z",
   "workspace": {
     "inboxReadAt": null,
@@ -35,15 +35,19 @@ The following example shows the envelope and workspace field names. Empty settin
 }
 ```
 
-`format` and `version` identify the archive contract. Archive version 3 is independent of the internal persisted-state version and requires schedules. Version 2 introduced the explicitly chosen Project scope on each routing correction. Versions 1 and 2 remain importable; a version-1 correction without this field inherits its target assignment's saved Project scope. `exportedAt` and other timestamps use ISO 8601. IDs are opaque strings, and records refer to each other by those IDs. Detailed workspace shapes are defined in [`packages/shared/src/contracts.ts`](../../packages/shared/src/contracts.ts).
+`format` and `version` identify the archive contract. Archive version 4 is independent of internal persisted-state version 36. It adds optional Project and Channel emoji. Version 3 added required schedules; version 2 added the explicitly chosen Project scope on each routing correction. Versions 1, 2, 3, and 4 are importable. A version-1 correction without the scope field inherits its target assignment's saved Project scope. `exportedAt` and other timestamps use ISO 8601. IDs are opaque strings, and records refer to each other by those IDs. Detailed workspace shapes are defined in [`packages/shared/src/contracts.ts`](../../packages/shared/src/contracts.ts).
 
 ### Projects
 
-Each Project contains `id`, `name`, `rootCount`, and `createdAt`. Absolute roots are omitted. Import requires exactly `rootCount` existing local directories for each Project, supplied in an explicit mapping outside the archive.
+Each Project contains `id`, `name`, `rootCount`, and `createdAt`, with an optional user-selected `emoji`. Absolute roots are omitted. Import requires exactly `rootCount` existing local directories for each Project, supplied in an explicit mapping outside the archive.
+
+### Channels
+
+Each Channel may contain a user-selected `emoji`. The field is optional and travels with the Channel record.
 
 ### Schedules
 
-Each schedule contains its Channel ID, title, message text, paused state, and either a one-time ISO timestamp or a five-field cron expression with an IANA time zone. It also stores the next and last run timestamps. Version-1 and version-2 archives may omit `schedules`; import treats that as an empty list. Version 3 requires `schedules`. Import rejects invalid schedules, including references to missing Channels.
+Each schedule contains its Channel ID, title, message text, paused state, and either a one-time ISO timestamp or a five-field cron expression with an IANA time zone. It also stores the next and last run timestamps. Version-1 and version-2 archives may omit `schedules`; import treats that as an empty list. Versions 3 and 4 require `schedules`. Import rejects invalid schedules, including references to missing Channels.
 
 ### Attachments
 
@@ -55,8 +59,8 @@ All limits below measure UTF-8 JSON size:
 
 | Value | Maximum | Purpose |
 | --- | --- | --- |
-| Generated version-3 archive | 48 MiB | Keeps supported exports within the HTTP restoration workflow. |
-| Imported version-1, version-2, or version-3 archive value | 64 MiB | Accepts earlier exports as well as current ones. |
+| Generated version-4 archive | 48 MiB | Keeps supported exports within the HTTP restoration workflow. |
+| Imported version-1, version-2, version-3, or version-4 archive value | 64 MiB | Accepts earlier exports as well as current ones. |
 | Explicit Project mappings | 8 MiB | Maps archived Projects to local directories. |
 | Complete HTTP import request | 80 MiB | Includes the archive, mappings, and JSON framing. This does not increase the archive limit. |
 

@@ -341,14 +341,18 @@ Replace `YYYYMMDD` with your backup date, and adjust the source if using `COMMON
 
 ### Automatic state recovery
 
-On startup, the host migrates persisted workspaces into the format supported by the running release. Migration preserves conversations, native-session mappings, and routing history. Older corrections inherit their target assignment's Project scope, and workspaces without schedule data load with no scheduled messages.
+On startup, the host migrates persisted workspaces to state version 36. Migration preserves conversations, native-session mappings, and routing history. Older corrections inherit their target assignment's Project scope. Versions before 35 without schedule data load with no scheduled messages; versions 35 and 36 normally require canonical schedules.
+
+A transitional version-35 build could write `state.json` and `state.backup.json` without `schedules`. Automatic recovery accepts the pair when both files have the work-in-progress shape and each contains a positive, canonical Project or Channel emoji marker. It also accepts one such marked file when the other file is absent. It adds empty schedules during migration while preserving conversation and native-session relationships. A primary missing schedules with a strict backup, an invalid strict primary with a work-in-progress backup, or a pair without the emoji evidence is ambiguous. Startup stops without moving, replacing, or rewriting either raw file. A valid primary can load with an older work-in-progress backup after migration. Keep a private full backup and reconcile ambiguous pairs and any schedule history manually before restarting.
 
 Each write retains the previous valid primary as `state.backup.json`. On startup:
 
 | State files | Result |
 | --- | --- |
+| Both files are the evidenced version-35 work-in-progress pair, or only one marked file exists | Migrate with empty schedules. |
+| A version-35 primary without schedules that is not part of the evidenced pair, or an invalid strict primary with a work-in-progress backup | Stop, preserving raw `state.json` and `state.backup.json` for private reconciliation. |
 | Primary is valid | Load the primary. |
-| Primary is invalid; backup is valid | Preserve the primary as `state.corrupt.json` and recover the backup. |
+| Primary is invalid for another reason; backup is valid | Preserve the primary as `state.corrupt.json` and recover the backup. |
 | Both are invalid | Stop without replacing either file. |
 
 ### Downgrade an application release

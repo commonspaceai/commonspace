@@ -1472,6 +1472,10 @@ export function CommonspaceConversation({
 				: state?.channels.find((channel) => channel.id === activeChannelId),
 		[activeChannelId, state?.channels],
 	);
+	const activeAgent =
+		activeConversation?.kind === "dm"
+			? bootstrap?.agents.find((agent) => agent.id === activeConversation.id)
+			: undefined;
 	const slashSuggestions =
 		snapshot.activeConversation === null ||
 		pendingImages.length > 0 ||
@@ -2648,7 +2652,19 @@ export function CommonspaceConversation({
 				title={heading.title}
 				subtitle={heading.subtitle}
 				mark={
-					snapshot.activeConversation === null ? "✦" : isChannel ? "#" : "@"
+					snapshot.activeConversation === null ? (
+						"✦"
+					) : isChannel ? (
+						activeChannel?.emoji ? (
+							<span className="emoji-glyph">{activeChannel.emoji}</span>
+						) : (
+							"#"
+						)
+					) : activeAgent?.avatarEmoji ? (
+						<span className="emoji-glyph">{activeAgent.avatarEmoji}</span>
+					) : (
+						"@"
+					)
 				}
 				actions={
 					<div className="flex items-center gap-1">

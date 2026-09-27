@@ -2,8 +2,8 @@ import type { AgentAdapterKind } from "./agent-adapters.js";
 
 export type { AgentAdapterKind } from "./agent-adapters.js";
 
-export const COMMONSPACE_STATE_VERSION = 35 as const;
-export const COMMONSPACE_EXPORT_VERSION = 3 as const;
+export const COMMONSPACE_STATE_VERSION = 36 as const;
+export const COMMONSPACE_EXPORT_VERSION = 4 as const;
 
 export interface CommonspaceDefaults {
 	maxAgentsPerTurn: number;
@@ -102,6 +102,7 @@ export interface CommonspaceNotificationVerification {
 export interface CommonspacePortableProject {
 	id: string;
 	name: string;
+	emoji?: string;
 	rootCount: number;
 	createdAt: string;
 }
@@ -231,6 +232,7 @@ export interface CommonspaceAgentDefinition {
 export interface CommonspaceProject {
 	id: string;
 	name: string;
+	emoji?: string;
 	paths: string[];
 	createdAt: string;
 }
@@ -388,6 +390,7 @@ export type UpdateThreadContextRequest = UpdateChannelContextRequest;
 export interface CommonspaceChannel {
 	id: string;
 	name: string;
+	emoji?: string;
 	agentIds: string[];
 	instructions: string;
 	memory: CommonspaceChannelMemory;
@@ -668,11 +671,29 @@ export type CommonspaceMutation =
 			action: "set-notifications";
 			notifications: CommonspaceNotificationSettings;
 	  }
-	| { action: "create-project"; name: string; paths: string[] }
+	| {
+			action: "create-project";
+			name: string;
+			paths: string[];
+			emoji?: string | undefined;
+	  }
+	| { action: "set-project-emoji"; projectId: string; emoji: string }
+	| { action: "rename-project"; projectId: string; name: string }
 	| { action: "add-project-path"; projectId: string; path: string }
 	| { action: "remove-project"; projectId: string }
-	| { action: "create-channel"; name: string; agentIds: string[] }
-	| { action: "set-channel-agents"; channelId: string; agentIds: string[] }
+	| {
+			action: "create-channel";
+			name: string;
+			agentIds: string[];
+			emoji?: string | undefined;
+	  }
+	| {
+			action: "set-channel-agents";
+			channelId: string;
+			agentIds: string[];
+			name?: string | undefined;
+			emoji?: string | undefined;
+	  }
 	| { action: "set-channel-context"; channelId: string; instructions: string }
 	| {
 			action: "set-channel-memory";
@@ -712,6 +733,7 @@ export type CommonspaceMutation =
 	| { action: "remove-agent"; agentId: string }
 	| { action: "reset-dm"; agentId: string }
 	| { action: "remove-channel"; channelId: string }
+	| { action: "rename-channel"; channelId: string; name: string }
 	| {
 			action: "create-schedule";
 			title: string;

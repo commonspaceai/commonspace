@@ -1398,10 +1398,7 @@ function loadAgentFields(agent: JsonObject): LoadedAgentFields | undefined {
 	const displayName = agent.displayName.normalize("NFKC").trim().slice(0, 80);
 	const model =
 		typeof agent.model === "string" ? agent.model.trim().slice(0, 200) : null;
-	const avatarEmoji =
-		typeof agent.avatarEmoji === "string"
-			? agent.avatarEmoji.normalize("NFKC").trim().slice(0, 16)
-			: undefined;
+	const avatarEmoji = loadedEmoji(agent.avatarEmoji);
 	const accentColor =
 		typeof agent.accentColor === "string" &&
 		/^#[0-9a-fA-F]{6}$/u.test(agent.accentColor.trim())
@@ -1415,7 +1412,7 @@ function loadAgentFields(agent: JsonObject): LoadedAgentFields | undefined {
 		model: model === "" ? null : model,
 		createdAt: agent.createdAt.slice(0, 100),
 		fullAccess: agent.fullAccess === true,
-		avatarEmoji: avatarEmoji === "" ? undefined : avatarEmoji,
+		avatarEmoji,
 		accentColor,
 	};
 	return isValidSavedCodexIdentity(fields) ? fields : undefined;
@@ -1625,6 +1622,12 @@ function loadedString(
 	defaultValue = "",
 ): string {
 	return typeof value === "string" ? value.slice(0, maximum) : defaultValue;
+}
+
+function loadedEmoji(value: JsonValue | undefined): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const emoji = value.trim();
+	return emoji !== "" && emoji.length <= 32 ? emoji : undefined;
 }
 
 function loadedIsoTimestamp(value: JsonValue | undefined): string | null {
@@ -2042,12 +2045,15 @@ function sanitizeProjects(
 		];
 		if (name === "" || paths.length === 0) continue;
 		ids.add(id);
-		projects.push({
+		const sanitizedProject: CommonspaceState["projects"][number] = {
 			id,
 			name,
 			paths,
 			createdAt: loadedString(project.createdAt, 100),
-		});
+		};
+		const emoji = loadedEmoji(project.emoji);
+		if (emoji !== undefined) sanitizedProject.emoji = emoji;
+		projects.push(sanitizedProject);
 	}
 	return projects;
 }
@@ -2068,7 +2074,7 @@ function sanitizeChannels(
 			.replace(/^#+/, "");
 		if (name === "") continue;
 		ids.add(id);
-		channels.push({
+		const sanitizedChannel: CommonspaceState["channels"][number] = {
 			id,
 			name,
 			agentIds: loadedStringArray(channel.agentIds, 64, 200),
@@ -2076,7 +2082,10 @@ function sanitizeChannels(
 			memory: sanitizeChannelMemory(channel.memory),
 			routingMemory: sanitizeRoutingMemory(channel.routingMemory),
 			createdAt: loadedString(channel.createdAt, 100),
-		});
+		};
+		const emoji = loadedEmoji(channel.emoji);
+		if (emoji !== undefined) sanitizedChannel.emoji = emoji;
+		channels.push(sanitizedChannel);
 	}
 	return channels;
 }
@@ -3508,7 +3517,7 @@ function collectArchiveAttachments(
 }
 
 interface DecodedWorkspaceArchive {
-	readonly version: 1 | 2 | typeof COMMONSPACE_EXPORT_VERSION;
+	readonly version: 1 | 2 | 3 | typeof COMMONSPACE_EXPORT_VERSION;
 	readonly workspace: JsonObject;
 	readonly importedWorkspace: JsonObject;
 	readonly projects: JsonValue[];
@@ -3550,6 +3559,7 @@ function decodeWorkspaceArchive(
 		archive.format !== "commonspace-workspace" ||
 		(archive.version !== 1 &&
 			archive.version !== 2 &&
+			archive.version !== 3 &&
 			archive.version !== COMMONSPACE_EXPORT_VERSION)
 	)
 		throw new Error("unsupported Commonspace workspace archive");
@@ -3599,12 +3609,15 @@ async function resolveImportedProjects(
 		if (new Set(paths).size !== paths.length)
 			throw new Error(`Project ${name} mappings must be unique`);
 		mappedIds.delete(id);
-		projects.push({
+		const importedProject: CommonspaceState["projects"][number] = {
 			id,
 			name,
 			paths,
 			createdAt: loadedString(project.createdAt, 100),
-		});
+		};
+		const emoji = loadedEmoji(project.emoji);
+		if (emoji !== undefined) importedProject.emoji = emoji;
+		projects.push(importedProject);
 	}
 	if (mappedIds.size > 0)
 		throw new Error("Project mappings contain unknown archive Projects");
@@ -3661,6 +3674,20 @@ function withLegacyArchiveCorrectionScopes(
 	return comparable;
 }
 
+function portableProject(
+	project: CommonspaceState["projects"][number],
+): CommonspaceWorkspaceArchive["workspace"]["projects"][number] {
+	const portable: CommonspaceWorkspaceArchive["workspace"]["projects"][number] =
+		{
+			id: project.id,
+			name: project.name,
+			rootCount: project.paths.length,
+			createdAt: project.createdAt,
+		};
+	if (project.emoji !== undefined) portable.emoji = project.emoji;
+	return portable;
+}
+
 function sanitizeImportedWorkspace(
 	decoded: DecodedWorkspaceArchive,
 	projects: CommonspaceState["projects"],
@@ -3694,12 +3721,7 @@ function sanitizeImportedWorkspace(
 		notifications: imported.notifications,
 		defaults: imported.defaults,
 		agents: imported.agents,
-		projects: imported.projects.map((project) => ({
-			id: project.id,
-			name: project.name,
-			rootCount: project.paths.length,
-			createdAt: project.createdAt,
-		})),
+		projects: imported.projects.map(portableProject),
 		channels: imported.channels,
 		threads: imported.threads,
 		pins: imported.pins,
@@ -4205,6 +4227,49 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		return sanitizeLoadedState(JSON.parse(await readFile(path, "utf8")));
 	}
 
+	private async inspectVersion35WithoutSchedules(
+		path: string,
+	): Promise<{ state: CommonspaceState | null } | null> {
+		let value: JsonValue;
+		try {
+			value = JSON.parse(await readFile(path, "utf8"));
+		} catch {
+			return null;
+		}
+		const record = plainRecord(value);
+		if (
+			record === null ||
+			record.version !== 35 ||
+			Object.hasOwn(record, "schedules")
+		)
+			return null;
+		try {
+			const state = sanitizeLoadedState({ ...record, schedules: [] });
+			const hasMarkedEntity = (
+				candidates: JsonValue | undefined,
+				entities: CommonspaceState["projects"] | CommonspaceState["channels"],
+			): boolean =>
+				Array.isArray(candidates) &&
+				candidates.some((candidate) => {
+					const entity = plainRecord(candidate);
+					return (
+						entity !== null &&
+						typeof entity.emoji === "string" &&
+						loadedEmoji(entity.emoji) === entity.emoji &&
+						entities.some(
+							(saved) => saved.id === entity.id && saved.emoji === entity.emoji,
+						)
+					);
+				});
+			const marked =
+				hasMarkedEntity(record.projects, state.projects) ||
+				hasMarkedEntity(record.channels, state.channels);
+			return { state: marked ? state : null };
+		} catch {
+			return { state: null };
+		}
+	}
+
 	private async hasCorruptState(): Promise<boolean> {
 		try {
 			await readFile(this.stateCorruptPath, "utf8");
@@ -4220,8 +4285,42 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			this.state = await this.readPersistedState(this.statePath);
 		} catch (primaryError) {
 			const primaryMissing = errorCode(primaryError) === "ENOENT";
+			const primaryLegacy = primaryMissing
+				? null
+				: await this.inspectVersion35WithoutSchedules(this.statePath);
+			let backup: CommonspaceState | undefined;
+			let recoveryError: unknown;
 			try {
-				this.state = await this.readPersistedState(this.stateBackupPath);
+				backup = await this.readPersistedState(this.stateBackupPath);
+			} catch (error) {
+				recoveryError = error;
+			}
+			const backupLegacy =
+				backup === undefined
+					? await this.inspectVersion35WithoutSchedules(this.stateBackupPath)
+					: null;
+			if (primaryLegacy !== null || backupLegacy !== null) {
+				const migrated =
+					primaryLegacy?.state &&
+					(backupLegacy?.state || errorCode(recoveryError) === "ENOENT")
+						? primaryLegacy.state
+						: primaryMissing && backupLegacy?.state
+							? backupLegacy.state
+							: null;
+				if (migrated !== null) {
+					this.state = migrated;
+					this.environment.logger?.warn(
+						"Commonspace migrated an emoji-version-35 workspace with no schedules",
+					);
+					return;
+				}
+				throw new Error(
+					"Commonspace version-35 state without schedules requires manual recovery; state.json and state.backup.json were not changed",
+					{ cause: primaryError },
+				);
+			}
+			if (backup !== undefined) {
+				this.state = backup;
 				if (!primaryMissing) {
 					await rm(this.stateCorruptPath, { force: true });
 					await rename(this.statePath, this.stateCorruptPath);
@@ -4229,20 +4328,20 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				this.environment.logger?.warn(
 					"Commonspace recovered unavailable state.json from state.backup.json",
 				);
-			} catch (recoveryError) {
+			} else {
 				if (!primaryMissing || errorCode(recoveryError) !== "ENOENT") {
 					this.environment.logger?.warn(primaryError);
 					this.environment.logger?.warn(recoveryError);
 					throw new AggregateError(
 						[primaryError, recoveryError],
 						"Commonspace state and rollback backup are both invalid",
-						{ cause: recoveryError },
+						{ cause: primaryError },
 					);
 				}
 				if (await this.hasCorruptState())
 					throw new Error(
 						"Commonspace saved state is corrupt and no rollback backup is available",
-						{ cause: recoveryError },
+						{ cause: primaryError },
 					);
 				this.state = createInitialState();
 			}
@@ -5083,12 +5182,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					portableAgent.accentColor = agent.accentColor;
 				return portableAgent;
 			}),
-			projects: state.projects.map((project) => ({
-				id: project.id,
-				name: project.name,
-				rootCount: project.paths.length,
-				createdAt: project.createdAt,
-			})),
+			projects: state.projects.map(portableProject),
 			channels: state.channels,
 			threads: state.threads,
 			schedules: state.schedules,

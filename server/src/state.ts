@@ -132,9 +132,10 @@ function normalizedName(value: string, label: string): string {
 	return name;
 }
 
-function normalizedAvatarEmoji(value: string | undefined): string | undefined {
+function normalizedEmoji(value: string | undefined): string | undefined {
 	if (value === undefined) return undefined;
-	const emoji = value.normalize("NFKC").trim().slice(0, 16);
+	const emoji = value.trim();
+	if (emoji.length > 32) throw new Error("emoji is too long");
 	return emoji === "" ? undefined : emoji;
 }
 
@@ -158,6 +159,21 @@ function normalizedChannel(value: string): string {
 		.slice(0, 48)
 		.replace(/-$/g, "");
 	if (name === "") throw new Error("channel name is required");
+	return name;
+}
+
+function uniqueChannelName(
+	state: CommonspaceState,
+	value: string,
+	excludedId?: string,
+): string {
+	const name = normalizedChannel(value);
+	if (
+		state.channels.some(
+			(channel) => channel.id !== excludedId && channel.name === name,
+		)
+	)
+		throw new Error(`channel #${name} already exists`);
 	return name;
 }
 
@@ -495,25 +511,23 @@ function createChannel(
 	mutation: MutationOf<"create-channel">,
 	dependencies: StateDependencies,
 ): CommonspaceState {
-	const name = normalizedChannel(mutation.name);
-	if (state.channels.some((channel) => channel.name === name))
-		throw new Error(`channel #${name} already exists`);
+	const name = uniqueChannelName(state, mutation.name);
 	const agentIds = channelAgentIds(state, mutation.agentIds);
+	const emoji = normalizedEmoji(mutation.emoji);
+	const channel: CommonspaceState["channels"][number] = {
+		id: dependencies.ids(),
+		name,
+		agentIds,
+		instructions: "",
+		memory: emptyChannelMemory(),
+		routingMemory: emptyRoutingMemory(),
+		createdAt: dependencies.now(),
+	};
+	if (emoji !== undefined) channel.emoji = emoji;
 	return {
 		...state,
 		revision: nextRevision(state),
-		channels: [
-			...state.channels,
-			{
-				id: dependencies.ids(),
-				name,
-				agentIds,
-				instructions: "",
-				memory: emptyChannelMemory(),
-				routingMemory: emptyRoutingMemory(),
-				createdAt: dependencies.now(),
-			},
-		],
+		channels: [...state.channels, channel],
 	};
 }
 
@@ -524,10 +538,37 @@ function setChannelAgents(
 	if (!state.channels.some((channel) => channel.id === mutation.channelId))
 		throw new Error("unknown channel");
 	const agentIds = channelAgentIds(state, mutation.agentIds);
+	const name =
+		mutation.name === undefined
+			? undefined
+			: uniqueChannelName(state, mutation.name, mutation.channelId);
+	const emoji = normalizedEmoji(mutation.emoji);
 	const channels = state.channels.map((channel) => {
 		if (channel.id !== mutation.channelId) return channel;
-		return { ...channel, agentIds };
+		const updated: CommonspaceState["channels"][number] = {
+			...channel,
+			agentIds,
+		};
+		if (name !== undefined) updated.name = name;
+		if (mutation.emoji !== undefined) {
+			delete updated.emoji;
+			if (emoji !== undefined) updated.emoji = emoji;
+		}
+		return updated;
 	});
+	return { ...state, revision: nextRevision(state), channels };
+}
+
+function renameChannel(
+	state: CommonspaceState,
+	mutation: MutationOf<"rename-channel">,
+): CommonspaceState {
+	if (!state.channels.some((channel) => channel.id === mutation.channelId))
+		throw new Error("unknown channel");
+	const name = uniqueChannelName(state, mutation.name, mutation.channelId);
+	const channels = state.channels.map((channel) =>
+		channel.id === mutation.channelId ? { ...channel, name } : channel,
+	);
 	return { ...state, revision: nextRevision(state), channels };
 }
 
@@ -690,7 +731,7 @@ function updateAgentProfile(
 		)
 	)
 		throw new Error("agent workspace name already exists");
-	const avatarEmoji = normalizedAvatarEmoji(mutation.avatarEmoji);
+	const avatarEmoji = normalizedEmoji(mutation.avatarEmoji);
 	const accentColor = normalizedAccentColor(mutation.accentColor);
 	let matched = false;
 	const agents = state.agents.map((agent) => {
@@ -704,7 +745,10 @@ function updateAgentProfile(
 			fullAccess: mutation.fullAccess ?? agent.fullAccess === true,
 			createdAt: agent.createdAt,
 		};
-		if (avatarEmoji !== undefined) updated.avatarEmoji = avatarEmoji;
+		if (mutation.avatarEmoji === undefined) {
+			if (agent.avatarEmoji !== undefined)
+				updated.avatarEmoji = agent.avatarEmoji;
+		} else if (avatarEmoji !== undefined) updated.avatarEmoji = avatarEmoji;
 		if (accentColor !== undefined) updated.accentColor = accentColor;
 		if (agent.nativeProfile !== undefined)
 			updated.nativeProfile = agent.nativeProfile;
@@ -1008,6 +1052,8 @@ export function applyMutation(
 		case "set-notifications":
 			return setNotifications(state, mutation);
 		case "create-project":
+		case "set-project-emoji":
+		case "rename-project":
 		case "add-project-path":
 		case "remove-project":
 			return applyProjectMutation(state, mutation, dependencies);
@@ -1015,6 +1061,8 @@ export function applyMutation(
 			return createChannel(state, mutation, dependencies);
 		case "set-channel-agents":
 			return setChannelAgents(state, mutation);
+		case "rename-channel":
+			return renameChannel(state, mutation);
 		case "set-channel-context":
 			return setChannelContext(state, mutation);
 		case "set-channel-memory":

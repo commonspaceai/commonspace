@@ -28,6 +28,7 @@ const meta = {
 		onOpen: fn(),
 		onTogglePinned: fn(),
 		onSettings: fn(),
+		onRename: fn(),
 		onMarkUnread: fn(),
 		onCopy: fn(),
 		copyLabel: "Copy channel name",
@@ -62,11 +63,58 @@ export const OpenMenu: Story = {
 		await expect(labels).toEqual([
 			"Open channel",
 			"Mark unread",
+			"Rename channel",
 			"Pin to sidebar",
 			"Copy channel name",
 			"Channel settings",
 			"Remove channel",
 		]);
+	},
+};
+
+export const ProjectOpenMenu: Story = {
+	render: (args) => (
+		<div className="[&_[data-slot=dropdown-menu-trigger]]:opacity-100">
+			<CollectionActionMenu {...args} />
+		</div>
+	),
+	args: {
+		defaultOpen: true,
+		kind: "project",
+		label: "Commonspace",
+		meta: "2 folders",
+		copyLabel: "Copy project name",
+		onAddFolder: fn(),
+	},
+	play: async ({ args }) => {
+		const page = within(document.body);
+		const menu = page.getByRole("menu");
+		const labels = within(menu)
+			.getAllByRole("menuitem")
+			.map(
+				(item) =>
+					item.querySelector("strong")?.textContent ?? item.textContent?.trim(),
+			);
+		await expect(labels).toEqual([
+			"Open project",
+			"Rename project",
+			"Add local folder",
+			"Pin to sidebar",
+			"Copy project name",
+			"Project settings",
+			"Remove project",
+		]);
+		await userEvent.click(
+			within(menu).getByRole("menuitem", { name: /Rename project/u }),
+		);
+		const dialog = within(
+			await page.findByRole("dialog", { name: "Rename project" }),
+		);
+		const nameInput = dialog.getByRole("textbox", { name: "Project name" });
+		await userEvent.clear(nameInput);
+		await userEvent.type(nameInput, "Commonspace Studio");
+		await userEvent.click(dialog.getByRole("button", { name: "Save" }));
+		await expect(args.onRename).toHaveBeenCalledWith("Commonspace Studio");
 	},
 };
 

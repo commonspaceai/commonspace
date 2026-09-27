@@ -221,6 +221,40 @@ async function prepareChannelSorting(canvasElement: HTMLElement) {
 
 export const Expanded: Story = {};
 
+const renameProjectMutation = fn(async () => undefined);
+export const ProjectRenameContextMenu: Story = {
+	args: {
+		store: createStoryStore(storyBootstrap, {
+			mutate: renameProjectMutation,
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		renameProjectMutation.mockReset();
+		const canvas = within(canvasElement);
+		const page = within(canvasElement.ownerDocument.body);
+		fireEvent.contextMenu(
+			canvas.getByRole("button", { name: "Select project Commonspace" }),
+		);
+		const menu = await page.findByRole("menu");
+		await userEvent.click(
+			within(menu).getByRole("menuitem", { name: /Rename project/u }),
+		);
+		const dialog = await page.findByRole("dialog", { name: "Rename project" });
+		const dialogContent = within(dialog);
+		const nameInput = dialogContent.getByRole("textbox", {
+			name: "Project name",
+		});
+		await userEvent.clear(nameInput);
+		await userEvent.type(nameInput, "Commonspace Studio");
+		await userEvent.click(dialogContent.getByRole("button", { name: "Save" }));
+		await expect(renameProjectMutation).toHaveBeenCalledWith({
+			action: "rename-project",
+			projectId: primaryProject.id,
+			name: "Commonspace Studio",
+		});
+	},
+};
+
 export const AgentModelsAccessible: Story = {
 	args: {
 		...meta.args,

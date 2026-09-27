@@ -2,6 +2,7 @@ import type {
 	CommonspaceAgentProfile,
 	CommonspaceBootstrap,
 	CommonspaceMessage,
+	CommonspaceMutation,
 	CommonspacePin,
 	HarnessCapabilityGroup,
 	HarnessCapabilityInventory,
@@ -9,7 +10,6 @@ import type {
 } from "@commonspace/shared";
 import { AGENT_ADAPTERS, McpAuthenticationStatus } from "@commonspace/shared";
 import {
-	ChevronDownIcon,
 	LoaderCircleIcon,
 	RefreshCwIcon,
 	SearchIcon,
@@ -29,6 +29,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { AgentAvatar } from "@/design-system/AgentAvatar";
 import { ConfirmActionDialog } from "@/design-system/ConfirmActionDialog";
+import { EmojiPicker } from "@/design-system/EmojiPicker";
 import { cn } from "@/lib/utils";
 import { ChannelContextBrief } from "./ChannelContextBrief.tsx";
 import {
@@ -66,119 +67,6 @@ function useSettingsDraftValue<Value extends string | boolean | string[]>(
 
 function runtimeLabel(agent: CommonspaceAgentProfile): string {
 	return AGENT_ADAPTERS[agent.adapter].label;
-}
-
-const AVATAR_EMOJIS = [
-	["🤖", "robot agent"],
-	["🧠", "brain thinking"],
-	["🧭", "compass direction"],
-	["🛠️", "tools builder"],
-	["⚙️", "gear systems"],
-	["✨", "sparkles"],
-	["🚀", "rocket launch"],
-	["⚡", "lightning fast"],
-	["🔥", "fire hot"],
-	["🌐", "globe web"],
-	["🔬", "microscope research"],
-	["🔎", "search inspect"],
-	["🎨", "palette design"],
-	["💻", "computer code"],
-	["🧩", "puzzle solve"],
-	["🛰️", "satellite infrastructure"],
-	["🦾", "robot arm"],
-	["🦉", "owl wisdom"],
-	["🐙", "octopus"],
-	["🦊", "fox"],
-	["🐝", "bee"],
-	["🌱", "seed growth"],
-	["💡", "lightbulb idea"],
-	["🛡️", "shield safety"],
-] as const;
-
-function AvatarEmojiPicker({
-	value,
-	onChange,
-}: {
-	value: string;
-	onChange: (value: string) => void;
-}) {
-	const [open, setOpen] = useState(false);
-	const [query, setQuery] = useState("");
-	const picker = useRef<HTMLDivElement>(null);
-	const visible = AVATAR_EMOJIS.filter(([, keywords]) =>
-		`${keywords}`
-			.toLocaleLowerCase()
-			.includes(query.trim().toLocaleLowerCase()),
-	);
-
-	useEffect(() => {
-		if (!open) return;
-		const close = (event: PointerEvent) => {
-			if (
-				!(event.target instanceof Node) ||
-				picker.current?.contains(event.target) !== true
-			)
-				setOpen(false);
-		};
-		document.addEventListener("pointerdown", close);
-		return () => {
-			document.removeEventListener("pointerdown", close);
-		};
-	}, [open]);
-
-	return (
-		<div ref={picker} className="relative">
-			<button
-				type="button"
-				className="flex min-h-9 w-full items-center justify-between rounded-sm border bg-background px-3 text-left text-xl hover:bg-muted"
-				aria-label="Choose avatar emoji"
-				aria-expanded={open}
-				onClick={() => {
-					setOpen((current) => !current);
-				}}
-			>
-				<span>{value || "🤖"}</span>
-				<ChevronDownIcon
-					className="size-4 text-muted-foreground"
-					aria-hidden="true"
-				/>
-			</button>
-			{open && (
-				<section
-					className="absolute top-[calc(100%+6px)] left-0 z-30 w-full min-w-[240px] rounded-md border bg-popover p-2 text-popover-foreground shadow-lg"
-					aria-label="Avatar emoji picker"
-				>
-					<input
-						type="search"
-						className="mb-2 min-h-10 w-full rounded-sm border bg-background px-2 text-sm"
-						aria-label="Search avatar emoji"
-						placeholder="Search emoji"
-						value={query}
-						onChange={(event) => {
-							setQuery(event.target.value);
-						}}
-					/>
-					<div className="grid max-h-44 grid-cols-6 gap-1 overflow-y-auto">
-						{visible.map(([emoji, keywords]) => (
-							<button
-								key={emoji}
-								type="button"
-								className="grid size-9 place-items-center rounded-sm border-0 text-lg hover:bg-muted aria-pressed:bg-primary/10"
-								aria-label={`Use ${keywords} avatar`}
-								aria-pressed={value === emoji}
-								onClick={() => {
-									onChange(emoji);
-									setOpen(false);
-								}}
-							>
-								{emoji}
-							</button>
-						))}
-					</div>
-				</section>
-			)}
-		</div>
-	);
 }
 
 interface ChannelSettingsEditorProps extends SettingsPaneProps {
@@ -544,21 +432,33 @@ function ChannelSettingsEditor({
 	onClose,
 	channel,
 }: ChannelSettingsEditorProps) {
+	const [name, setName] = useSettingsDraftValue(channel.name);
 	const [agentIds, setAgentIds] = useSettingsDraftValue(channel.agentIds);
+	const [emoji, setEmoji] = useSettingsDraftValue(channel.emoji ?? "");
 	const [saving, setSaving] = useState(false);
+	const [saveError, setSaveError] = useState<string | null>(null);
 	const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
 
 	const save = async (event: FormEvent) => {
 		event.preventDefault();
 		if (saving) return;
 		setSaving(true);
+		setSaveError(null);
 		try {
-			await store.mutate({
+			const mutation: Extract<
+				CommonspaceMutation,
+				{ action: "set-channel-agents" }
+			> = {
 				action: "set-channel-agents",
 				channelId: id,
 				agentIds,
-			});
+			};
+			if (name !== channel.name) mutation.name = name;
+			if (emoji !== (channel.emoji ?? "")) mutation.emoji = emoji;
+			await store.mutate(mutation);
 			onClose();
+		} catch (error) {
+			setSaveError(error instanceof Error ? error.message : String(error));
 		} finally {
 			setSaving(false);
 		}
@@ -572,7 +472,10 @@ function ChannelSettingsEditor({
 			<header className="flex min-h-[72px] items-center gap-3 border-b py-2.5 pr-3.5 pl-5">
 				<div className="min-w-0 flex-1">
 					<h2 className="truncate font-heading text-base font-semibold">
-						# {channel.name}
+						<span className={emoji ? "emoji-glyph" : undefined}>
+							{emoji || "#"}
+						</span>{" "}
+						{channel.name}
 					</h2>
 					<p className="mt-0.5 text-xs text-muted-foreground">
 						Manage who can participate in this shared room.
@@ -597,6 +500,34 @@ function ChannelSettingsEditor({
 					disabled={saving}
 					className="min-h-0 min-w-0 flex-1 overflow-y-auto border-0 p-6"
 				>
+					<label className="mb-6 grid gap-1.5 text-xs font-semibold">
+						<span>Channel name</span>
+						<input
+							autoComplete="off"
+							maxLength={48}
+							name="channel-name"
+							required
+							value={name}
+							onChange={(event) => {
+								setName(event.target.value);
+								setSaveError(null);
+							}}
+							className="min-h-10 w-full rounded-sm border bg-background px-3 text-sm font-normal"
+						/>
+					</label>
+					{saveError !== null && (
+						<p className="mb-5 text-xs text-destructive" role="alert">
+							{saveError}
+						</p>
+					)}
+					<div className="mb-6 grid gap-1.5 text-xs font-semibold">
+						<span>Channel emoji</span>
+						<EmojiPicker
+							value={emoji}
+							label="Choose channel emoji"
+							onChange={setEmoji}
+						/>
+					</div>
 					<ChannelMembers
 						agents={bootstrap.agents}
 						agentIds={agentIds}
@@ -1068,7 +999,8 @@ function AgentSettingsEditor({
 		displayName: displayName || agent.displayName,
 		accentColor,
 	};
-	if (avatarEmoji !== "") previewAgent.avatarEmoji = avatarEmoji;
+	if (avatarEmoji === "") delete previewAgent.avatarEmoji;
+	else previewAgent.avatarEmoji = avatarEmoji;
 
 	const save = async () => {
 		if (saving || displayName.trim() === "") return;
@@ -1166,7 +1098,8 @@ function AgentSettingsEditor({
 						<div className="grid grid-cols-2 gap-3">
 							<div className="grid gap-1.5 text-xs font-semibold">
 								<span>Avatar emoji</span>
-								<AvatarEmojiPicker
+								<EmojiPicker
+									label="Choose avatar emoji"
 									value={avatarEmoji}
 									onChange={(value) => {
 										setAvatarEmoji(value);

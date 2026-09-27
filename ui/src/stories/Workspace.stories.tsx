@@ -41,6 +41,84 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const Conversation: Story = {};
 
+export const ChannelEmojiCustomization: Story = {
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		await userEvent.click(
+			await page.findByRole("button", { name: "Open channel settings" }),
+		);
+		await userEvent.click(
+			page.getByRole("button", { name: "Choose channel emoji" }),
+		);
+		const picker = within(
+			await page.findByRole("dialog", { name: "Choose emoji" }),
+		);
+		await userEvent.type(
+			picker.getByRole("searchbox", { name: "Search emojis" }),
+			"distorted face",
+		);
+		await userEvent.click(
+			await picker.findByRole(
+				"button",
+				{ name: "distorted face" },
+				{ timeout: 10_000 },
+			),
+		);
+		await expect(
+			page.getByRole("button", { name: "Choose channel emoji" }),
+		).toHaveTextContent("🫪");
+		await userEvent.click(page.getByRole("button", { name: "Save changes" }));
+		await waitFor(() =>
+			expect(
+				page.getByRole("button", { name: /Open channel general/ }),
+			).toHaveTextContent("🫪"),
+		);
+		await userEvent.click(
+			page.getByRole("button", { name: "Open channel settings" }),
+		);
+		await expect(
+			page.getByRole("button", { name: "Choose channel emoji" }),
+		).toHaveTextContent("🫪");
+	},
+};
+
+export const ProjectEmojiCustomization: Story = {
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		await userEvent.click(
+			await page.findByRole("button", { name: "More actions for Commonspace" }),
+		);
+		await userEvent.click(
+			await page.findByRole("menuitem", { name: "Project settings" }),
+		);
+		await userEvent.click(
+			page.getByRole("button", { name: "Choose project emoji" }),
+		);
+		const picker = within(
+			await page.findByRole("dialog", { name: "Choose emoji" }),
+		);
+		await userEvent.type(
+			picker.getByRole("searchbox", { name: "Search emojis" }),
+			"rocket",
+		);
+		await userEvent.click(
+			await picker.findByRole(
+				"button",
+				{ name: /^rocket$/u },
+				{ timeout: 10_000 },
+			),
+		);
+		await waitFor(() =>
+			expect(
+				page.getByRole("button", { name: "Select project Commonspace" }),
+			).toHaveTextContent("🚀"),
+		);
+		await expect(
+			page.getByRole("button", { name: "Choose project emoji" }),
+		).toHaveTextContent("🚀");
+	},
+};
+
 export const AgentDiscoveryFailure = {
 	beforeEach: ({ msw }) => {
 		msw.use(

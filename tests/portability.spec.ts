@@ -276,7 +276,7 @@ describe("workspace portability", () => {
 		await source.initialize();
 		const archive = await source.exportWorkspace();
 		await source.close();
-		expect(archive.version).toBe(3);
+		expect(archive.version).toBe(4);
 		const legacyArchive = { ...archive, version: 1 };
 		const legacyCorrection = mustExist(
 			legacyArchive.workspace.messages[`channel:${channel.id}`]?.[0]?.routing
@@ -331,6 +331,12 @@ describe("workspace portability", () => {
 		await source.initialize();
 		await addTestHarness(source, "codex", "Review Bot");
 		await source.mutate({
+			action: "update-agent-profile",
+			agentId: "codex",
+			displayName: "Review Bot",
+			avatarEmoji: "Ⓜ️",
+		});
+		await source.mutate({
 			action: "set-defaults",
 			maxAgentsPerTurn: 6,
 			memoryThreads: 8,
@@ -339,6 +345,7 @@ describe("workspace portability", () => {
 			action: "create-channel",
 			name: "portable-room",
 			agentIds: ["codex"],
+			emoji: "™️",
 		});
 		await source.mutate({
 			action: "set-notifications",
@@ -357,6 +364,7 @@ describe("workspace portability", () => {
 					action: "create-project",
 					name: "Portable App",
 					paths: [projectRoot, sharedRoot],
+					emoji: "🈁",
 				})
 			).projects[0],
 		);
@@ -379,9 +387,15 @@ describe("workspace portability", () => {
 		const serialized = JSON.stringify(archive);
 		expect(archive).toMatchObject({
 			format: "commonspace-workspace",
-			version: 3,
+			version: 4,
 			workspace: {
-				projects: [{ id: project.id, name: "Portable App", rootCount: 2 }],
+				projects: [
+					{ id: project.id, name: "Portable App", emoji: "🈁", rootCount: 2 },
+				],
+				channels: [
+					expect.objectContaining({ name: "portable-room", emoji: "™️" }),
+				],
+				agents: [expect.objectContaining({ id: "codex", avatarEmoji: "Ⓜ️" })],
 			},
 			attachments: [
 				expect.objectContaining({ name: "opaque.bin", data: sharedRoot }),
@@ -392,6 +406,16 @@ describe("workspace portability", () => {
 		expect(serialized).not.toContain("agentSessions");
 		expect(serialized).not.toContain("dmSessions");
 		await source.close();
+		const reloaded = new CommonspaceHostService(
+			{},
+			{ root: join(root, "state") },
+			{ discoverAgents: discoverTestHarnesses },
+		);
+		await reloaded.initialize();
+		expect(reloaded.snapshot().agents[0]?.avatarEmoji).toBe("Ⓜ️");
+		expect(reloaded.snapshot().channels[0]?.emoji).toBe("™️");
+		expect(reloaded.snapshot().projects[0]?.emoji).toBe("🈁");
+		await reloaded.close();
 
 		const targetRoot = await mkdtemp(
 			join(tmpdir(), "commonspace-export-target-"),
@@ -420,6 +444,24 @@ describe("workspace portability", () => {
 		await expect(
 			importWorkspace.call(target, malformed, mappings),
 		).rejects.toThrow("workspace archive failed structural validation");
+		for (const location of ["project", "channel"] as const) {
+			const malformedEmoji = structuredClone(archive);
+			if (location === "project") {
+				const firstProject = malformedEmoji.workspace.projects[0];
+				if (firstProject === undefined)
+					throw new Error("missing archive Project");
+				firstProject.emoji = " 🈁 ";
+			} else {
+				const firstChannel = malformedEmoji.workspace.channels[0];
+				if (firstChannel === undefined)
+					throw new Error("missing archive Channel");
+				firstChannel.emoji = " ™️ ";
+			}
+			await expect(
+				importWorkspace.call(target, malformedEmoji, mappings),
+			).rejects.toThrow("workspace archive failed structural validation");
+			expect(target.snapshot().revision).toBe(0);
+		}
 		await importWorkspace.call(target, archive, mappings);
 
 		expect(importedNotificationCount).toBe(0);
@@ -429,11 +471,14 @@ describe("workspace portability", () => {
 		});
 		expect(target.snapshot().channels[0]).toMatchObject({
 			name: "portable-room",
+			emoji: "™️",
 			agentIds: ["codex"],
 		});
 		expect(target.snapshot().channels[0]).not.toHaveProperty("settings");
+		expect(target.snapshot().agents[0]?.avatarEmoji).toBe("Ⓜ️");
 		expect(target.snapshot().projects[0]).toMatchObject({
 			id: project.id,
+			emoji: "🈁",
 			paths: [await realpath(mappedProject), await realpath(targetRoot)],
 		});
 		expect(

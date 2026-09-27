@@ -86,6 +86,7 @@ export function AgentAvatar({
 			{...props}
 			className={cn(
 				"relative grid shrink-0 place-items-center rounded-md bg-muted font-sans font-medium text-foreground",
+				agent?.avatarEmoji && "emoji-glyph",
 				sizeClasses[size],
 				className,
 			)}

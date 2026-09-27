@@ -86,36 +86,52 @@ export const MixedProjectConversations: Story = {
 };
 
 export const ProjectSettings: Story = {
-	args: { settingsRequest: 1 },
-	play: async ({ canvasElement }) => {
+	args: {
+		settingsRequest: 1,
+		store: createStoryStore(storyBootstrap, { mutate: fn(async () => {}) }),
+	},
+	play: async ({ canvasElement, args }) => {
 		const canvas = within(canvasElement);
-		const settings = await canvas.findByRole("complementary", {
+		const settingsElement = await canvas.findByRole("complementary", {
 			name: "Project settings",
 		});
-		await expect(settings).toBeVisible();
+		const settings = within(settingsElement);
+		await expect(settingsElement).toBeVisible();
 		const resizer = canvas.queryByRole("separator", {
 			name: "Resize settings",
 		});
-		if (resizer === null) {
-			return;
-		}
-		const initial = Number(resizer.getAttribute("aria-valuenow"));
-		resizer.focus();
-		await userEvent.keyboard("{ArrowRight}");
-		await expect(resizer).toHaveAttribute(
-			"aria-valuenow",
-			String(
-				Math.max(
-					COMMONSPACE_RESIZABLE_PANEL.min,
-					initial - COMMONSPACE_RESIZABLE_PANEL.step,
+		if (resizer !== null) {
+			const initial = Number(resizer.getAttribute("aria-valuenow"));
+			resizer.focus();
+			await userEvent.keyboard("{ArrowRight}");
+			await expect(resizer).toHaveAttribute(
+				"aria-valuenow",
+				String(
+					Math.max(
+						COMMONSPACE_RESIZABLE_PANEL.min,
+						initial - COMMONSPACE_RESIZABLE_PANEL.step,
+					),
 				),
-			),
-		);
-		await userEvent.dblClick(resizer);
-		await expect(resizer).toHaveAttribute(
-			"aria-valuenow",
-			String(COMMONSPACE_RESIZABLE_PANEL.defaultValue),
-		);
+			);
+			await userEvent.dblClick(resizer);
+			await expect(resizer).toHaveAttribute(
+				"aria-valuenow",
+				String(COMMONSPACE_RESIZABLE_PANEL.defaultValue),
+			);
+		}
+		const nameInput = settings.getByRole("textbox", { name: "Name" });
+		await userEvent.clear(nameInput);
+		await userEvent.type(nameInput, "Operations Atlas");
+		await userEvent.click(settings.getByRole("button", { name: "Save name" }));
+		await expect(nameInput).toHaveValue("Operations Atlas");
+		await expect(args.store.mutate).toHaveBeenCalledWith({
+			action: "rename-project",
+			projectId: primaryProject.id,
+			name: "Operations Atlas",
+		});
+		await userEvent.clear(nameInput);
+		await userEvent.type(nameInput, primaryProject.name);
+		await expect(nameInput).toHaveValue(primaryProject.name);
 	},
 };
 

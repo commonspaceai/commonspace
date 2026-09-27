@@ -255,3 +255,70 @@ it("includes Channel note pins in Storybook retention preview and removal", asyn
 		}),
 	);
 });
+
+it("imports a version-3 Storybook archive with schedules and Project emoji", async () => {
+	const source = setupServer(...createWorkspaceMockApi("scheduled"));
+	source.listen({ onUnhandledRequest: "error" });
+	servers.push(source);
+	const exported = await fetch(new URL("/api/export", window.location.href));
+	expect(exported.ok).toBe(true);
+	const archive = z
+		.object({
+			workspace: z
+				.object({
+					projects: z.array(
+						z.object({ id: z.string(), rootCount: z.number() }).passthrough(),
+					),
+					schedules: z.array(z.unknown()),
+				})
+				.passthrough(),
+		})
+		.passthrough()
+		.parse(await exported.json());
+	expect(archive.workspace.schedules.length).toBeGreaterThan(0);
+	source.close();
+	const target = setupServer(...createWorkspaceMockApi("empty"));
+	target.listen({ onUnhandledRequest: "error" });
+	servers.push(target);
+	const project = archive.workspace.projects[0];
+	if (project === undefined) throw new Error("Story Project is missing");
+	project.emoji = "🧪";
+	const projectMappings = Object.fromEntries(
+		archive.workspace.projects.map((item) => [
+			item.id,
+			Array.from(
+				{ length: item.rootCount },
+				(_, index) => `/story/${item.id}-${index}`,
+			),
+		]),
+	);
+	const requestImport = (workspace: typeof archive.workspace) =>
+		fetch(new URL("/api/import", window.location.href), {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				archive: { ...archive, version: 3, workspace },
+				projectMappings,
+			}),
+		});
+	const missingSchedules = structuredClone(archive.workspace);
+	Reflect.deleteProperty(missingSchedules, "schedules");
+	expect((await requestImport(missingSchedules)).status).toBe(400);
+	const imported = await requestImport(archive.workspace);
+	expect(imported.ok).toBe(true);
+	const importedState = z
+		.object({
+			projects: z.array(
+				z.object({ id: z.string(), emoji: z.string().optional() }),
+			),
+			schedules: z.array(z.unknown()),
+		})
+		.parse(await imported.json());
+	expect(importedState.projects.find((item) => item.id === project.id)).toEqual(
+		{
+			id: project.id,
+			emoji: "🧪",
+		},
+	);
+	expect(importedState.schedules).toEqual(archive.workspace.schedules);
+});
