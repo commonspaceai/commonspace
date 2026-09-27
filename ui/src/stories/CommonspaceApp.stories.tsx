@@ -6,6 +6,7 @@ import {
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { CommonspaceApp } from "../CommonspaceApp";
+import { sidebarPreferencesStore } from "../sidebar-preferences";
 import {
 	createStoryStore,
 	emptyBootstrap,
@@ -238,16 +239,28 @@ export const OnboardingAddAgent: Story = {
 		await expect(
 			canvas.getByRole("button", { name: "Use selected agent" }),
 		).toBeDisabled();
-		await userEvent.click(canvas.getByRole("button", { name: "Add an agent" }));
-		await waitFor(() => {
-			expect(page.getByRole("dialog", { name: "Add an agent" })).toBeVisible();
-		});
-		await userEvent.click(page.getByRole("button", { name: "Cancel" }));
-		await waitFor(() => {
-			expect(
-				page.queryByRole("dialog", { name: "Add an agent" }),
-			).not.toBeInTheDocument();
-		});
+		const wasCollapsed = sidebarPreferencesStore
+			.getSnapshot()
+			.collapsedSections.includes("agent");
+		sidebarPreferencesStore.setSectionCollapsed("agent", true);
+		try {
+			await userEvent.click(
+				canvas.getByRole("button", { name: "Add an agent" }),
+			);
+			await waitFor(() => {
+				expect(
+					page.getByRole("dialog", { name: "Add an agent" }),
+				).toBeVisible();
+			});
+			await userEvent.click(page.getByRole("button", { name: "Cancel" }));
+			await waitFor(() => {
+				expect(
+					page.queryByRole("dialog", { name: "Add an agent" }),
+				).not.toBeInTheDocument();
+			});
+		} finally {
+			sidebarPreferencesStore.setSectionCollapsed("agent", wasCollapsed);
+		}
 		await expect(
 			canvas.getByRole("button", { name: "Add an agent" }),
 		).toHaveFocus();

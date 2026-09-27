@@ -2604,7 +2604,9 @@ export function CommonspaceSidebar({
 							/>
 						)
 					}
-					open={!preferences.collapsedSections.includes("agent")}
+					open={
+						!preferences.collapsedSections.includes("agent") || form === "agent"
+					}
 					onOpenChange={(open) => {
 						sidebarPreferencesStore.setSectionCollapsed("agent", !open);
 					}}
