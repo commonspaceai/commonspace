@@ -39,7 +39,7 @@ The development server also exposes the Components Manifest and an MCP endpoint 
 
 Use this loop for UI work:
 
-1. Start or reuse `pnpm storybook`. Connect to `http://127.0.0.1:6006/mcp` and discover its available tools. After adding a client connection, reload that client's MCP configuration if the tools are not yet exposed.
+1. Complete [startup and connection recovery](#startup-and-connection-recovery) below. Start or reuse the development server and establish an actual MCP connection before editing UI.
 2. Call `docs-list` with `withStoryIds: true`. Use `docs-show` for the relevant component and `docs-show-story` for specific states. Reuse existing production components and patterns; inspect source to confirm ownership and implementation before editing.
 3. Before adding or changing stories, call `get-storybook-story-instructions`. Keep fixtures synthetic and exercise observable user behavior.
 4. While exploring visual composition, use the running canvas and hot reload; do not run tests or rebuild after each visual edit. Once an interaction is settled, call `test-run` for its affected story IDs. Full suites belong to production integration, not the visual sketch loop.
@@ -47,9 +47,48 @@ Use this loop for UI work:
 
 MCP supplies component contracts, story discovery, previews, interaction results, and accessibility feedback. It does not judge composition or certify visual quality. Follow the pixel review protocol below as a separate required step.
 
-If MCP tools are not exposed by the current client, the same local endpoint can be called through a standard MCP SDK client. If the endpoint or an individual tool fails, record the actual failure and continue with `pnpm test:storybook -- <story-file-filter>` and browser inspection. Do not claim those fallback checks ran through MCP. Keep Storybook's manager open when using tools that depend on its testing channel.
+Missing native tools alone do not justify skipping MCP. Use the direct SDK connection below in the same agent session. If startup, the direct connection, or a needed tool still fails after the relevant recovery steps, record the concrete command/request error and use `pnpm test:storybook -- <story-file-filter>` and browser inspection for that failed check. Continue using the MCP tools that work. Do not claim non-MCP fallback checks ran through MCP. Keep Storybook's manager open when using tools that depend on its testing channel.
 
 Do not use `--update-snapshots` as an ordinary verification step. Inspect the affected state, decide whether the change is correct, and update only an accepted baseline.
+
+### Startup and connection recovery
+
+The agent owns startup; do not ask the user to run Storybook. Run commands from the current repository root, with the shell prefix required by the working environment (the examples use `rtk proxy`).
+
+1. Check the development server with `rtk proxy curl --fail --silent --show-error --max-time 5 http://127.0.0.1:6006/index.json`. Confirm the index contains this project's `workspace--conversation` story and the listening process's working directory belongs to the current checkout. Identify an unexpected listener before reusing or stopping it. Do not silently switch ports: `.codex/config.toml` points at 6006.
+2. If no server is running, launch `rtk proxy pnpm storybook` in a persistent terminal/exec session. Keep the process alive, inspect its startup output, and repeat the index check when it reports ready. Fix startup errors before proceeding; neither a static build nor the isolated test configuration exposes MCP. Reuse a healthy server instead of starting a duplicate.
+3. Discover the client's deferred tools. In Codex code mode, search `ALL_TOOLS` for names containing `storybook`, read the matching tool's schema, then call it through `tools`. For example, call `await tools.mcp__storybook__docs_list({ withStoryIds: true })`. Absence from the initially displayed tool list does not establish that it is unavailable.
+4. If native tools are missing or their connection is stale, connect directly with the installed MCP SDK below. This performs the MCP handshake and tool calls against the same endpoint without requiring a new agent session. Keep using this connection path for documentation, previews, and focused tests as needed.
+
+From the repository root, this command lists tool names and input schemas, then calls `docs-list`:
+
+```bash
+rtk proxy node --input-type=module <<'JS'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+const client = new Client({ name: 'commonspace-storybook', version: '1.0.0' });
+try {
+  await client.connect(new StreamableHTTPClientTransport(
+    new URL('http://127.0.0.1:6006/mcp'),
+  ));
+  const { tools } = await client.listTools();
+  console.log(JSON.stringify(tools.map(({ name, inputSchema }) => ({ name, inputSchema })), null, 2));
+  const result = await client.callTool({
+    name: 'docs-list',
+    arguments: { withStoryIds: true },
+  });
+  console.log(JSON.stringify(result, null, 2));
+  if (result.isError) process.exitCode = 1;
+} finally {
+  await client.close();
+}
+JS
+```
+
+For subsequent calls, replace the `callTool` request using the returned tool schema; omit the tool listing once discovered. For example, `stories-preview` accepts `{ stories: [{ storyId: 'workspace--conversation' }] }`. Tool names on the wire use hyphens (`docs-list`, `test-run`), while native Codex tool identifiers use underscores. This is actual MCP over Streamable HTTP, not a browser fallback. The SDK is already a root development dependency; no installation or additional server configuration is needed after the normal repository setup.
+
+Open the returned manager URL (`/?path=/story/...`), not only `iframe.html`, before calling `test-run`. If it reports a missing testing channel, load the manager and retry the focused call. A plain GET to `/mcp` is not a readiness check: use the SDK handshake and `listTools`/`callTool` to diagnose protocol failures. Report the actual failure and which recovery steps ran, rather than saying only that tools were not exposed.
 
 ### Shared-component review
 
