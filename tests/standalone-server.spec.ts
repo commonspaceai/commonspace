@@ -514,7 +514,7 @@ describe("standalone Commonspace server", () => {
 		);
 		await expect(exportResponse.json()).resolves.toMatchObject({
 			format: "commonspace-workspace",
-			version: 2,
+			version: 3,
 		});
 
 		const invalidImportResponse = await fetch(`${running.url}/api/import`, {

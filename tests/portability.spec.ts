@@ -276,7 +276,7 @@ describe("workspace portability", () => {
 		await source.initialize();
 		const archive = await source.exportWorkspace();
 		await source.close();
-		expect(archive.version).toBe(2);
+		expect(archive.version).toBe(3);
 		const legacyArchive = { ...archive, version: 1 };
 		const legacyCorrection = mustExist(
 			legacyArchive.workspace.messages[`channel:${channel.id}`]?.[0]?.routing
@@ -379,7 +379,7 @@ describe("workspace portability", () => {
 		const serialized = JSON.stringify(archive);
 		expect(archive).toMatchObject({
 			format: "commonspace-workspace",
-			version: 2,
+			version: 3,
 			workspace: {
 				projects: [{ id: project.id, name: "Portable App", rootCount: 2 }],
 			},

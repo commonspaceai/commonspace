@@ -11,6 +11,15 @@ const notificationSettingsSchema = z.strictObject({
 	sound: z.boolean(),
 });
 
+const scheduleTimingSchema = z.discriminatedUnion("kind", [
+	z.strictObject({ kind: z.literal("once"), runAt: z.string() }),
+	z.strictObject({
+		kind: z.literal("cron"),
+		expression: z.string(),
+		timeZone: z.string(),
+	}),
+]);
+
 export const CommonspaceMutationSchema = z.discriminatedUnion(
 	"action",
 	[
@@ -113,6 +122,27 @@ export const CommonspaceMutationSchema = z.discriminatedUnion(
 			action: z.literal("remove-channel"),
 			channelId: z.string(),
 		}),
+		z.strictObject({
+			action: z.literal("create-schedule"),
+			title: z.string(),
+			channelId: z.string(),
+			text: z.string(),
+			timing: scheduleTimingSchema,
+		}),
+		z.strictObject({
+			action: z.literal("update-schedule"),
+			id: z.string(),
+			title: z.string(),
+			channelId: z.string(),
+			text: z.string(),
+			timing: scheduleTimingSchema,
+		}),
+		z.strictObject({
+			action: z.literal("set-schedule-paused"),
+			id: z.string(),
+			paused: z.boolean(),
+		}),
+		z.strictObject({ action: z.literal("delete-schedule"), id: z.string() }),
 	],
 	{ error: "unknown mutation" },
 ) satisfies z.ZodType<CommonspaceMutation>;

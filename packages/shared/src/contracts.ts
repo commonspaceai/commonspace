@@ -2,8 +2,8 @@ import type { AgentAdapterKind } from "./agent-adapters.js";
 
 export type { AgentAdapterKind } from "./agent-adapters.js";
 
-export const COMMONSPACE_STATE_VERSION = 34 as const;
-export const COMMONSPACE_EXPORT_VERSION = 2 as const;
+export const COMMONSPACE_STATE_VERSION = 35 as const;
+export const COMMONSPACE_EXPORT_VERSION = 3 as const;
 
 export interface CommonspaceDefaults {
 	maxAgentsPerTurn: number;
@@ -108,9 +108,15 @@ export interface CommonspacePortableProject {
 
 export type CommonspacePortableWorkspace = Omit<
 	CommonspaceState,
-	"version" | "revision" | "dmSessions" | "agentSessions" | "projects"
+	| "version"
+	| "revision"
+	| "dmSessions"
+	| "agentSessions"
+	| "projects"
+	| "schedules"
 > & {
 	projects: CommonspacePortableProject[];
+	schedules: CommonspaceSchedule[];
 };
 
 export interface CommonspaceArchiveAttachment {
@@ -592,6 +598,23 @@ export interface CommonspaceThread {
 	createdAt: string;
 }
 
+export type CommonspaceScheduleTiming =
+	| { kind: "once"; runAt: string }
+	| { kind: "cron"; expression: string; timeZone: string };
+
+export interface CommonspaceSchedule {
+	id: string;
+	title: string;
+	channelId: string;
+	text: string;
+	timing: CommonspaceScheduleTiming;
+	paused: boolean;
+	/** Null after a one-time schedule has sent its message. */
+	nextRunAt: string | null;
+	lastRunAt: string | null;
+	createdAt: string;
+}
+
 export interface CommonspaceState {
 	version: typeof COMMONSPACE_STATE_VERSION;
 	revision: number;
@@ -615,6 +638,7 @@ export interface CommonspaceState {
 	projects: CommonspaceProject[];
 	channels: CommonspaceChannel[];
 	threads: CommonspaceThread[];
+	schedules: CommonspaceSchedule[];
 	pins: CommonspacePin[];
 	permissions: CommonspacePermissionRequest[];
 	messages: Record<string, CommonspaceMessage[]>;
@@ -687,7 +711,24 @@ export type CommonspaceMutation =
 	  }
 	| { action: "remove-agent"; agentId: string }
 	| { action: "reset-dm"; agentId: string }
-	| { action: "remove-channel"; channelId: string };
+	| { action: "remove-channel"; channelId: string }
+	| {
+			action: "create-schedule";
+			title: string;
+			channelId: string;
+			text: string;
+			timing: CommonspaceScheduleTiming;
+	  }
+	| {
+			action: "update-schedule";
+			id: string;
+			title: string;
+			channelId: string;
+			text: string;
+			timing: CommonspaceScheduleTiming;
+	  }
+	| { action: "set-schedule-paused"; id: string; paused: boolean }
+	| { action: "delete-schedule"; id: string };
 
 export interface SendMessageRequest {
 	conversation: ConversationRef;

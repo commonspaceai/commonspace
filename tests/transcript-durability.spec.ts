@@ -55,6 +55,7 @@ async function stateRoot(messageCount: number): Promise<string> {
 			projects: [],
 			channels: [],
 			threads: [],
+			schedules: [],
 			messages: { "dm:codex-review-bot": transcript(messageCount) },
 		}),
 	);

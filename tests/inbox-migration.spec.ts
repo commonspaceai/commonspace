@@ -67,6 +67,7 @@ async function loadState({
 			],
 		},
 	};
+	if (version >= 35) persisted.schedules = [];
 	if (inboxReadAt !== undefined) persisted.inboxReadAt = inboxReadAt;
 	if (inboxReadMessageIds !== undefined)
 		persisted.inboxReadMessageIds = inboxReadMessageIds;
@@ -113,6 +114,7 @@ describe("Commonspace Inbox state migration", () => {
 
 		for (let version = 1; version < COMMONSPACE_STATE_VERSION; version += 1) {
 			const state = await loadState({ version, channels: [channel] });
+			expect(state.schedules, `state version ${String(version)}`).toEqual([]);
 			expect(state.channels, `state version ${String(version)}`).toEqual([
 				{
 					id: "channel-1",

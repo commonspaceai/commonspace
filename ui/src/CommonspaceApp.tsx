@@ -181,6 +181,7 @@ function CommonspaceAppNavigation({
 		openSearch,
 		openTarget,
 		openThreads,
+		openScheduled,
 		toggleNavigation,
 	} = navigation;
 
@@ -231,6 +232,7 @@ function CommonspaceAppNavigation({
 					onSettingsOpenChange={onSettingsOpenChange}
 					inboxActive={activeDestination === "inbox"}
 					threadsActive={activeDestination === "threads"}
+					scheduledActive={activeDestination === "scheduled"}
 					conversationActive={activeDestination === "conversation"}
 					directoryActive={activeDestination === "directory"}
 					activeProjectViewId={activeProjectViewId}
@@ -239,6 +241,7 @@ function CommonspaceAppNavigation({
 					onOpenSearch={openSearch}
 					onOpenInbox={() => openInbox()}
 					onOpenThreads={openThreads}
+					onOpenScheduled={openScheduled}
 					onOpenDirectory={openDirectory}
 					onOpenContextSettings={openContextSettings}
 					onOpenAgentSessions={() => openInbox("sessions")}

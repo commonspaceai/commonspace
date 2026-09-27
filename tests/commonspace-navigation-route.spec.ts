@@ -24,6 +24,7 @@ describe("Commonspace TanStack routes", () => {
 		["/inbox", { kind: "inbox", view: "attention" }],
 		["/inbox/sessions", { kind: "inbox", view: "sessions" }],
 		["/threads", { kind: "threads" }],
+		["/scheduled", { kind: "scheduled" }],
 		["/projects", { kind: "directory", directory: "projects" }],
 		["/projects/", { kind: "directory", directory: "projects" }],
 		["/channels", { kind: "directory", directory: "channels" }],

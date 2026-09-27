@@ -21,6 +21,48 @@ const bootstrapSchema = z.object({
 	}),
 });
 
+test("creates and manages a scheduled Channel message", async ({ page }) => {
+	await page.goto("/scheduled");
+	await expect(page.getByRole("heading", { name: "Scheduled" })).toBeVisible();
+	await page.getByRole("button", { name: "New schedule" }).click();
+	const editor = page.getByRole("dialog", { name: "New schedule" });
+	await editor
+		.getByRole("textbox", { name: "Title" })
+		.fill("Automated release check");
+	await editor
+		.getByRole("combobox", { name: "Channel" })
+		.selectOption({ label: "#verification" });
+	await editor
+		.getByRole("textbox", { name: "Message" })
+		.fill("Review the latest release.");
+	await editor
+		.getByRole("combobox", { name: "Frequency" })
+		.selectOption("cron");
+	await editor
+		.getByRole("textbox", { name: "Cron expression" })
+		.fill("0 9 * * *");
+	await editor.getByRole("textbox", { name: "Time zone" }).fill("UTC");
+	await editor.getByRole("button", { name: "Save schedule" }).click();
+	const schedule = page.getByRole("listitem").filter({
+		has: page.getByRole("button", {
+			name: "Edit schedule Automated release check",
+		}),
+	});
+	await expect(schedule).toContainText("#verification");
+	await page.reload();
+	await expect(schedule).toContainText("0 9 * * * (UTC)");
+	await schedule.getByRole("button", { name: "Pause" }).click();
+	await expect(schedule).toContainText("Paused");
+	await schedule.getByRole("button", { name: "Resume" }).click();
+	await expect(schedule).toContainText("Next run");
+	await schedule.getByRole("button", { name: "Delete" }).click();
+	await page
+		.getByRole("dialog", { name: "Delete Automated release check?" })
+		.getByRole("button", { name: "Delete schedule" })
+		.click();
+	await expect(schedule).toHaveCount(0);
+});
+
 test("persists the selected workspace inference agent across clients", async ({
 	page,
 	context,

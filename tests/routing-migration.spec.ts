@@ -96,7 +96,7 @@ describe("routing state migration", () => {
 			{ discoverAgents: async () => [] },
 		);
 		await service.initialize();
-		expect(service.snapshot().version).toBe(34);
+		expect(service.snapshot().version).toBe(COMMONSPACE_STATE_VERSION);
 		expect(
 			service.snapshot().messages[`channel:${channel.id}`]?.[0]?.routing
 				?.corrections[0]?.projectIds,
@@ -446,6 +446,7 @@ describe("routing state migration", () => {
 						createdAt: "2026-08-30T00:00:00.000Z",
 					},
 				],
+				schedules: [],
 				messages: {},
 			}),
 		);

@@ -16,6 +16,7 @@ const MAX_FILE_PATH_LENGTH = 4_096;
 export type CommonspaceRoute =
 	| { kind: "inbox"; view: "attention" | "sessions" }
 	| { kind: "threads" }
+	| { kind: "scheduled" }
 	| { kind: "directory"; directory: "projects" | "channels" | "agents" }
 	| {
 			kind: "project";
@@ -99,6 +100,10 @@ const threadsRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/threads",
 });
+const scheduledRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/scheduled",
+});
 const projectsRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/projects",
@@ -141,6 +146,7 @@ const commonspaceRouteTree = rootRoute.addChildren([
 	inboxRoute,
 	inboxSessionsRoute,
 	threadsRoute,
+	scheduledRoute,
 	projectsRoute,
 	projectRoute,
 	projectFileRoute,
@@ -270,6 +276,8 @@ export function commonspaceRouteFromMatches(
 			return { kind: "inbox", view: "sessions" };
 		case "/threads":
 			return { kind: "threads" };
+		case "/scheduled":
+			return { kind: "scheduled" };
 		case "/projects":
 			return { kind: "directory", directory: "projects" };
 		case "/channels":
@@ -383,6 +391,8 @@ export function commonspaceRouteHref(
 			}).href;
 		case "threads":
 			return router.buildLocation({ to: "/threads", search: {} }).href;
+		case "scheduled":
+			return router.buildLocation({ to: "/scheduled", search: {} }).href;
 		case "directory":
 			return directoryRouteHref(router, route.directory);
 		case "project":
