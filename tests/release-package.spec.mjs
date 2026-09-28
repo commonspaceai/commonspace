@@ -159,6 +159,19 @@ describe("npm release package", () => {
 		).toThrow("cli/package.json keywords must be a non-empty string array");
 	});
 
+	it("packages a distinct nightly version without changing source manifests", () => {
+		const cli = cliManifest("0.2.0");
+		const server = serverManifest("0.2.0");
+		const manifest = createNpmPackageManifest(
+			cli,
+			server,
+			"0.2.0-nightly.20260928.gabcdef0.42.1",
+		);
+		expect(manifest.version).toBe("0.2.0-nightly.20260928.gabcdef0.42.1");
+		expect(cli.version).toBe("0.2.0");
+		expect(server.version).toBe("0.2.0");
+	});
+
 	it("stages only npm runtime assets", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-npm-stage-test-"));
 		roots.push(root);

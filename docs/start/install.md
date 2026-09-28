@@ -57,6 +57,8 @@ To use an exact release instead of the latest, include its version:
 npx --yes commonspace@0.0.6
 ```
 
+To try a nightly, open the [recommended nightly](https://github.com/commonspaceai/commonspace/releases/tag/nightly-green), follow its link to the dated release, and use the `npm exec` command in that release's notes. Nightlies are GitHub tarballs and do not change the npm `latest` version. Back up `~/.commonspace` before switching versions. A broken nightly is listed separately for debugging and is never the recommended build.
+
 These commands print package information without starting the app:
 
 ```bash

@@ -29,6 +29,7 @@ defaults:
 jobs:
   resolve:
     name: Authorize release commit
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
