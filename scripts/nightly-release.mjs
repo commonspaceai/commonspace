@@ -151,10 +151,7 @@ async function main() {
 			"artifacts/nightly/release.json",
 			`${JSON.stringify(release, null, 2)}\n`,
 		);
-		await appendFile(
-			output,
-			`sha=${release.sha}\ntag=${release.tag}\nversion=${release.version}\n`,
-		);
+		await appendFile(output, `version=${release.version}\n`);
 		return;
 	}
 	if (process.argv[2] !== "classify")

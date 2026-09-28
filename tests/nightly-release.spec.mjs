@@ -122,6 +122,16 @@ describe("nightly releases", () => {
 		]);
 		expect(workflow.jobs.publish.permissions).toEqual({ contents: "write" });
 		expect(workflow.jobs.windows.needs).toContain("linux");
+		const eventSha = `\${{ github.sha }}`;
+		for (const job of Object.values(workflow.jobs)) {
+			for (const step of job.steps) {
+				if (step.uses?.startsWith("actions/checkout@"))
+					expect(step.with.ref).toBe(eventSha);
+			}
+		}
+		for (const step of workflow.jobs.publish.steps) {
+			if (step.env?.SHA !== undefined) expect(step.env.SHA).toBe(eventSha);
+		}
 		expect(
 			workflow.jobs.publish.steps.find(
 				(step) => step.name === "Update recommended nightly",
