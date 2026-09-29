@@ -60,6 +60,26 @@ describe("CI policy", () => {
 		]);
 	});
 
+	it("keeps the release verification job off shared package caches", async () => {
+		const workflow = parse(
+			await readFile(
+				new URL(".github/workflows/release.yml", repoRoot),
+				"utf8",
+			),
+		);
+		const steps = workflow.jobs.verify.steps;
+		expect(steps.some((step) => step.uses?.startsWith("actions/cache@"))).toBe(
+			false,
+		);
+		const setupNode = steps.find((step) =>
+			step.uses?.startsWith("actions/setup-node@"),
+		);
+		expect(setupNode?.with).toMatchObject({
+			"package-manager-cache": false,
+		});
+		expect(setupNode?.with).not.toHaveProperty("cache");
+	});
+
 	it("keeps the npm environment file within GitHub's writable API contract", async () => {
 		const environment = await readJson(".github/npm-release-environment.json");
 		const mainPolicy = await readJson(".github/npm-release-main-policy.json");
