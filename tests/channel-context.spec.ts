@@ -721,10 +721,13 @@ describe("editable shared Channel context", () => {
 			const { service, channel } = await fixture();
 			const marker = "PRESERVE_TAIL_OBLIGATION";
 			const prefix = "Validated context detail. ".repeat(
-				length === "long" ? 350 : 1,
+				length === "long" ? 700 : 1,
 			);
-			const summary = `${prefix}${marker}`;
+			const summary = `${
+				length === "long" ? prefix.slice(0, 16_000 - marker.length) : prefix
+			}${marker}`;
 			expect(summary.length).toBeLessThanOrEqual(16_000);
+			if (length === "long") expect(summary).toHaveLength(16_000);
 			expect(summary.indexOf(marker) > 8_000).toBe(length === "long");
 			await service.mutate({
 				action: "set-channel-memory",
@@ -737,8 +740,7 @@ describe("editable shared Channel context", () => {
 				service.snapshot().channels.find((item) => item.id === channel.id),
 			).memory;
 			expect(stored).toMatchObject({ origin: "user", status: "current" });
-			expect(stored.summary).toHaveLength(summary.length);
-			expect(stored.summary).toContain(marker);
+			expect(stored.summary).toBe(summary);
 
 			let prompt: string | undefined;
 			const request = vi.fn(async (input: AgentRunInput) => {
@@ -760,7 +762,7 @@ describe("editable shared Channel context", () => {
 			);
 			expect(previousMemory).toMatchObject({
 				origin: "user",
-				summary: expect.stringContaining(marker),
+				summary,
 			});
 			expect(
 				sections.find((section) => section.startsWith("Pinned context: ")),
