@@ -179,7 +179,7 @@ pnpm verify:adapter:gemini
 pnpm verify:adapter:opencode
 ```
 
-These commands run pinned real Claude Code, Gemini CLI, and OpenCode runtimes against loopback Anthropic Messages and Gemini API fixtures. Each child receives an explicit environment, synthetic credentials, and temporary native configuration/session directories. No login, provider key, or separately installed CLI is needed. Gemini CLI and OpenCode are development-only test dependencies; production uses the user's installed executables. These tests also run in `pnpm test` and `pnpm check`.
+These commands run pinned real Claude Code, Gemini CLI, and OpenCode runtimes against loopback Anthropic Messages and Gemini API fixtures. Each child receives an explicit environment, synthetic credentials, and temporary native configuration/session directories. No login, provider key, or separately installed CLI is needed. Gemini CLI and OpenCode are development-only test dependencies; production uses the user's installed executables. These tests run in `pnpm check` and CI; `pnpm test` keeps the routine suite short.
 
 The fixture replaces only model responses. The real runtime stores native history, calls the real Commonspace MCP endpoint, receives permission choices, and posts progress through the real HTTP service. Tests cover:
 

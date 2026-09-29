@@ -33,7 +33,7 @@ Run `pnpm docs:contracts` from the repository root to generate TypeDoc for the p
 
 ### Focused iteration
 
-During visual exploration, use the [Fast UI loop](#fast-ui-loop) below. For behavior changes, run the relevant test file while iterating. Use the change-specific requirements in [Contributing](../../CONTRIBUTING.md#verify) when the change is settled. Examples:
+During visual exploration, use the [Fast UI loop](#fast-ui-loop) below. For behavior changes, run the relevant test file while iterating when it can observe the project-owned behavior. Use the change-specific requirements in [Contributing](../../CONTRIBUTING.md#verify) when the change is settled. Examples:
 
 | Change                           | Focused check                                                                      | Evidence limit                                                                  |
 | -------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -46,14 +46,16 @@ During visual exploration, use the [Fast UI loop](#fast-ui-loop) below. For beha
 
 The Node test workers disable native Web Storage so jsdom owns isolated browser storage. This keeps UI tests consistent across supported Node versions without writing browser-like state to a host storage file.
 
+`pnpm test` and `pnpm test:watch` run the routine Vitest suite. The real native adapter CLI checks run through `pnpm verify:adapters`; they remain part of `pnpm check` and CI.
+
 ### Integration gates
 
 Use these when preparing a settled change for handoff or release. They are not part of each visual edit:
 
 | Command               | What it verifies                                                                                                                                                                                           |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm check:fast`     | Formatting, lint, types, unit/integration tests, and representative Storybook browser tests for a broad code-iteration check                                                                                               |
-| `pnpm check`          | The full local gate, including all Storybook browser tests and production application and Storybook builds                                                                                                 |
+| `pnpm check:fast`     | Formatting, lint, types, routine Vitest tests, and representative Storybook browser tests for a broad code-iteration check                                                                               |
+| `pnpm check`          | The full local gate, including native adapter integration, all Storybook browser tests, and production application and Storybook builds                                                                  |
 | `pnpm verify:live`    | A fresh production build and the integrated desktop browser flow through both separate development-style servers and the installed single-origin path                                                      |
 | `pnpm check:ui`       | UI types, the complete Storybook browser suite, and the production UI build                                                                                                                                |
 | `pnpm test:e2e`       | A production build followed by integrated Playwright application flows; use `test:e2e:built` after an already-current build                                                                                |
@@ -64,7 +66,7 @@ The live verifier uses temporary workspace data and test runtimes. It proves pro
 
 Use [Desktop usage](desktop-usage.md) for assembled flows and [Visual verification](../design/visual-verification.md) for rendered evidence.
 
-`check:fast` is a broader iteration gate, not a replacement for `check`. `verify:live` and `test:e2e` exercise assembled behavior; use `verify:live:built` and `test:e2e:built` after a current build to avoid rebuilding the same candidate. Pixel baselines, authenticated runtime checks, routing-quality evaluation, and benchmarks answer separate questions and are not implied by green unit tests.
+`check:fast` is available for broad iteration. Run `check` once on a settled change. `verify:live` and `test:e2e` build before exercising assembled behavior; use `verify:live:built` and `test:e2e:built` after `check` to test that same build once. Pixel baselines, authenticated runtime checks, routing-quality evaluation, and benchmarks answer separate questions and are not implied by green unit tests.
 
 ## Fast UI loop
 
@@ -90,12 +92,7 @@ watcher. Browser-file parallelism is bounded by the host, with ceilings of four
 workers locally and two in CI, to avoid making browser checks slower through
 contention.
 
-When the change is settled, the representative screen suite provides a quick integration check. `check:ui` adds UI types, the full Storybook suite, and a production UI build:
-
-```bash
-pnpm test:storybook:smoke
-pnpm check:ui
-```
+For a quick representative check, run `pnpm test:storybook:smoke`. Run `pnpm check` once the UI change is settled.
 
 These commands do not replace the change-specific handoff requirements in [Contributing](../../CONTRIBUTING.md#verify). Storybook's Vitest suite checks rendering, interactions, and accessibility in a real browser. Pixel comparisons use `pnpm test:visual`; visual acceptance still requires inspecting the images.
 

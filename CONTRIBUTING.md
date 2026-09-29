@@ -17,7 +17,7 @@ Clone your fork, add `commonspaceai/commonspace` as the upstream remote, and fol
 ## Make the change
 
 1. State the user problem, owning package, product rule, and verification plan.
-2. Add a focused failing test for behavior changes; explain when existing coverage is sufficient.
+2. Name the project-owned behavior and a realistic defect. Add or extend a focused test when it can expose that defect with an independently derived expected result. Existing coverage may suffice. Do not test transparent forwarding or third-party behavior.
 3. Make the smallest change that solves the problem, following the [simplicity rules](AGENTS.md#simplicity).
 4. Update affected consumers, saved-data migrations, tests, and canonical documentation together.
 5. Review the complete diff, including generated files. Remove unnecessary mechanisms and explain why any material added complexity is needed under the [simplicity rules](AGENTS.md#simplicity).
@@ -30,12 +30,12 @@ Choose checks based on what changed:
 
 | Change                                            | Required evidence                                                          |
 | ------------------------------------------------- | -------------------------------------------------------------------------- |
-| Shared types, server, saved data, or security     | Focused regression test, `pnpm check`, and `pnpm verify:live`              |
+| Shared types, server, saved data, or security     | Relevant focused coverage, `pnpm check`, and `pnpm verify:live:built`      |
 | UI component or screen                            | Storybook states, behavior checks, `pnpm check`, and desktop inspection    |
 | Packaging, installation, dependencies, or release | Focused checks and the complete macOS `pnpm verify:release` candidate gate |
 | Documentation or templates only                   | Links, commands, Markdown syntax, and `git diff --check`                   |
 
-For a code change, start with the relevant focused test. Once the change is settled, run its required integration checks. For example:
+For a code change, use the relevant focused test while iterating. Once the change is settled, run its required integration checks once. For example:
 
 ```bash
 pnpm test tests/channel-context.spec.ts
@@ -43,7 +43,7 @@ pnpm check
 git diff --check
 ```
 
-Replace the example test with the relevant file and add `pnpm verify:live` for shared, server, saved-data, or security changes. Docs-only changes use the last table row; they do not require this code-check sequence.
+Replace the example test with the relevant file. For shared, server, saved-data, or security changes, run `pnpm verify:live:built` after `pnpm check` to verify the build that just passed. Use `pnpm verify:live` when running the live verifier alone, since it builds first. Docs-only changes use the last table row; they do not require this code-check sequence.
 
 Use [Visual verification](docs/design/visual-verification.md) while iterating on UI and [Releasing](docs/guides/releasing.md) for candidate checks. Real-agent and real-service checks are additional; record what ran and what did not.
 

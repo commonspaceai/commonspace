@@ -38,15 +38,8 @@ Settle the desktop design at 1440 × 960 first. Inspect actual rendered pixels a
 
 ## Verify
 
-For behavior changes, extend an existing focused test to reproduce the failure; add a new test when coverage is missing. If existing coverage already proves the requirement, use it and explain why it is sufficient. Use Storybook for isolated UI states and browser flows for assembled behavior.
+For behavior changes, identify a project-owned invariant and a realistic defect. Extend an existing focused test when it can expose that defect with an independent expected result; add a new test when meaningful coverage is missing. If existing coverage already proves the requirement, use it and explain why it is sufficient. Do not add tests that only restate mocks, transparent forwarding, or third-party behavior. Use Storybook for isolated UI states and browser flows for assembled behavior.
 
-Select checks using [Contributing](CONTRIBUTING.md#verify). Run required integration gates on the settled change; do not repeat broad checks or reviews without a new change, failure, or unresolved concern.
-
-```bash
-pnpm check:fast
-pnpm check
-pnpm verify:live
-git diff --check
-```
+Select checks using [Contributing](CONTRIBUTING.md#verify). Run required integration gates on the settled change; do not repeat broad checks or reviews without a new change, failure, or unresolved concern. After `pnpm check`, use `pnpm verify:live:built` when live verification is required so the same build is checked once.
 
 For documentation-only changes, check links, commands, and Markdown syntax. See [Contributing](CONTRIBUTING.md) for change-specific verification.
