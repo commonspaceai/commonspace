@@ -5,4 +5,5 @@ export * from "./inbox.js";
 export * from "./mutation.js";
 export * from "./project-files.js";
 export * from "./project-tags.js";
+export * from "./response-schemas.js";
 export * from "./search.js";
