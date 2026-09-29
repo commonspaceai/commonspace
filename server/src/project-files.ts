@@ -8,7 +8,15 @@ import {
 	stat,
 } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { basename, extname, isAbsolute, join, relative, sep } from "node:path";
+import {
+	basename,
+	extname,
+	isAbsolute,
+	join,
+	relative,
+	resolve,
+	sep,
+} from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import type {
@@ -264,8 +272,14 @@ async function resolveProjectPath(
 		);
 	const relativePath = safeRelativePath(path, allowRoot);
 	const root = await realpath(configuredRoot);
-	const candidate =
-		relativePath === "" ? root : join(root, ...relativePath.split("/"));
+	const candidate = resolve(root, relativePath);
+	if (!insideRoot(root, candidate)) {
+		throw new ProjectFileError(
+			403,
+			"project_path_outside_root",
+			"Project path resolves outside its folder",
+		);
+	}
 	let absolutePath: string;
 	try {
 		absolutePath = await realpath(candidate);

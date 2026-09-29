@@ -12,7 +12,6 @@ import type {
 	CommonspaceQueuedFollowup,
 	CommonspaceRetentionPreview,
 	CommonspaceRoutingConfiguration,
-	CommonspaceState,
 	CommonspaceTraceEntry,
 	CommonspaceTracePlanStep,
 	CommonspaceWorkspaceArchive,
@@ -21,19 +20,24 @@ import type {
 	FollowupQueueResponse,
 	HarnessCapabilityInventory,
 	RerouteAssignmentRequest,
-	RerouteAssignmentResponse,
 	RetryRoutingRequest,
-	RetryRoutingResponse,
 	SelectDirectoryResponse,
 	SendFileAttachment,
 	SendImageAttachment,
 	SendMessageRequest,
-	SendMessageResponse,
 	StopAgentRunsResponse,
 	UpdateRoutingConfigurationRequest,
 	UpdateThreadContextRequest,
 } from "@commonspace/shared";
-import { conversationKey, isAgentAdapterKind } from "@commonspace/shared";
+import {
+	conversationKey,
+	isAgentAdapterKind,
+	parseCommonspaceBootstrap,
+	parseCommonspaceState,
+	parseRerouteAssignmentResponse,
+	parseRetryRoutingResponse,
+	parseSendMessageResponse,
+} from "@commonspace/shared";
 import type { WorkspaceArchiveSource } from "./workspace-import.ts";
 
 export const enum AgentDiscoveryStatus {
@@ -364,7 +368,12 @@ export function parseActivityEventData(
 	}
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+async function requestJson<T>(
+	path: string,
+	init?: RequestInit,
+	// biome-ignore lint/plugin: HTTP JSON is unknown until an endpoint parser validates it.
+	parse?: (value: unknown) => T,
+): Promise<T> {
 	const response = await fetch(path, {
 		...init,
 		headers: {
@@ -385,7 +394,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 				: `Commonspace request failed (${String(response.status)})`,
 		);
 	}
-	return value;
+	return parse === undefined ? value : parse(value);
 }
 
 function prepareMessageAdmission(
@@ -476,7 +485,11 @@ export class CommonspaceClientStore {
 		this.pendingConfigurationRefresh = false;
 		this.set({ ...this.snapshot, loading: true, error: null });
 		let refreshSucceeded = false;
-		const task = requestJson<CommonspaceBootstrap>("/api/bootstrap")
+		const task = requestJson(
+			"/api/bootstrap",
+			undefined,
+			parseCommonspaceBootstrap,
+		)
 			.then((bootstrap) => {
 				refreshSucceeded = true;
 				const liveActivities = this.pendingLiveActivities;
@@ -574,10 +587,11 @@ export class CommonspaceClientStore {
 	async mutate(mutation: CommonspaceMutation): Promise<void> {
 		const routingGeneration = this.routingGeneration;
 		try {
-			const result = await requestJson<CommonspaceBootstrap>("/api/mutate", {
-				method: "POST",
-				body: JSON.stringify(mutation),
-			});
+			const result = await requestJson(
+				"/api/mutate",
+				{ method: "POST", body: JSON.stringify(mutation) },
+				parseCommonspaceBootstrap,
+			);
 			let merged: CommonspaceBootstrap;
 			if (
 				mutation.action === "remove-agent" &&
@@ -665,12 +679,13 @@ export class CommonspaceClientStore {
 			discovery: { status: AgentDiscoveryStatus.Pending, adapter },
 		});
 		try {
-			const result = await requestJson<CommonspaceBootstrap>(
+			const result = await requestJson(
 				"/api/discover-agents",
 				{
 					method: "POST",
 					body: JSON.stringify({ adapter }),
 				},
+				parseCommonspaceBootstrap,
 			);
 			if (request !== this.discoveryRequest) return;
 			const merged = this.mergeBootstrap(result);
@@ -766,12 +781,13 @@ export class CommonspaceClientStore {
 
 	async rerouteAssignment(request: RerouteAssignmentRequest): Promise<void> {
 		try {
-			const result = await requestJson<RerouteAssignmentResponse>(
+			const result = await requestJson(
 				"/api/reroute",
 				{
 					method: "POST",
 					body: JSON.stringify(request),
 				},
+				parseRerouteAssignmentResponse,
 			);
 			const bootstrap = this.snapshot.bootstrap;
 			if (bootstrap === null) {
@@ -793,12 +809,13 @@ export class CommonspaceClientStore {
 
 	async retryRouting(request: RetryRoutingRequest): Promise<void> {
 		try {
-			const result = await requestJson<RetryRoutingResponse>(
+			const result = await requestJson(
 				"/api/routing/retry",
 				{
 					method: "POST",
 					body: JSON.stringify(request),
 				},
+				parseRetryRoutingResponse,
 			);
 			const bootstrap = this.snapshot.bootstrap;
 			if (bootstrap === null) {
@@ -889,12 +906,13 @@ export class CommonspaceClientStore {
 	): Promise<void> {
 		const navigationRevision = ++this.navigationRevision;
 		try {
-			const result = await requestJson<SendMessageResponse>(
+			const result = await requestJson(
 				`/api/messages/${encodeURIComponent(messageId)}/edit`,
 				{
 					method: "POST",
 					body: JSON.stringify(request),
 				},
+				parseSendMessageResponse,
 			);
 			const bootstrap = this.snapshot.bootstrap;
 			if (bootstrap === null) {
@@ -974,13 +992,17 @@ export class CommonspaceClientStore {
 		projectMappings: Record<string, string[]>,
 	): Promise<void> {
 		try {
-			const state = await requestJson<CommonspaceState>("/api/import", {
-				method: "POST",
-				body: JSON.stringify({
-					archive: archiveSource.value,
-					projectMappings,
-				}),
-			});
+			const state = await requestJson(
+				"/api/import",
+				{
+					method: "POST",
+					body: JSON.stringify({
+						archive: archiveSource.value,
+						projectMappings,
+					}),
+				},
+				parseCommonspaceState,
+			);
 			const bootstrap = this.snapshot.bootstrap;
 			if (bootstrap === null) {
 				await this.refresh();
@@ -1093,10 +1115,11 @@ export class CommonspaceClientStore {
 			error: null,
 		});
 		try {
-			const result = await requestJson<SendMessageResponse>("/api/send", {
-				method: "POST",
-				body: JSON.stringify(request),
-			});
+			const result = await requestJson(
+				"/api/send",
+				{ method: "POST", body: JSON.stringify(request) },
+				parseSendMessageResponse,
+			);
 			const pendingSubmissions = this.snapshot.pendingSubmissions.filter(
 				(candidate) => candidate.id !== submission.id,
 			);

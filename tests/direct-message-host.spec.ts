@@ -136,7 +136,7 @@ describe("Commonspace direct-message host sessions", () => {
 		});
 	});
 
-	it("stop-and-send cancels the active turn and runs the replacement next", async () => {
+	it("stop-and-send leaves unrelated acceptance free while cancellation waits", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-dm-stop-send-"));
 		roots.push(root);
 		const runAgent = vi.fn(async (input: AgentRunInput) => {
@@ -163,6 +163,7 @@ describe("Commonspace direct-message host sessions", () => {
 		);
 		await service.initialize();
 		await addTestHarness(service, "codex", "Review Bot");
+		await addTestHarness(service, "hermes", "Other Bot");
 
 		const first = await service.send({
 			conversation: { kind: "dm", id: "codex" },
@@ -171,17 +172,67 @@ describe("Commonspace direct-message host sessions", () => {
 		await vi.waitFor(() => {
 			expect(runAgent).toHaveBeenCalledOnce();
 		});
-		await service.send({
+		const cancellationStarted = deferred<void>();
+		const cancellation = deferred<void>();
+		const sessionName = mustExist(runAgent.mock.calls[0]?.[0]).sessionName;
+		const scopeKey = `codex\u0000${sessionName}`;
+		const activeSessions: unknown = Object.getOwnPropertyDescriptor(
+			service,
+			"activeAcpSessions",
+		)?.value;
+		const processes: unknown = Object.getOwnPropertyDescriptor(
+			service,
+			"acpProcesses",
+		)?.value;
+		if (!(activeSessions instanceof Map) || !(processes instanceof Map))
+			throw new Error("native cancellation test hooks are unavailable");
+		activeSessions.set(scopeKey, {
+			processScopeKey: scopeKey,
+			sessionId: "native-session",
+		});
+		processes.set(scopeKey, {
+			cancelSession: async () => {
+				cancellationStarted.resolve(undefined);
+				await cancellation.promise;
+			},
+		});
+		const replacement = service.send({
 			conversation: { kind: "dm", id: "codex" },
 			text: "New direction",
 			delivery: "stop-and-send",
 		});
+		await cancellationStarted.promise;
+		const unrelated = service.send({
+			conversation: { kind: "dm", id: "hermes" },
+			text: "Unrelated work",
+		});
+		const unrelatedAccepted = await vi
+			.waitFor(
+				() => {
+					expect(
+						service
+							.snapshot()
+							.messages["dm:hermes"]?.some(
+								(message) => message.text === "Unrelated work",
+							),
+					).toBe(true);
+				},
+				{ timeout: 1_000 },
+			)
+			.then(
+				() => true,
+				() => false,
+			);
+		cancellation.resolve(undefined);
+		await Promise.all([replacement, unrelated]);
 		await service.whenIdle();
+		expect(unrelatedAccepted).toBe(true);
 
-		expect(runAgent.mock.calls.map(([input]) => input.message)).toEqual([
-			"Old direction",
-			"New direction",
-		]);
+		expect(
+			runAgent.mock.calls
+				.filter(([input]) => input.agent.id === "codex")
+				.map(([input]) => input.message),
+		).toEqual(["Old direction", "New direction"]);
 		expect(
 			service
 				.snapshot()
