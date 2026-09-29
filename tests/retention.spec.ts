@@ -82,6 +82,33 @@ afterEach(async () => {
 });
 
 describe("explicit retention", () => {
+	it("keeps another agent's Bot Chat process when retaining a DM", async () => {
+		const { service } = await retentionWorkspace();
+		await addTestHarness(service, "hermes", "Other Bot");
+		const processes: unknown = Object.getOwnPropertyDescriptor(
+			service,
+			"acpProcesses",
+		)?.value;
+		if (!(processes instanceof Map))
+			throw new Error("native process test hook is unavailable");
+		const closeCodex = vi.fn(async () => undefined);
+		const closeHermes = vi.fn(async () => undefined);
+		const hermesProcess = { close: closeHermes };
+		processes.set("codex\u0000Bot Chat", { close: closeCodex });
+		processes.set("hermes\u0000Bot Chat", hermesProcess);
+		const conversation = { kind: "dm", id: "codex" } as const;
+		const preview = service.previewRetention(conversation);
+
+		await service.applyRetention({
+			conversation,
+			expectedRevision: preview.revision,
+		});
+
+		expect(closeCodex).toHaveBeenCalledOnce();
+		expect(closeHermes).not.toHaveBeenCalled();
+		expect(processes.get("hermes\u0000Bot Chat")).toBe(hermesProcess);
+	});
+
 	it("previews without deleting and purges only the selected conversation", async () => {
 		const { root, service, conversation, sent, fileId, imagePath, filePath } =
 			await retentionWorkspace();

@@ -49,6 +49,8 @@ A typical Channel send follows this sequence:
 
 A routing or execution failure after acceptance leaves the source message in history. The browser displays the resulting attention state instead of losing the user's request.
 
+Message preparation and attachment storage may overlap across requests. Before acceptance, the service rechecks the conversation and schedule against current state. Acceptance, workspace mutations, message deletion, retention, and permission choices share a commit queue that serializes their state writes and rollback. Agent runs start after acceptance and remain concurrent across independent native sessions.
+
 In development and preview, Vite forwards `/api` to `127.0.0.1:3100`. Production browser assets are built into `ui/dist`. The npm CLI serves its packaged `ui-dist`; the source-based macOS service serves `ui/dist`. Both use Express so the UI and API share one loopback origin.
 
 ### Browser routes
@@ -183,6 +185,7 @@ Activity, reasoning summaries, plans, tool calls, native context-compaction life
 `ui/src/main.tsx` mounts React and shared styles. `CommonspaceApp` composes the desktop navigation and conversation surfaces. The URL determines the startup destination: `/` opens Inbox, and unknown or stale detail routes return there. The shell has no separate Workspace landing page or Agent-runs dashboard.
 
 `CommonspaceClientStore` owns bootstrap state, selection, sends, mutations, and revision refreshes. The browser communicates with the server only through shared contracts and `/api`.
+Responses that install workspace state are validated against shared runtime schemas before entering the client store. A malformed response leaves the last valid snapshot available and surfaces an error.
 
 Sidebar sort preferences belong to `ui/src/sidebar-preferences.ts` and persist in browser storage. `ui/src/channel-sorting.ts` orders Channels without changing conversation data. Pinned and unpinned Channels remain separate groups when sorting or reordering.
 

@@ -4295,28 +4295,11 @@ esac
 			).channels[0],
 		);
 
-		const sending = service.send({
+		const immediate = await service.send({
 			conversation: { kind: "channel", id: channel.id },
 			text: "Fix the API.",
 		});
-		const immediate = await Promise.race([
-			sending.then((response) => ({ status: "accepted" as const, response })),
-			new Promise<{ status: "blocked" }>((resolve) => {
-				setTimeout(() => {
-					resolve({ status: "blocked" });
-				}, 50);
-			}),
-		]);
-		route.resolve({
-			mode: "parallel",
-			assignments: [{ agentId: "backend", projectIds: [] }],
-			confidence: 0.95,
-			reason: "API work belongs to Backend.",
-		});
-
-		expect(immediate.status).toBe("accepted");
-		if (immediate.status !== "accepted") return;
-		expect(immediate.response.accepted.routing).toMatchObject({
+		expect(immediate.accepted.routing).toMatchObject({
 			source: "ai",
 			status: "pending",
 			startedAt: expect.any(String),
@@ -4327,12 +4310,18 @@ esac
 			reason: "Routing with inference.",
 		});
 		expect(
-			immediate.response.state.messages[`channel:${channel.id}`]?.at(-1)?.text,
+			immediate.state.messages[`channel:${channel.id}`]?.at(-1)?.text,
 		).toBe("Fix the API.");
+		route.resolve({
+			mode: "parallel",
+			assignments: [{ agentId: "backend", projectIds: [] }],
+			confidence: 0.95,
+			reason: "API work belongs to Backend.",
+		});
 		await service.whenIdle();
 		expect(
 			(await service.bootstrap()).state.messages[`channel:${channel.id}`]?.find(
-				(message) => message.id === immediate.response.accepted.id,
+				(message) => message.id === immediate.accepted.id,
 			)?.routing,
 		).toMatchObject({
 			source: "ai",
@@ -4351,6 +4340,94 @@ esac
 			confidence: 0.95,
 			reason: "API work belongs to Backend.",
 		});
+	});
+
+	it("does not restore a deleted message when routing waits behind its deletion", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-routing-delete-"));
+		roots.push(root);
+		const route = deferred<CommonspaceRouteResult>();
+		const runAgent = vi.fn(async () => "An outdated reply.");
+		const service = new CommonspaceHostService(
+			{},
+			{ root },
+			{
+				discoverAgents: async () => [
+					{
+						id: "backend",
+						displayName: "Backend",
+						adapter: "hermes" as const,
+						status: "stopped" as const,
+					},
+				],
+				runAgent,
+				routeAgents: async () => route.promise,
+			},
+		);
+		services.push(service);
+		await service.initialize();
+		await addDiscoveredAgents(service, "backend");
+		const channel = mustExist(
+			(
+				await service.mutate({
+					action: "create-channel",
+					name: "engineering",
+					agentIds: ["backend"],
+				})
+			).channels[0],
+		);
+		const sent = await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			text: "Delete this before routing completes.",
+		});
+		const stateChange: unknown = Object.getOwnPropertyDescriptor(
+			CommonspaceHostService.prototype,
+			"withStateChange",
+		)?.value;
+		const prepareRouting: unknown = Object.getOwnPropertyDescriptor(
+			CommonspaceHostService.prototype,
+			"prepareResolvedPendingRouting",
+		)?.value;
+		if (
+			typeof stateChange !== "function" ||
+			typeof prepareRouting !== "function"
+		)
+			throw new Error("routing test hooks are unavailable");
+		const queueHeld = deferred<void>();
+		const releaseQueue = deferred<void>();
+		let routingPrepared = false;
+		Object.defineProperty(service, "prepareResolvedPendingRouting", {
+			value: (...args: unknown[]) => {
+				const resolved: unknown = prepareRouting.call(service, ...args);
+				routingPrepared = true;
+				return resolved;
+			},
+		});
+		const blocker: unknown = stateChange.call(service, async () => {
+			queueHeld.resolve();
+			await releaseQueue.promise;
+		});
+		await queueHeld.promise;
+		const deleting = service.deleteMessage(sent.accepted.id);
+		route.resolve({
+			mode: "parallel",
+			assignments: [{ agentId: "backend", projectIds: [] }],
+			reason: "Backend was selected.",
+		});
+		try {
+			await vi.waitFor(() => expect(routingPrepared).toBe(true));
+		} finally {
+			releaseQueue.resolve();
+		}
+		await Promise.all([blocker, deleting]);
+		await service.whenIdle();
+		expect(
+			service
+				.snapshot()
+				.messages[`channel:${channel.id}`]?.find(
+					(message) => message.id === sent.accepted.id,
+				),
+		).toMatchObject({ deletedAt: expect.any(String) });
+		expect(runAgent).not.toHaveBeenCalled();
 	});
 
 	it("adds an explicitly tagged outside agent to the channel and active thread", async () => {

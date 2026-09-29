@@ -11,3 +11,5 @@ These routes are registered in [`server/src/app.ts`](../../server/src/app.ts).
 | `GET /api/events`                | None    | `200` `text/event-stream`                                                           |
 
 `GET /api/events` sends a `revision` event with `{ revision: number }`, an `activity` event with `{ activities: CommonspaceLiveAgentActivity[], queuedFollowups: CommonspaceQueuedFollowup[] }`, and `routing-changed` with `{}`. The activity and follow-up types live in [shared contracts](../../packages/shared/src/contracts.ts). The stream starts with the current revision and activity, then sends updates until the connection closes.
+
+Notification verification allows five requests per minute. Further requests return `429` with `code: "notification_verification_rate_limited"` without sending another native test notification.
