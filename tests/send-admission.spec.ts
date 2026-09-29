@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -90,6 +90,62 @@ async function admissionFixture(options: AdmissionFixtureOptions = {}) {
 }
 
 describe("send admission invariants", () => {
+	it("preserves a successful send after a concurrent pin write fails", async () => {
+		const { root, service } = await admissionFixture({
+			initiallyArmed: false,
+		});
+		const channel = mustExist(
+			(
+				await service.mutate({
+					action: "create-channel",
+					name: "pins",
+					agentIds: [],
+				})
+			).channels[0],
+		);
+		const writeStarted = deferred();
+		const releaseWrite = deferred();
+		const persist: unknown = Object.getOwnPropertyDescriptor(
+			CommonspaceHostService.prototype,
+			"persist",
+		)?.value;
+		if (typeof persist !== "function")
+			throw new Error("state persistence is unavailable");
+		let failNextWrite = true;
+		Object.defineProperty(service, "persist", {
+			value: async (scope?: "acceptance") => {
+				if (failNextWrite) {
+					failNextWrite = false;
+					writeStarted.resolve();
+					await releaseWrite.promise;
+					throw new Error("simulated pin write failure");
+				}
+				await persist.call(service, scope);
+			},
+		});
+		const failedPin = service.addPin({
+			scope: { kind: "channel", id: channel.id },
+			kind: "note",
+			note: "Rejected pin",
+		});
+		await writeStarted.promise;
+		const send = service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "Saved request",
+		});
+		releaseWrite.resolve();
+		await expect(failedPin).rejects.toThrow("simulated pin write failure");
+		await send;
+		await service.whenIdle();
+		expect(service.snapshot().pins).toEqual([]);
+		expect(service.snapshot().messages["dm:codex"]).toContainEqual(
+			expect.objectContaining({ text: "Saved request" }),
+		);
+		const saved = await readFile(join(root, "state.json"), "utf8");
+		expect(saved).toContain("Saved request");
+		expect(saved).not.toContain("Rejected pin");
+	});
+
 	it("commits concurrent sends in order", async () => {
 		const { gate, reached, runAgent, service } = await admissionFixture({
 			pauseCount: 2,

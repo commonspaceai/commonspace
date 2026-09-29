@@ -424,8 +424,6 @@ interface ResolvedRoutingProjects {
 interface ResolvedPendingRouting {
 	routing: CommonspaceRoutingDecision;
 	projects: CommonspaceState["projects"];
-	accepted: CommonspaceMessage;
-	thread?: CommonspaceThread;
 }
 
 interface PendingRoutingDecisionInput {
@@ -4568,7 +4566,20 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		this.historyIndexes.clear();
 		this.closeOperation ??= (async () => {
 			await this.historyEmbeddings.close();
-			const permissionsInterrupted = this.interruptPendingPermissions();
+			const permissionInterruption = await this.withStateChange(async () => {
+				const permissionIds = this.markPendingPermissionsInterrupted();
+				if (permissionIds.length === 0)
+					return { permissionIds, persistError: undefined };
+				let persistError: unknown;
+				try {
+					await this.persist();
+				} catch (error) {
+					persistError = error;
+				}
+				this.broadcastRevision();
+				return { permissionIds, persistError };
+			});
+			this.resolveInterruptedPermissions(permissionInterruption.permissionIds);
 			const processes = [...this.acpProcesses.values()];
 			this.acpProcesses.clear();
 			this.activeAcpSessions.clear();
@@ -4585,18 +4596,27 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				),
 			);
 			await this.whenIdle();
-			if (
-				this.markInterruptedRuns(
-					"Commonspace shut down before the agent completed.",
-				) ||
-				permissionsInterrupted
-			) {
-				await this.persist();
+			await this.withStateChange(async () => {
+				const previousState = this.state;
+				if (
+					!this.markInterruptedRuns(
+						"Commonspace shut down before the agent completed.",
+					)
+				)
+					return;
+				try {
+					await this.persist();
+				} catch (error) {
+					this.state = previousState;
+					throw error;
+				}
 				this.broadcastRevision();
-			}
+			});
 			await this.writeTail;
 			this.mcpCredentials.clear();
 			await this.mcpGateway?.close();
+			if (permissionInterruption.persistError !== undefined)
+				throw permissionInterruption.persistError;
 		})();
 		await this.closeOperation;
 	}
@@ -4961,42 +4981,50 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		scope: CommonspaceMcpScope,
 		rawText: string,
 	): Promise<{ messageId: string }> {
-		if (this.closing) throw new Error("Commonspace is shutting down");
-		const scoped = this.resolveMcpScope(scope);
-		const text = rawText.normalize("NFKC").trim().slice(0, 4_000);
-		if (text === "") throw new Error("progress text is required");
-		if (scoped.channel !== undefined) {
-			const peerMentions = mentionedChannelAgents(
-				scoped.channel.agentIds,
+		return this.withStateChange(async () => {
+			if (this.closing) throw new Error("Commonspace is shutting down");
+			const scoped = this.resolveMcpScope(scope);
+			const text = rawText.normalize("NFKC").trim().slice(0, 4_000);
+			if (text === "") throw new Error("progress text is required");
+			if (scoped.channel !== undefined) {
+				const peerMentions = mentionedChannelAgents(
+					scoped.channel.agentIds,
+					text,
+					this.configuredAgents(),
+				).filter((agentId) => agentId !== scoped.agent.id);
+				if (peerMentions.length > 0)
+					throw new Error(
+						"post progress cannot address peers; use commonspace_handoff",
+					);
+			}
+			const message: CommonspaceMessage = {
+				id: messageId(),
+				conversation: scope.conversation,
+				authorType: "agent",
+				authorId: scoped.agent.id,
+				authorName: scoped.agent.displayName,
 				text,
-				this.configuredAgents(),
-			).filter((agentId) => agentId !== scoped.agent.id);
-			if (peerMentions.length > 0)
-				throw new Error(
-					"post progress cannot address peers; use commonspace_handoff",
-				);
-		}
-		const message: CommonspaceMessage = {
-			id: messageId(),
-			conversation: scope.conversation,
-			authorType: "agent",
-			authorId: scoped.agent.id,
-			authorName: scoped.agent.displayName,
-			text,
-			createdAt: now(),
-		};
-		if (scoped.thread !== undefined) {
-			message.threadId = scoped.thread.id;
-			message.parentMessageId = scoped.thread.rootMessageId;
-		}
-		this.append(message);
-		if (scope.sessionName !== undefined)
-			this.executingAgentRunsByScope
-				.get(`${scoped.agent.id}\u0000${scope.sessionName}`)
-				?.progressMessageIds.add(message.id);
-		await this.persist();
-		this.broadcastRevision();
-		return { messageId: message.id };
+				createdAt: now(),
+			};
+			if (scoped.thread !== undefined) {
+				message.threadId = scoped.thread.id;
+				message.parentMessageId = scoped.thread.rootMessageId;
+			}
+			const previousState = this.state;
+			this.append(message);
+			try {
+				await this.persist();
+			} catch (error) {
+				this.state = previousState;
+				throw error;
+			}
+			if (scope.sessionName !== undefined)
+				this.executingAgentRunsByScope
+					.get(`${scoped.agent.id}\u0000${scope.sessionName}`)
+					?.progressMessageIds.add(message.id);
+			this.broadcastRevision();
+			return { messageId: message.id };
+		});
 	}
 
 	async handoff(
@@ -5260,12 +5288,18 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			);
 			throw error;
 		}
-		const previousState = this.state;
-		this.state = state;
 		try {
-			await this.persist();
+			await this.withStateChange(async () => {
+				const previousState = this.state;
+				this.state = state;
+				try {
+					await this.persist();
+				} catch (error) {
+					this.state = previousState;
+					throw error;
+				}
+			});
 		} catch (error) {
-			this.state = previousState;
 			await this.removeImageAttachments(
 				images.map((image) => image.metadata.id),
 			);
@@ -5334,26 +5368,42 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	async applyRetention(
 		request: ApplyRetentionRequest,
 	): Promise<CommonspaceRetentionPreview> {
-		return this.withAdmission(() =>
-			this.withStateChange(async () => {
-				const preview = this.previewRetention(request.conversation);
-				if (
-					!Number.isSafeInteger(request.expectedRevision) ||
-					request.expectedRevision !== preview.revision
-				)
-					throw new Error("retention preview is stale");
-				const removedThreads = retentionThreads(
-					this.state,
-					request.conversation,
-				);
-				if (this.retentionHasActiveWork(request.conversation, removedThreads))
-					throw new Error("conversation has active work");
-				await this.commitRetention(
-					prepareRetention(this.state, request.conversation, removedThreads),
-				);
-				return preview;
-			}),
-		);
+		return this.withAdmission(async () => {
+			const { preview, removedProcessScopeNames } = await this.withStateChange(
+				async () => {
+					const preview = this.previewRetention(request.conversation);
+					if (
+						!Number.isSafeInteger(request.expectedRevision) ||
+						request.expectedRevision !== preview.revision
+					)
+						throw new Error("retention preview is stale");
+					const removedThreads = retentionThreads(
+						this.state,
+						request.conversation,
+					);
+					if (this.retentionHasActiveWork(request.conversation, removedThreads))
+						throw new Error("conversation has active work");
+					const prepared = prepareRetention(
+						this.state,
+						request.conversation,
+						removedThreads,
+					);
+					await this.commitRetention(prepared);
+					return {
+						preview,
+						removedProcessScopeNames: prepared.removedProcessScopeNames,
+					};
+				},
+			);
+			await this.closeAcpProcessesMatching(
+				(agentId, scopeName) =>
+					removedProcessScopeNames.has(scopeName) &&
+					(request.conversation.kind !== "dm" ||
+						agentId === request.conversation.id),
+			);
+			await this.withStateChange(() => this.removePendingAttachmentDeletions());
+			return preview;
+		});
 	}
 
 	private retentionHasActiveWork(
@@ -5379,10 +5429,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		);
 	}
 
-	private async commitRetention({
-		state,
-		removedProcessScopeNames,
-	}: PreparedRetention): Promise<void> {
+	private async commitRetention({ state }: PreparedRetention): Promise<void> {
 		const previousState = this.state;
 		this.state = state;
 		try {
@@ -5391,12 +5438,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			this.state = previousState;
 			throw error;
 		}
-		await this.closeAcpProcessesMatching((_agentId, scopeName) =>
-			removedProcessScopeNames.has(scopeName),
-		);
 		this.revokeInvalidMcpCredentials();
 		this.broadcastRevision();
-		await this.removePendingAttachmentDeletions();
 	}
 	routing(): CommonspaceRoutingConfiguration {
 		return this.publicRoutingConfiguration();
@@ -5522,46 +5565,73 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	): Promise<CommonspaceChannelMemory> {
 		return this.withAdmission(async () =>
 			this.withChannelMemoryLock(channelId, async () => {
-				const channel = this.state.channels.find(
-					(candidate) => candidate.id === channelId,
+				const { memoryBefore, projection } = await this.withStateChange(
+					async () => {
+						const channel = this.state.channels.find(
+							(candidate) => candidate.id === channelId,
+						);
+						if (channel === undefined) throw new Error("unknown channel");
+						const memoryBefore: CommonspaceChannelMemory = {
+							...channel.memory,
+							status: "compacting",
+						};
+						const projection = projectChannelMemory(
+							this.state,
+							channelId,
+							this.state.defaults.memoryThreads,
+						);
+						const previousState = this.state;
+						this.replaceChannelMemoryState(channelId, () => memoryBefore);
+						try {
+							await this.persist();
+						} catch (error) {
+							this.state = previousState;
+							throw error;
+						}
+						this.broadcastRevision();
+						return { memoryBefore, projection };
+					},
 				);
-				if (channel === undefined) throw new Error("unknown channel");
-				const memoryBefore: CommonspaceChannelMemory = {
-					...channel.memory,
-					status: "compacting",
-				};
-				const projection = projectChannelMemory(
-					this.state,
-					channelId,
-					this.state.defaults.memoryThreads,
-				);
-				this.replaceChannelMemoryState(channelId, () => memoryBefore);
-				await this.persist();
-				this.broadcastRevision();
 				try {
 					const inferred = await this.inferChannelMemory(channelId, projection);
-					const memory = this.reconcileInferredChannelMemory(
-						channelId,
-						memoryBefore,
-						projection,
-						inferred,
-					);
-					if (memory === undefined)
-						throw new Error("channel was removed during context compaction");
-					this.replaceChannelMemoryState(channelId, () => memory);
-					await this.persist();
-					this.broadcastRevision();
-					return structuredClone(memory);
-				} catch (error) {
-					if (
-						this.replaceChannelMemoryState(channelId, (memory) => ({
-							...memory,
-							status: "failed",
-						})) !== undefined
-					) {
-						await this.persist();
+					return await this.withStateChange(async () => {
+						const memory = this.reconcileInferredChannelMemory(
+							channelId,
+							memoryBefore,
+							projection,
+							inferred,
+						);
+						if (memory === undefined)
+							throw new Error("channel was removed during context compaction");
+						const previousState = this.state;
+						this.replaceChannelMemoryState(channelId, () => memory);
+						try {
+							await this.persist();
+						} catch (error) {
+							this.state = previousState;
+							throw error;
+						}
 						this.broadcastRevision();
-					}
+						return structuredClone(memory);
+					});
+				} catch (error) {
+					await this.withStateChange(async () => {
+						const previousState = this.state;
+						if (
+							this.replaceChannelMemoryState(channelId, (memory) => ({
+								...memory,
+								status: "failed",
+							})) === undefined
+						)
+							return;
+						try {
+							await this.persist();
+						} catch (persistError) {
+							this.state = previousState;
+							throw persistError;
+						}
+						this.broadcastRevision();
+					});
 					throw error;
 				}
 			}),
@@ -5580,43 +5650,43 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		threadId: string,
 		request: UpdateThreadContextRequest,
 	): Promise<CommonspaceThreadContext> {
-		return this.withAdmission(async () => {
-			if (typeof request.summary !== "string")
-				throw new Error("thread context summary is required");
-			const thread = this.state.threads.find(
-				(candidate) => candidate.id === threadId,
-			);
-			if (thread === undefined) throw new Error("unknown thread");
-			const projection = projectThreadMemory(this.state, threadId);
-			const memory: CommonspaceThread["context"]["memory"] = {
-				summary: request.summary.normalize("NFKC").trim().slice(0, 16_000),
-				decisions: normalizedContextRequestEntries(
-					request.decisions,
-					"thread context decisions",
-				),
-				openQuestions: normalizedContextRequestEntries(
-					request.openQuestions,
-					"thread context open questions",
-				),
-				updatedAt: now(),
-				origin: "user",
-				status: "current",
-				sourceMessageCount: projection.sourceMessageCount,
-				estimatedTokens: projection.estimatedTokens,
-				compactedThroughMessageId: projection.compactedThroughMessageId,
-			};
-			const context = { ...thread.context, memory };
-			this.state = {
-				...this.state,
-				revision: this.state.revision + 1,
-				threads: this.state.threads.map((candidate) =>
-					candidate.id === threadId ? { ...candidate, context } : candidate,
-				),
-			};
-			await this.persist();
-			this.broadcastRevision();
-			return structuredClone(context);
-		});
+		return this.withAdmission(() =>
+			this.withPersistedStateChange(() => {
+				if (typeof request.summary !== "string")
+					throw new Error("thread context summary is required");
+				const thread = this.state.threads.find(
+					(candidate) => candidate.id === threadId,
+				);
+				if (thread === undefined) throw new Error("unknown thread");
+				const projection = projectThreadMemory(this.state, threadId);
+				const memory: CommonspaceThread["context"]["memory"] = {
+					summary: request.summary.normalize("NFKC").trim().slice(0, 16_000),
+					decisions: normalizedContextRequestEntries(
+						request.decisions,
+						"thread context decisions",
+					),
+					openQuestions: normalizedContextRequestEntries(
+						request.openQuestions,
+						"thread context open questions",
+					),
+					updatedAt: now(),
+					origin: "user",
+					status: "current",
+					sourceMessageCount: projection.sourceMessageCount,
+					estimatedTokens: projection.estimatedTokens,
+					compactedThroughMessageId: projection.compactedThroughMessageId,
+				};
+				const context = { ...thread.context, memory };
+				this.state = {
+					...this.state,
+					revision: this.state.revision + 1,
+					threads: this.state.threads.map((candidate) =>
+						candidate.id === threadId ? { ...candidate, context } : candidate,
+					),
+				};
+				return structuredClone(context);
+			}),
+		);
 	}
 
 	async compactThreadContext(
@@ -5760,42 +5830,52 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	}
 
 	async addPin(request: AddPinRequest): Promise<CommonspacePin> {
-		return this.withAdmission(async () => {
-			const pin = this.preparePin(request, this.resolvePinScope(request.scope));
-			const previousState = this.state;
-			this.state = {
-				...this.state,
-				revision: this.state.revision + 1,
-				pins: [...this.state.pins, pin],
-			};
-			this.invalidateChangedContextEvidence(previousState);
-			await this.persist();
-			this.broadcastRevision();
-			return structuredClone(pin);
-		});
+		return this.withAdmission(() =>
+			this.withPersistedStateChange(() => {
+				const pin = this.preparePin(
+					request,
+					this.resolvePinScope(request.scope),
+				);
+				const previousState = this.state;
+				this.state = {
+					...this.state,
+					revision: this.state.revision + 1,
+					pins: [...this.state.pins, pin],
+				};
+				this.invalidateChangedContextEvidence(previousState);
+				return structuredClone(pin);
+			}),
+		);
 	}
 
 	async removePin(pinId: string): Promise<CommonspacePin> {
-		return this.withAdmission(async () => {
-			if (typeof pinId !== "string" || pinId === "")
-				throw new Error("pin id is required");
-			const pin = this.state.pins.find((candidate) => candidate.id === pinId);
-			if (pin === undefined) throw new Error("unknown pin");
-			if (pin.removedAt !== null) return structuredClone(pin);
-			const removed = { ...pin, removedAt: now() };
-			const previousState = this.state;
-			this.state = {
-				...this.state,
-				revision: this.state.revision + 1,
-				pins: this.state.pins.map((candidate) =>
-					candidate.id === pinId ? removed : candidate,
-				),
-			};
-			this.invalidateChangedContextEvidence(previousState);
-			await this.persist();
-			this.broadcastRevision();
-			return structuredClone(removed);
-		});
+		return this.withAdmission(() =>
+			this.withStateChange(async () => {
+				if (typeof pinId !== "string" || pinId === "")
+					throw new Error("pin id is required");
+				const pin = this.state.pins.find((candidate) => candidate.id === pinId);
+				if (pin === undefined) throw new Error("unknown pin");
+				if (pin.removedAt !== null) return structuredClone(pin);
+				const removed = { ...pin, removedAt: now() };
+				const previousState = this.state;
+				this.state = {
+					...this.state,
+					revision: this.state.revision + 1,
+					pins: this.state.pins.map((candidate) =>
+						candidate.id === pinId ? removed : candidate,
+					),
+				};
+				this.invalidateChangedContextEvidence(previousState);
+				try {
+					await this.persist();
+				} catch (error) {
+					this.state = previousState;
+					throw error;
+				}
+				this.broadcastRevision();
+				return structuredClone(removed);
+			}),
+		);
 	}
 
 	async respondPermission(
@@ -5854,6 +5934,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		conversation: SendMessageRequest["conversation"],
 		thread: CommonspaceThread | undefined,
 		request: AgentPermissionRequest,
+		executionIsCurrent: () => boolean,
 	): Promise<AgentPermissionOutcome> {
 		const toolCallId = request.toolCallId
 			.normalize("NFKC")
@@ -5895,30 +5976,39 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		if (thread !== undefined) permission.threadId = thread.id;
 		if (request.kind !== undefined && request.kind.trim() !== "")
 			permission.kind = request.kind.trim().slice(0, 100);
-		const previousState = this.state;
-		const outcome = new Promise<AgentPermissionOutcome>((resolve) => {
-			this.permissionResolvers.set(permission.id, { resolve });
+		const pending = await this.withStateChange(async () => {
+			if (
+				activeRun.phase !== "running" ||
+				this.activeAgentRuns.get(activeRun.id) !== activeRun ||
+				!executionIsCurrent()
+			)
+				return null;
+			const outcome = new Promise<AgentPermissionOutcome>((resolve) => {
+				this.permissionResolvers.set(permission.id, { resolve });
+			});
+			const previousState = this.state;
+			if (conversation.kind === "dm")
+				this.updateMessageReplyStatus(
+					conversation,
+					activeRun.sourceMessageId,
+					"needs_input",
+				);
+			this.state = {
+				...this.state,
+				revision: this.state.revision + 1,
+				permissions: [...this.state.permissions, permission],
+			};
+			try {
+				await this.persist();
+			} catch (error) {
+				this.state = previousState;
+				this.permissionResolvers.delete(permission.id);
+				throw error;
+			}
+			this.broadcastRevision();
+			return { outcome };
 		});
-		if (conversation.kind === "dm")
-			this.updateMessageReplyStatus(
-				conversation,
-				activeRun.sourceMessageId,
-				"needs_input",
-			);
-		this.state = {
-			...this.state,
-			revision: this.state.revision + 1,
-			permissions: [...this.state.permissions, permission],
-		};
-		try {
-			await this.persist();
-		} catch (error) {
-			this.state = previousState;
-			this.permissionResolvers.delete(permission.id);
-			throw error;
-		}
-		this.broadcastRevision();
-		return outcome;
+		return pending?.outcome ?? {};
 	}
 
 	async inspectAgentCapabilities(
@@ -6295,7 +6385,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		return changed;
 	}
 
-	private interruptPendingPermissions(agentId?: string): boolean {
+	private markPendingPermissionsInterrupted(agentId?: string): string[] {
 		const pendingIds = new Set(
 			this.state.permissions
 				.filter(
@@ -6305,7 +6395,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				)
 				.map((permission) => permission.id),
 		);
-		if (pendingIds.size === 0) return false;
+		if (pendingIds.size === 0) return [];
 		const interruptedAt = now();
 		this.state = {
 			...this.state,
@@ -6320,11 +6410,16 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					: permission,
 			),
 		};
-		for (const permissionId of pendingIds) {
+		return [...pendingIds];
+	}
+
+	private resolveInterruptedPermissions(
+		permissionIds: readonly string[],
+	): void {
+		for (const permissionId of permissionIds) {
 			this.permissionResolvers.get(permissionId)?.resolve({});
 			this.permissionResolvers.delete(permissionId);
 		}
-		return true;
 	}
 
 	private processBelongsToRemovedChannel(
@@ -6491,7 +6586,6 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		mutation: CommonspaceMutation,
 	): Promise<void> {
 		if (mutation.action === "remove-agent") {
-			this.invalidateAgentExecution(mutation.agentId);
 			const reason = "Interrupted because the Agent was removed.";
 			const invalidatedRuns = [...this.activeAgentRuns.values()].filter(
 				(run) => run.agentId === mutation.agentId,
@@ -6533,23 +6627,49 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			return;
 
 		const reason = "Interrupted because agent permissions changed.";
-		this.invalidateAgentExecution(updated.id);
-		const changed = this.interruptPendingPermissions(updated.id);
+		const permissionInterruption = await this.withStateChange(async () => {
+			const permissionIds = this.markPendingPermissionsInterrupted(updated.id);
+			if (permissionIds.length === 0)
+				return { permissionIds, persistError: undefined };
+			let persistError: unknown;
+			try {
+				await this.persist();
+			} catch (error) {
+				persistError = error;
+			}
+			this.broadcastRevision();
+			return { permissionIds, persistError };
+		});
+		this.resolveInterruptedPermissions(permissionInterruption.permissionIds);
 		const runs = [...this.activeAgentRuns.values()].filter(
-			(run) => run.agentId === updated.id,
+			(run) =>
+				run.agentId === updated.id &&
+				run.agentExecutionRevision !== this.agentExecutionRevision(updated.id),
 		);
-		await this.interruptAgentRuns(runs, reason);
-		await this.recordPendingRunInvalidations(
-			{ kind: "agent", agentId: updated.id },
-			reason,
-		);
-		const currentFullAccess = this.agentFullAccess(updated);
-		await this.closeAcpProcessesMatching(
-			(candidateAgentId, _scopeName, processClient) =>
-				candidateAgentId === updated.id &&
-				this.acpLaunchAccess.get(processClient) !== currentFullAccess,
-		);
-		if (changed) await this.persist();
+		try {
+			await this.interruptAgentRuns(runs, reason);
+		} finally {
+			try {
+				await this.recordPendingRunInvalidations(
+					{ kind: "agent", agentId: updated.id },
+					reason,
+				);
+			} finally {
+				const currentAgent = this.state.agents.find(
+					(agent) => agent.id === updated.id,
+				);
+				if (currentAgent !== undefined) {
+					const currentFullAccess = this.agentFullAccess(currentAgent);
+					await this.closeAcpProcessesMatching(
+						(candidateAgentId, _scopeName, processClient) =>
+							candidateAgentId === updated.id &&
+							this.acpLaunchAccess.get(processClient) !== currentFullAccess,
+					);
+				}
+			}
+		}
+		if (permissionInterruption.persistError !== undefined)
+			throw permissionInterruption.persistError;
 	}
 
 	private async cleanupRemovedAgentProcesses(agentId: string): Promise<void> {
@@ -6630,17 +6750,42 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private async commitMutation(
 		mutation: CommonspaceMutation,
 	): Promise<CommonspaceState> {
-		const prepared = this.prepareMutation(mutation);
-		await this.applyMutationState(mutation);
-		this.invalidateChangedContextEvidence(prepared.previousState);
-		await this.persistMutation(prepared);
-		this.armScheduleTimer();
-		this.activateMutationRoutingConfiguration(prepared);
-		await this.invalidateMutationRuns(mutation);
-		this.revokeInvalidMcpCredentials();
-		await this.applyMutationAgentAccessChange(mutation, prepared.previousState);
-		await this.cleanupMutationProcesses(prepared.processCleanup);
-		this.broadcastRevision();
+		const prepared = await this.withStateChange(async () => {
+			const prepared = this.prepareMutation(mutation);
+			await this.applyMutationState(mutation);
+			this.invalidateChangedContextEvidence(prepared.previousState);
+			await this.persistMutation(prepared);
+			this.armScheduleTimer();
+			this.activateMutationRoutingConfiguration(prepared);
+			if (mutation.action === "remove-agent")
+				this.invalidateAgentExecution(mutation.agentId);
+			if (mutation.action === "update-agent-profile") {
+				const previous = prepared.previousState.agents.find(
+					(agent) => agent.id === mutation.agentId,
+				);
+				const updated = this.state.agents.find(
+					(agent) => agent.id === mutation.agentId,
+				);
+				if (
+					previous !== undefined &&
+					updated !== undefined &&
+					this.agentFullAccess(previous) !== this.agentFullAccess(updated)
+				)
+					this.invalidateAgentExecution(updated.id);
+			}
+			this.revokeInvalidMcpCredentials();
+			this.broadcastRevision();
+			return prepared;
+		});
+		try {
+			await this.invalidateMutationRuns(mutation);
+			await this.applyMutationAgentAccessChange(
+				mutation,
+				prepared.previousState,
+			);
+		} finally {
+			await this.cleanupMutationProcesses(prepared.processCleanup);
+		}
 		return this.publicSnapshot();
 	}
 
@@ -6649,9 +6794,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			mutation.action === "remove-agent"
 				? await this.acquireRoutingConfigurationLock()
 				: undefined;
-		return this.withAdmission(() =>
-			this.withStateChange(() => this.commitMutation(mutation)),
-		).finally(() => releaseRoutingConfiguration?.());
+		return this.withAdmission(() => this.commitMutation(mutation)).finally(() =>
+			releaseRoutingConfiguration?.(),
+		);
 	}
 
 	private withMessageSubmissionTelemetry(
@@ -6995,6 +7140,22 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		return task;
 	}
 
+	private withPersistedStateChange<T>(change: () => T): Promise<T> {
+		return this.withStateChange(async () => {
+			const previousState = this.state;
+			let result: T;
+			try {
+				result = change();
+				await this.persist();
+			} catch (error) {
+				this.state = previousState;
+				throw error;
+			}
+			this.broadcastRevision();
+			return result;
+		});
+	}
+
 	private async acceptPreparedSend(
 		prepared: PreparedSend,
 		markAccepted: () => void,
@@ -7018,49 +7179,54 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			await this.removePersistedSendAttachments(prepared);
 			throw error;
 		}
-		return this.withStateChange(async () => {
-			try {
-				assertCurrent();
-			} catch (error) {
-				await this.removePersistedSendAttachments(prepared);
-				throw error;
-			}
-			const response = await this.commitAcceptedSend(prepared);
-			markAccepted();
-			const scopeKey = this.followupScopeKey(
+		const { response, abortActiveRuns } = await this.withStateChange(
+			async () => {
+				try {
+					assertCurrent();
+				} catch (error) {
+					await this.removePersistedSendAttachments(prepared);
+					throw error;
+				}
+				const response = await this.commitAcceptedSend(prepared);
+				markAccepted();
+				const scopeKey = this.followupScopeKey(
+					prepared.request.conversation,
+					response.thread?.id,
+				);
+				const delivery = prepared.request.delivery ?? "queue";
+				let abortActiveRuns = false;
+				if (this.activeConversationRuns.has(scopeKey)) {
+					const queue = this.pendingFollowups.get(scopeKey) ?? [];
+					const pending = {
+						prepared,
+						response,
+						delivery,
+						telemetryContext: context.active(),
+					};
+					if (delivery === "steer" || delivery === "stop-and-send")
+						queue.unshift(pending);
+					else queue.push(pending);
+					this.pendingFollowups.set(scopeKey, queue);
+					abortActiveRuns =
+						delivery === "steer" || delivery === "stop-and-send";
+				} else {
+					this.startConversationRun(scopeKey, {
+						prepared,
+						response,
+						delivery,
+						telemetryContext: context.active(),
+					});
+				}
+				return { response, abortActiveRuns };
+			},
+		);
+		if (abortActiveRuns)
+			await this.abortConversationRuns(
 				prepared.request.conversation,
 				response.thread?.id,
+				"Stopped for a follow-up.",
 			);
-			const delivery = prepared.request.delivery ?? "queue";
-			if (this.activeConversationRuns.has(scopeKey)) {
-				const queue = this.pendingFollowups.get(scopeKey) ?? [];
-				const pending = {
-					prepared,
-					response,
-					delivery,
-					telemetryContext: context.active(),
-				};
-				if (delivery === "steer" || delivery === "stop-and-send")
-					queue.unshift(pending);
-				else queue.push(pending);
-				this.pendingFollowups.set(scopeKey, queue);
-				if (delivery === "steer" || delivery === "stop-and-send") {
-					await this.abortConversationRuns(
-						prepared.request.conversation,
-						response.thread?.id,
-						"Stopped for a follow-up.",
-					);
-				}
-			} else {
-				this.startConversationRun(scopeKey, {
-					prepared,
-					response,
-					delivery,
-					telemetryContext: context.active(),
-				});
-			}
-			return response;
-		});
+		return response;
 	}
 
 	private locateFailedRoutingSource(
@@ -7222,7 +7388,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	async retryRouting(
 		request: RetryRoutingRequest,
 	): Promise<RetryRoutingResponse> {
-		return this.withAdmission(() => this.commitRoutingRetry(request));
+		return this.withAdmission(() =>
+			this.withStateChange(() => this.commitRoutingRetry(request)),
+		);
 	}
 
 	private validatedRerouteProjectIds(
@@ -7569,7 +7737,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	async rerouteAssignment(
 		request: RerouteAssignmentRequest,
 	): Promise<RerouteAssignmentResponse> {
-		return this.withAdmission(() => this.commitRerouteAssignment(request));
+		return this.withAdmission(() =>
+			this.withStateChange(() => this.commitRerouteAssignment(request)),
+		);
 	}
 
 	private findPendingFollowup(
@@ -7593,48 +7763,62 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	async reorderFollowup(
 		request: ReorderFollowupRequest,
 	): Promise<FollowupQueueResponse> {
-		return this.withAdmission(async () => {
-			const messageId = this.requiredFollowupMessageId(request.messageId);
-			if (request.direction !== "up" && request.direction !== "down")
-				throw new Error("invalid queue direction");
-			const location = this.findPendingFollowup(messageId);
-			if (location === undefined) throw new Error("queued follow-up not found");
-			const target =
-				request.direction === "up" ? location.index - 1 : location.index + 1;
-			if (target >= 0 && target < location.queue.length) {
-				const [item] = location.queue.splice(location.index, 1);
-				if (item === undefined)
-					throw new Error("queued follow-up changed during reorder");
-				location.queue.splice(target, 0, item);
-				this.broadcastLiveActivities();
-			}
-			return { queuedFollowups: this.queuedFollowups() };
-		});
+		return this.withAdmission(() =>
+			this.withStateChange(async () => {
+				const messageId = this.requiredFollowupMessageId(request.messageId);
+				if (request.direction !== "up" && request.direction !== "down")
+					throw new Error("invalid queue direction");
+				const location = this.findPendingFollowup(messageId);
+				if (location === undefined)
+					throw new Error("queued follow-up not found");
+				const target =
+					request.direction === "up" ? location.index - 1 : location.index + 1;
+				if (target >= 0 && target < location.queue.length) {
+					const [item] = location.queue.splice(location.index, 1);
+					if (item === undefined)
+						throw new Error("queued follow-up changed during reorder");
+					location.queue.splice(target, 0, item);
+					this.broadcastLiveActivities();
+				}
+				return { queuedFollowups: this.queuedFollowups() };
+			}),
+		);
 	}
 
 	async removeFollowup(
 		request: RemoveFollowupRequest,
 	): Promise<FollowupQueueResponse> {
-		return this.withAdmission(async () => {
-			const messageId = this.requiredFollowupMessageId(request.messageId);
-			const location = this.findPendingFollowup(messageId);
-			if (location === undefined) throw new Error("queued follow-up not found");
-			const [removed] = location.queue.splice(location.index, 1);
-			if (location.queue.length === 0)
-				this.pendingFollowups.delete(location.scopeKey);
-			if (removed !== undefined) {
-				this.updateMessageReplyStatus(
-					removed.prepared.request.conversation,
-					messageId,
-					"cancelled",
-					"Removed from queue.",
-				);
-				await this.persist();
-				this.broadcastRevision();
-				this.broadcastLiveActivities();
-			}
-			return { queuedFollowups: this.queuedFollowups() };
-		});
+		return this.withAdmission(() =>
+			this.withStateChange(async () => {
+				const messageId = this.requiredFollowupMessageId(request.messageId);
+				const location = this.findPendingFollowup(messageId);
+				if (location === undefined)
+					throw new Error("queued follow-up not found");
+				const previousQueue = [...location.queue];
+				const previousState = this.state;
+				const [removed] = location.queue.splice(location.index, 1);
+				if (location.queue.length === 0)
+					this.pendingFollowups.delete(location.scopeKey);
+				if (removed !== undefined) {
+					this.updateMessageReplyStatus(
+						removed.prepared.request.conversation,
+						messageId,
+						"cancelled",
+						"Removed from queue.",
+					);
+					try {
+						await this.persist();
+					} catch (error) {
+						this.state = previousState;
+						this.pendingFollowups.set(location.scopeKey, previousQueue);
+						throw error;
+					}
+					this.broadcastRevision();
+					this.broadcastLiveActivities();
+				}
+				return { queuedFollowups: this.queuedFollowups() };
+			}),
+		);
 	}
 
 	async stopAgentRuns(
@@ -7671,19 +7855,26 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 							?.cancelSession(session.sessionId);
 				}),
 			);
-			const changed =
-				message.conversation.kind === "dm" && stoppedAgentIds.length > 0
-					? this.updateMessageReplyStatus(
-							message.conversation,
-							message.id,
-							"error",
-							"Stopped by user.",
-						)
-					: false;
-			if (changed) {
-				await this.persist();
+			await this.withStateChange(async () => {
+				const previousState = this.state;
+				const changed =
+					message.conversation.kind === "dm" && stoppedAgentIds.length > 0
+						? this.updateMessageReplyStatus(
+								message.conversation,
+								message.id,
+								"error",
+								"Stopped by user.",
+							)
+						: false;
+				if (!changed) return;
+				try {
+					await this.persist();
+				} catch (error) {
+					this.state = previousState;
+					throw error;
+				}
 				this.broadcastRevision();
-			}
+			});
 			return { stoppedAgentIds };
 		});
 	}
@@ -8579,20 +8770,40 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		invalidation: AgentRunInvalidation,
 		reason: string,
 	): Promise<void> {
-		const invalidated = this.takePendingRunInvalidations(invalidation);
-		await Promise.all(
-			invalidated.agentRuns.map((run) =>
-				this.recordInterruptedAgentRun(run, reason),
-			),
-		);
-		let routingChanged = false;
-		for (const item of invalidated.routingFollowups) {
-			routingChanged =
-				this.recordPendingRoutingInterruption(item, reason) || routingChanged;
-		}
-		if (!routingChanged) return;
-		await this.persist();
-		this.broadcastRevision();
+		await this.withStateChange(async () => {
+			const previousState = this.state;
+			const previousQueues = new Map(
+				[...this.pendingFollowups].map(([scopeKey, queue]) => [
+					scopeKey,
+					[...queue],
+				]),
+			);
+			const invalidated = this.takePendingRunInvalidations(invalidation);
+			const previousPhases = invalidated.agentRuns.map((run) => run.phase);
+			let changed = false;
+			for (const run of invalidated.agentRuns)
+				changed = this.applyInterruptedAgentRun(run, reason) || changed;
+			for (const item of invalidated.routingFollowups) {
+				changed =
+					this.recordPendingRoutingInterruption(item, reason) || changed;
+			}
+			if (!changed) return;
+			try {
+				await this.persist();
+			} catch (error) {
+				this.state = previousState;
+				for (const [index, run] of invalidated.agentRuns.entries()) {
+					const previousPhase = previousPhases[index];
+					if (previousPhase !== undefined) run.phase = previousPhase;
+				}
+				this.pendingFollowups.clear();
+				for (const [scopeKey, queue] of previousQueues)
+					this.pendingFollowups.set(scopeKey, queue);
+				this.broadcastLiveActivities();
+				throw error;
+			}
+			this.broadcastRevision();
+		});
 	}
 
 	private async interruptAgentRuns(
@@ -8606,16 +8817,20 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			const session = this.activeAcpSessions.get(run.scopeKey);
 			if (session !== undefined) sessions.set(run.scopeKey, session);
 		}
-		await Promise.all(
-			running.map((run) => this.recordInterruptedAgentRun(run, reason)),
-		);
-		await Promise.all(
-			[...sessions.values()].map((session) =>
-				this.acpProcesses
-					.get(session.processScopeKey)
-					?.cancelSession(session.sessionId),
-			),
-		);
+		try {
+			await this.withStateChange(async () => {
+				for (const run of running)
+					await this.recordInterruptedAgentRun(run, reason);
+			});
+		} finally {
+			await Promise.all(
+				[...sessions.values()].map((session) =>
+					this.acpProcesses
+						.get(session.processScopeKey)
+						?.cancelSession(session.sessionId),
+				),
+			);
+		}
 	}
 
 	private async abortConversationRuns(
@@ -8634,23 +8849,31 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			(run) => runIds.has(run.id) && !run.abortController.signal.aborted,
 		);
 		await this.interruptAgentRuns(runs, reason);
-		const sourceMessageIds = new Set(
-			activities.map((activity) => activity.sourceMessageId),
-		);
-		let changed = false;
-		for (const sourceMessageId of sourceMessageIds) {
-			changed =
-				this.updateMessageReplyStatus(
-					conversation,
-					sourceMessageId,
-					"cancelled",
-					reason,
-				) || changed;
-		}
-		if (changed) {
-			await this.persist();
-			this.broadcastRevision();
-		}
+		await this.withStateChange(async () => {
+			const previousState = this.state;
+			const sourceMessageIds = new Set(
+				activities.map((activity) => activity.sourceMessageId),
+			);
+			let changed = false;
+			for (const sourceMessageId of sourceMessageIds) {
+				changed =
+					this.updateMessageReplyStatus(
+						conversation,
+						sourceMessageId,
+						"cancelled",
+						reason,
+					) || changed;
+			}
+			if (changed) {
+				try {
+					await this.persist();
+				} catch (error) {
+					this.state = previousState;
+					throw error;
+				}
+				this.broadcastRevision();
+			}
+		});
 	}
 
 	private async persistSendAttachments(prepared: PreparedSend): Promise<void> {
@@ -8929,17 +9152,25 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		execution: AgentRunExecutionContext,
 	): Promise<void> {
 		const conversation = execution.prepared.request.conversation;
-		if (
-			conversation.kind !== "dm" ||
-			!this.updateMessageReplyStatus(
-				conversation,
-				execution.run.sourceMessageId,
-				"running",
+		if (conversation.kind !== "dm") return;
+		await this.withStateChange(async () => {
+			const previousState = this.state;
+			if (
+				!this.updateMessageReplyStatus(
+					conversation,
+					execution.run.sourceMessageId,
+					"running",
+				)
 			)
-		)
-			return;
-		await this.persist();
-		this.broadcastRevision();
+				return;
+			try {
+				await this.persist();
+			} catch (error) {
+				this.state = previousState;
+				throw error;
+			}
+			this.broadcastRevision();
+		});
 	}
 
 	private agentRunInput(
@@ -8966,6 +9197,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					prepared.request.conversation,
 					thread,
 					request,
+					executionIsCurrent,
 				),
 			signal: execution.run.abortController.signal,
 		};
@@ -9092,56 +9324,72 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		session: ReplyDeliverySession,
 		text: string,
 	): Promise<void> {
-		if (session.relayStopRecorded) return;
-		session.relayStopRecorded = true;
-		const { prepared, response, thread } = session;
-		const stop: CommonspaceMessage = {
-			id: messageId(),
-			sourceMessageId: response.accepted.id,
-			conversation: prepared.request.conversation,
-			authorType: "system",
-			authorId: "system",
-			authorName: "Commonspace",
-			text,
-			createdAt: now(),
-			...projectReferenceFields(prepared.projects),
-		};
-		if (thread !== undefined) {
-			stop.threadId = thread.id;
-			stop.parentMessageId = thread.rootMessageId;
-		}
-		this.append(stop);
-		await this.persist();
-		this.broadcastRevision();
+		await this.withStateChange(async () => {
+			if (session.relayStopRecorded) return;
+			const { prepared, response, thread } = session;
+			const stop: CommonspaceMessage = {
+				id: messageId(),
+				sourceMessageId: response.accepted.id,
+				conversation: prepared.request.conversation,
+				authorType: "system",
+				authorId: "system",
+				authorName: "Commonspace",
+				text,
+				createdAt: now(),
+				...projectReferenceFields(prepared.projects),
+			};
+			if (thread !== undefined) {
+				stop.threadId = thread.id;
+				stop.parentMessageId = thread.rootMessageId;
+			}
+			const previousState = this.state;
+			this.append(stop);
+			try {
+				await this.persist();
+			} catch (error) {
+				this.state = previousState;
+				throw error;
+			}
+			session.relayStopRecorded = true;
+			this.broadcastRevision();
+		});
 	}
 
 	private async ensureAgentThreadMembership(
 		execution: AgentRunExecutionContext,
 	): Promise<void> {
-		const { agent, thread } = execution;
-		if (thread === undefined) return;
-		const currentThread = this.state.threads.find(
-			(candidate) => candidate.id === thread.id,
-		);
-		if (
-			currentThread === undefined ||
-			currentThread.agentIds.includes(agent.id)
-		)
-			return;
-		this.state = {
-			...this.state,
-			revision: this.state.revision + 1,
-			threads: this.state.threads.map((candidate) =>
-				candidate.id === currentThread.id
-					? {
-							...currentThread,
-							agentIds: [...currentThread.agentIds, agent.id],
-						}
-					: candidate,
-			),
-		};
-		await this.persist();
-		this.broadcastRevision();
+		await this.withStateChange(async () => {
+			const { agent, thread } = execution;
+			if (thread === undefined) return;
+			const currentThread = this.state.threads.find(
+				(candidate) => candidate.id === thread.id,
+			);
+			if (
+				currentThread === undefined ||
+				currentThread.agentIds.includes(agent.id)
+			)
+				return;
+			const previousState = this.state;
+			this.state = {
+				...this.state,
+				revision: this.state.revision + 1,
+				threads: this.state.threads.map((candidate) =>
+					candidate.id === currentThread.id
+						? {
+								...currentThread,
+								agentIds: [...currentThread.agentIds, agent.id],
+							}
+						: candidate,
+				),
+			};
+			try {
+				await this.persist();
+			} catch (error) {
+				this.state = previousState;
+				throw error;
+			}
+			this.broadcastRevision();
+		});
 	}
 
 	private async recordAgentRunFailure(
@@ -9150,39 +9398,47 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		delivery: AgentDelivery,
 		deliveryProjects: readonly CommonspaceState["projects"][number][],
 	): Promise<void> {
-		const { run, agent, prepared, thread } = execution;
-		if (prepared.request.conversation.kind === "dm") {
-			const status = /timed? out|timeout/iu.test(message)
-				? "timeout"
-				: "failed";
-			this.updateMessageReplyStatus(
-				prepared.request.conversation,
-				run.sourceMessageId,
-				status,
-				message,
-			);
-		}
-		const failure: CommonspaceMessage = {
-			id: messageId(),
-			sourceMessageId: run.sourceMessageId,
-			conversation: prepared.request.conversation,
-			authorType: "system",
-			authorId: "system",
-			authorName: "Commonspace",
-			text: `@${agent.id} run failed: ${message}`,
-			createdAt: now(),
-			...projectReferenceFields(deliveryProjects),
-		};
-		if (delivery.routingAssignmentId !== undefined)
-			failure.routingAssignmentId = delivery.routingAssignmentId;
-		if (thread !== undefined) {
-			failure.threadId = thread.id;
-			failure.parentMessageId = thread.rootMessageId;
-		}
-		this.append(failure);
-		run.phase = "terminal";
-		await this.persist();
-		this.broadcastRevision();
+		await this.withStateChange(async () => {
+			const previousState = this.state;
+			const { run, agent, prepared, thread } = execution;
+			if (prepared.request.conversation.kind === "dm") {
+				const status = /timed? out|timeout/iu.test(message)
+					? "timeout"
+					: "failed";
+				this.updateMessageReplyStatus(
+					prepared.request.conversation,
+					run.sourceMessageId,
+					status,
+					message,
+				);
+			}
+			const failure: CommonspaceMessage = {
+				id: messageId(),
+				sourceMessageId: run.sourceMessageId,
+				conversation: prepared.request.conversation,
+				authorType: "system",
+				authorId: "system",
+				authorName: "Commonspace",
+				text: `@${agent.id} run failed: ${message}`,
+				createdAt: now(),
+				...projectReferenceFields(deliveryProjects),
+			};
+			if (delivery.routingAssignmentId !== undefined)
+				failure.routingAssignmentId = delivery.routingAssignmentId;
+			if (thread !== undefined) {
+				failure.threadId = thread.id;
+				failure.parentMessageId = thread.rootMessageId;
+			}
+			this.append(failure);
+			try {
+				await this.persist();
+			} catch (error) {
+				this.state = previousState;
+				throw error;
+			}
+			run.phase = "terminal";
+			this.broadcastRevision();
+		});
 	}
 
 	private async agentRunAttribution(
@@ -9241,9 +9497,11 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private async recordInterruptedExecution(
 		execution: AgentRunExecutionContext,
 	): Promise<void> {
-		const state = this.agentRunExecutionState(execution);
-		if (state.status !== "interrupted") return;
-		await this.recordInterruptedAgentRun(execution.run, state.reason);
+		await this.withStateChange(async () => {
+			const state = this.agentRunExecutionState(execution);
+			if (state.status !== "interrupted") return;
+			await this.recordInterruptedAgentRun(execution.run, state.reason);
+		});
 	}
 
 	private async completeAgentReply({
@@ -9277,75 +9535,97 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			agentResponse,
 			projectRoots,
 		);
-		if (this.agentRunExecutionState(execution).status !== "current") {
+		let completed: CompletedAgentReply | null;
+		try {
+			completed = await this.withStateChange(async () => {
+				if (this.agentRunExecutionState(execution).status !== "current")
+					return null;
+				const previousState = this.state;
+				if (agentResponse.sessionId !== undefined)
+					this.rememberAgentSession(
+						agent.id,
+						sessionName,
+						agentResponse.sessionId,
+					);
+				if (prepared.request.conversation.kind === "dm") {
+					const status = completedReplyStatus(agentResponse.text);
+					this.updateMessageReplyStatus(
+						prepared.request.conversation,
+						run.sourceMessageId,
+						status,
+						status === "silent"
+							? "The agent completed without returning a visible response."
+							: undefined,
+					);
+				}
+				const key = conversationKey(prepared.request.conversation);
+				const text =
+					requestedHandoff === undefined || requestedHandoffTarget === undefined
+						? agentResponse.text
+						: `${agentResponse.text}\n\n@${agentMentionName(requestedHandoffTarget)} ${requestedHandoff.request}`;
+				const normalizedResponse = text.normalize("NFKC").trim();
+				const duplicateProgress = this.state.messages[key]?.findLast(
+					(message) =>
+						run.progressMessageIds.has(message.id) &&
+						message.text === normalizedResponse,
+				);
+				const reply: CommonspaceMessage = {
+					...duplicateProgress,
+					id: duplicateProgress?.id ?? messageId(),
+					sourceMessageId: run.sourceMessageId,
+					conversation: prepared.request.conversation,
+					authorType: "agent",
+					authorId: agent.id,
+					authorName: agent.displayName,
+					text,
+					createdAt: completedAt,
+					...projectReferenceFields(deliveryProjects),
+				};
+				if (delivery.routingAssignmentId !== undefined)
+					reply.routingAssignmentId = delivery.routingAssignmentId;
+				if (agentFiles.length > 0)
+					reply.files = agentFiles.map((file) => file.metadata);
+				if (trace !== undefined) reply.trace = trace;
+				if (runAttribution !== undefined) reply.runAttribution = runAttribution;
+				if (thread !== undefined) {
+					reply.threadId = thread.id;
+					reply.parentMessageId = thread.rootMessageId;
+				}
+				if (duplicateProgress !== undefined) {
+					this.state = {
+						...this.state,
+						messages: {
+							...this.state.messages,
+							[key]: (this.state.messages[key] ?? []).filter(
+								(message) => message.id !== duplicateProgress.id,
+							),
+						},
+					};
+				}
+				this.append(reply);
+				try {
+					await this.persist();
+				} catch (error) {
+					this.state = previousState;
+					throw error;
+				}
+				run.phase = "terminal";
+				this.broadcastRevision();
+				return { reply, requestedHandoffTarget };
+			});
+		} catch (error) {
+			await this.removeFileAttachments(
+				agentFiles.map((file) => file.metadata.id),
+			);
+			throw error;
+		}
+		if (completed === null) {
 			await this.removeFileAttachments(
 				agentFiles.map((file) => file.metadata.id),
 			);
 			await this.recordInterruptedExecution(execution);
-			return null;
 		}
-		if (agentResponse.sessionId !== undefined)
-			this.rememberAgentSession(agent.id, sessionName, agentResponse.sessionId);
-		if (prepared.request.conversation.kind === "dm") {
-			const status = completedReplyStatus(agentResponse.text);
-			this.updateMessageReplyStatus(
-				prepared.request.conversation,
-				run.sourceMessageId,
-				status,
-				status === "silent"
-					? "The agent completed without returning a visible response."
-					: undefined,
-			);
-		}
-		const key = conversationKey(prepared.request.conversation);
-		const text =
-			requestedHandoff === undefined || requestedHandoffTarget === undefined
-				? agentResponse.text
-				: `${agentResponse.text}\n\n@${agentMentionName(requestedHandoffTarget)} ${requestedHandoff.request}`;
-		const normalizedResponse = text.normalize("NFKC").trim();
-		const duplicateProgress = this.state.messages[key]?.findLast(
-			(message) =>
-				run.progressMessageIds.has(message.id) &&
-				message.text === normalizedResponse,
-		);
-		const reply: CommonspaceMessage = {
-			...duplicateProgress,
-			id: duplicateProgress?.id ?? messageId(),
-			sourceMessageId: run.sourceMessageId,
-			conversation: prepared.request.conversation,
-			authorType: "agent",
-			authorId: agent.id,
-			authorName: agent.displayName,
-			text,
-			createdAt: completedAt,
-			...projectReferenceFields(deliveryProjects),
-		};
-		if (delivery.routingAssignmentId !== undefined)
-			reply.routingAssignmentId = delivery.routingAssignmentId;
-		if (agentFiles.length > 0)
-			reply.files = agentFiles.map((file) => file.metadata);
-		if (trace !== undefined) reply.trace = trace;
-		if (runAttribution !== undefined) reply.runAttribution = runAttribution;
-		if (thread !== undefined) {
-			reply.threadId = thread.id;
-			reply.parentMessageId = thread.rootMessageId;
-		}
-		if (duplicateProgress !== undefined) {
-			this.state = {
-				...this.state,
-				messages: {
-					...this.state.messages,
-					[key]: (this.state.messages[key] ?? []).filter(
-						(message) => message.id !== duplicateProgress.id,
-					),
-				},
-			};
-		}
-		this.append(reply);
-		run.phase = "terminal";
-		await this.persist();
-		this.broadcastRevision();
-		return { reply, requestedHandoffTarget };
+		return completed;
 	}
 
 	private async deliverRequestedHandoff({
@@ -9834,66 +10114,91 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				"Routing selected an Agent whose execution authority changed.",
 			);
 		}
-		const thread = this.resolvedPendingRoutingThread(
-			response,
-			routing,
-			projects.projects,
-		);
-		const accepted: CommonspaceMessage = {
-			...response.accepted,
-			...projectReferenceFields(projects.projects),
-			routing,
-		};
-		const resolved: ResolvedPendingRouting = {
+		return {
 			routing,
 			projects: projects.projects,
-			accepted,
 		};
-		if (thread !== undefined) resolved.thread = thread;
-		return resolved;
 	}
 
 	private async commitResolvedPendingRouting(
 		prepared: PreparedSend,
 		response: SendMessageResponse,
 		resolved: ResolvedPendingRouting,
-	): Promise<{ prepared: PreparedSend; response: SendMessageResponse }> {
-		const key = conversationKey(prepared.request.conversation);
-		this.state = {
-			...this.state,
-			revision: this.state.revision + 1,
-			messages: {
-				...this.state.messages,
-				[key]: (this.state.messages[key] ?? []).map((message) =>
-					message.id === resolved.accepted.id ? resolved.accepted : message,
-				),
-			},
-			threads:
-				resolved.thread === undefined
-					? this.state.threads
-					: this.state.threads.map((existing) =>
-							existing.id === resolved.thread?.id ? resolved.thread : existing,
-						),
-		};
-		await this.persist();
-		this.broadcastRevision();
+	): Promise<{ prepared: PreparedSend; response: SendMessageResponse } | null> {
+		return this.withStateChange(async () => {
+			const pending = this.currentPendingRoutingMessage(prepared, response);
+			if (pending === undefined) return null;
+			if (!this.preparedSendIsCurrent(prepared, prepared.thread))
+				throw new Error("conversation changed during routing");
+			if (
+				resolved.routing.agentIds.some(
+					(agentId) => !this.preparedAgentExecutionIsCurrent(prepared, agentId),
+				)
+			)
+				throw new Error(
+					"Routing selected an Agent whose execution authority changed.",
+				);
+			const projects = resolved.projects.map((project) => {
+				const current = this.state.projects.find(
+					(candidate) => candidate.id === project.id,
+				);
+				if (current === undefined)
+					throw new Error("Project was removed during routing");
+				return current;
+			});
+			const thread = this.resolvedPendingRoutingThread(
+				response,
+				resolved.routing,
+				projects,
+			);
+			const accepted: CommonspaceMessage = {
+				...pending,
+				...projectReferenceFields(projects),
+				routing: resolved.routing,
+			};
+			const key = conversationKey(prepared.request.conversation);
+			const previousState = this.state;
+			this.state = {
+				...this.state,
+				revision: this.state.revision + 1,
+				messages: {
+					...this.state.messages,
+					[key]: (this.state.messages[key] ?? []).map((message) =>
+						message.id === accepted.id ? accepted : message,
+					),
+				},
+				threads:
+					thread === undefined
+						? this.state.threads
+						: this.state.threads.map((existing) =>
+								existing.id === thread.id ? thread : existing,
+							),
+			};
+			try {
+				await this.persist();
+			} catch (error) {
+				this.state = previousState;
+				throw error;
+			}
+			this.broadcastRevision();
 
-		const nextPrepared: PreparedSend = {
-			...prepared,
-			agentIds: resolved.routing.agentIds,
-			projects: resolved.projects,
-			routing: resolved.routing,
-		};
-		const project = resolved.projects[0];
-		if (project !== undefined) nextPrepared.project = project;
-		if (resolved.thread !== undefined) nextPrepared.thread = resolved.thread;
-		const nextResponse: SendMessageResponse = {
-			...response,
-			accepted: resolved.accepted,
-			state: this.publicSnapshot(),
-		};
-		if (resolved.thread !== undefined) nextResponse.thread = resolved.thread;
-		return { prepared: nextPrepared, response: nextResponse };
+			const nextPrepared: PreparedSend = {
+				...prepared,
+				agentIds: resolved.routing.agentIds,
+				projects,
+				routing: resolved.routing,
+			};
+			const project = projects[0];
+			if (project !== undefined) nextPrepared.project = project;
+			if (thread !== undefined) nextPrepared.thread = thread;
+			const nextResponse: SendMessageResponse = {
+				...response,
+				accepted,
+				state: this.publicSnapshot(),
+			};
+			if (thread !== undefined) nextResponse.thread = thread;
+			return { prepared: nextPrepared, response: nextResponse };
+		});
 	}
 
 	private async commitFailedPendingRouting(
@@ -9901,37 +10206,45 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		response: SendMessageResponse,
 		reason: string,
 	): Promise<null> {
-		const pending = this.currentPendingRoutingMessage(
-			prepared,
-			response,
-		)?.routing;
-		if (pending === undefined) return null;
-		const routing = failedRoutingDecision(
-			pending,
-			pending.startedAt ?? response.accepted.createdAt,
-			reason,
-		);
-		const key = conversationKey(prepared.request.conversation);
-		this.state = {
-			...this.state,
-			revision: this.state.revision + 1,
-			messages: {
-				...this.state.messages,
-				[key]: (this.state.messages[key] ?? []).map((message) =>
-					message.id === response.accepted.id
-						? {
-								...message,
-								routing,
-								replyStatus: "failed",
-								replyError: routing.reason,
-							}
-						: message,
-				),
-			},
-		};
-		await this.persist();
-		this.broadcastRevision();
-		return null;
+		return this.withStateChange(async () => {
+			const pending = this.currentPendingRoutingMessage(
+				prepared,
+				response,
+			)?.routing;
+			if (pending === undefined) return null;
+			const routing = failedRoutingDecision(
+				pending,
+				pending.startedAt ?? response.accepted.createdAt,
+				reason,
+			);
+			const key = conversationKey(prepared.request.conversation);
+			const previousState = this.state;
+			this.state = {
+				...this.state,
+				revision: this.state.revision + 1,
+				messages: {
+					...this.state.messages,
+					[key]: (this.state.messages[key] ?? []).map((message) =>
+						message.id === response.accepted.id
+							? {
+									...message,
+									routing,
+									replyStatus: "failed",
+									replyError: routing.reason,
+								}
+							: message,
+					),
+				},
+			};
+			try {
+				await this.persist();
+			} catch (error) {
+				this.state = previousState;
+				throw error;
+			}
+			this.broadcastRevision();
+			return null;
+		});
 	}
 
 	private async resolvePendingRouting(
@@ -10058,18 +10371,18 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		return { status: "current" };
 	}
 
-	private async recordInterruptedAgentRun(
+	private applyInterruptedAgentRun(
 		run: ActiveAgentRun,
 		reason: string,
-	): Promise<void> {
-		if (run.phase === "terminal") return;
+	): boolean {
+		if (run.phase === "terminal") return false;
 		const key = conversationKey(run.conversation);
 		const source = this.state.messages[key]?.find(
 			(message) => message.id === run.sourceMessageId,
 		);
 		if (source === undefined) {
 			run.phase = "terminal";
-			return;
+			return false;
 		}
 		if (run.conversation.kind === "dm") {
 			if (
@@ -10077,14 +10390,13 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				source.replyStatus !== "running" &&
 				source.replyStatus !== "needs_input"
 			)
-				return;
+				return false;
 			this.updateMessageReplyStatus(
 				run.conversation,
 				run.sourceMessageId,
 				"cancelled",
 				reason,
 			);
-			run.phase = "terminal";
 		} else {
 			const existingFailure = this.state.messages[key]?.some(
 				(message) =>
@@ -10096,7 +10408,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			);
 			if (existingFailure === true) {
 				run.phase = "terminal";
-				return;
+				return false;
 			}
 			const failure: CommonspaceMessage = {
 				id: messageId(),
@@ -10124,9 +10436,25 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				failure.parentMessageId = currentThread.rootMessageId;
 			}
 			this.append(failure);
-			run.phase = "terminal";
 		}
-		await this.persist();
+		run.phase = "terminal";
+		return true;
+	}
+
+	private async recordInterruptedAgentRun(
+		run: ActiveAgentRun,
+		reason: string,
+	): Promise<void> {
+		const previousState = this.state;
+		const previousPhase = run.phase;
+		if (!this.applyInterruptedAgentRun(run, reason)) return;
+		try {
+			await this.persist();
+		} catch (error) {
+			this.state = previousState;
+			run.phase = previousPhase;
+			throw error;
+		}
 		this.broadcastRevision();
 	}
 
@@ -10307,9 +10635,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		agentId: string,
 		sessionName: string,
 		expectedSessionId: string,
-	): void {
+	): boolean {
 		const current = this.state.agentSessions[agentId];
-		if (current?.[sessionName] !== expectedSessionId) return;
+		if (current?.[sessionName] !== expectedSessionId) return false;
 		const remaining = { ...current };
 		delete remaining[sessionName];
 		const agentSessions = { ...this.state.agentSessions };
@@ -10320,6 +10648,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			revision: this.state.revision + 1,
 			agentSessions,
 		};
+		return true;
 	}
 
 	private async inferChannelMemory(
@@ -10386,6 +10715,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			const sourceState = this.state;
 			const source = buildRoutingMemoryCompactionPrompt(sourceState, channelId);
 			if (source === null) return;
+			let update: (
+				channel: Readonly<CommonspaceState["channels"][number]>,
+			) => CommonspaceState["channels"][number]["routingMemory"];
 			try {
 				const summary = parseRoutingMemoryCompaction(
 					await this.completeInference(
@@ -10395,41 +10727,42 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 						{ kind: "channel-context", channelId },
 					),
 				);
-				if (
-					!this.updateRoutingMemoryIfCurrent(
-						channelId,
-						sourceState,
-						source.compactedThroughCorrectionId,
-						() => ({
-							summary,
-							status: "current",
-							correctionCount: source.correctionCount,
-							compactedThroughCorrectionId: source.compactedThroughCorrectionId,
-							updatedAt: now(),
-						}),
-					)
-				)
-					return;
+				update = () => ({
+					summary,
+					status: "current",
+					correctionCount: source.correctionCount,
+					compactedThroughCorrectionId: source.compactedThroughCorrectionId,
+					updatedAt: now(),
+				});
 			} catch (error) {
 				this.environment.logger?.warn(
 					`Commonspace routing memory compaction failed: ${error instanceof Error ? error.message : String(error)}`,
 				);
+				update = (channel) => ({
+					...channel.routingMemory,
+					status: "failed",
+					correctionCount: source.correctionCount,
+				});
+			}
+			await this.withStateChange(async () => {
+				const previousState = this.state;
 				if (
 					!this.updateRoutingMemoryIfCurrent(
 						channelId,
 						sourceState,
 						source.compactedThroughCorrectionId,
-						(channel) => ({
-							...channel.routingMemory,
-							status: "failed",
-							correctionCount: source.correctionCount,
-						}),
+						update,
 					)
 				)
 					return;
-			}
-			await this.persist();
-			this.broadcastRevision();
+				try {
+					await this.persist();
+				} catch (error) {
+					this.state = previousState;
+					throw error;
+				}
+				this.broadcastRevision();
+			});
 		});
 	}
 
@@ -10563,28 +10896,39 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private async beginThreadMemoryCompaction(
 		threadId: string,
 	): Promise<ThreadMemoryInferenceBaseline> {
-		const thread = this.state.threads.find(
-			(candidate) => candidate.id === threadId,
-		);
-		if (thread === undefined) throw new Error("unknown thread");
-		const projectionBeforeInference = projectThreadMemory(this.state, threadId);
-		const memoryBeforeInference: ThreadMemory = {
-			...thread.context.memory,
-			status: "compacting",
-		};
-		if (
-			this.replaceThreadMemoryState(threadId, () => memoryBeforeInference) ===
-			undefined
-		)
-			throw new Error("unknown thread");
-		await this.persist();
-		this.broadcastRevision();
-		return {
-			threadId,
-			channelId: thread.channelId,
-			memoryBeforeInference,
-			projectionBeforeInference,
-		};
+		return this.withStateChange(async () => {
+			const thread = this.state.threads.find(
+				(candidate) => candidate.id === threadId,
+			);
+			if (thread === undefined) throw new Error("unknown thread");
+			const projectionBeforeInference = projectThreadMemory(
+				this.state,
+				threadId,
+			);
+			const memoryBeforeInference: ThreadMemory = {
+				...thread.context.memory,
+				status: "compacting",
+			};
+			const previousState = this.state;
+			if (
+				this.replaceThreadMemoryState(threadId, () => memoryBeforeInference) ===
+				undefined
+			)
+				throw new Error("unknown thread");
+			try {
+				await this.persist();
+			} catch (error) {
+				this.state = previousState;
+				throw error;
+			}
+			this.broadcastRevision();
+			return {
+				threadId,
+				channelId: thread.channelId,
+				memoryBeforeInference,
+				projectionBeforeInference,
+			};
+		});
 	}
 
 	private async completeThreadMemoryCompaction(
@@ -10598,32 +10942,48 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			snapshot.threadId,
 			snapshot.projectionBeforeInference,
 		);
-		const memory = this.reconcileInferredThreadMemory(
-			snapshot,
-			inferred,
-			"preserve-current",
-		);
-		if (memory === undefined)
-			throw new Error("thread was removed during context compaction");
-		const context = this.replaceThreadMemoryState(
-			snapshot.threadId,
-			() => memory,
-		);
-		if (context === undefined)
-			throw new Error("thread was removed during context compaction");
-		await this.persist();
-		this.broadcastRevision();
-		return structuredClone(context);
+		return this.withStateChange(async () => {
+			const memory = this.reconcileInferredThreadMemory(
+				snapshot,
+				inferred,
+				"preserve-current",
+			);
+			if (memory === undefined)
+				throw new Error("thread was removed during context compaction");
+			const previousState = this.state;
+			const context = this.replaceThreadMemoryState(
+				snapshot.threadId,
+				() => memory,
+			);
+			if (context === undefined)
+				throw new Error("thread was removed during context compaction");
+			try {
+				await this.persist();
+			} catch (error) {
+				this.state = previousState;
+				throw error;
+			}
+			this.broadcastRevision();
+			return structuredClone(context);
+		});
 	}
 
 	private async failThreadMemoryCompaction(threadId: string): Promise<void> {
-		const context = this.replaceThreadMemoryState(threadId, (memory) => ({
-			...memory,
-			status: "failed",
-		}));
-		if (context === undefined) return;
-		await this.persist();
-		this.broadcastRevision();
+		await this.withStateChange(async () => {
+			const previousState = this.state;
+			const context = this.replaceThreadMemoryState(threadId, (memory) => ({
+				...memory,
+				status: "failed",
+			}));
+			if (context === undefined) return;
+			try {
+				await this.persist();
+			} catch (error) {
+				this.state = previousState;
+				throw error;
+			}
+			this.broadcastRevision();
+		});
 	}
 
 	private replaceChannelMemoryState(
@@ -10674,13 +11034,31 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				...memory,
 				status: "compacting",
 			};
-			if (
-				this.replaceChannelMemoryState(channel.id, () => compacting) ===
-				undefined
-			)
-				return undefined;
-			await this.persist();
-			this.broadcastRevision();
+			const started = await this.withStateChange(async () => {
+				const currentChannel = this.state.channels.find(
+					(candidate) => candidate.id === channel.id,
+				);
+				if (
+					currentChannel === undefined ||
+					currentChannel.memory.origin === "user"
+				)
+					return false;
+				const previousState = this.state;
+				if (
+					this.replaceChannelMemoryState(channel.id, () => compacting) ===
+					undefined
+				)
+					return false;
+				try {
+					await this.persist();
+				} catch (error) {
+					this.state = previousState;
+					throw error;
+				}
+				this.broadcastRevision();
+				return true;
+			});
+			if (!started) return undefined;
 			const inferred = await this.inferChannelMemory(channel.id, projection);
 			return this.reconcileInferredChannelMemory(
 				channel.id,
@@ -10730,13 +11108,31 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				projection,
 				projected,
 			);
-			if (
-				memory === undefined ||
-				this.replaceChannelMemoryState(channelId, () => memory) === undefined
-			)
-				return;
-			await this.persist();
-			this.broadcastRevision();
+			if (memory === undefined) return;
+			await this.withStateChange(async () => {
+				const currentChannel = this.state.channels.find(
+					(candidate) => candidate.id === channelId,
+				);
+				if (
+					currentChannel === undefined ||
+					(currentChannel.memory.origin === "user" &&
+						(currentChannel.memory !== channel.memory ||
+							memory.origin !== "user"))
+				)
+					return;
+				const previousState = this.state;
+				if (
+					this.replaceChannelMemoryState(channelId, () => memory) === undefined
+				)
+					return;
+				try {
+					await this.persist();
+				} catch (error) {
+					this.state = previousState;
+					throw error;
+				}
+				this.broadcastRevision();
+			});
 		});
 	}
 
@@ -10783,13 +11179,33 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				projectThreadMemory(this.state, thread.id),
 			);
 		}
-		if (
-			memory === undefined ||
-			this.replaceThreadMemoryState(thread.id, () => memory) === undefined
-		)
-			return;
-		await this.persist();
-		this.broadcastRevision();
+		if (memory === undefined) return;
+		const resolvedMemory = memory;
+		await this.withStateChange(async () => {
+			const currentThread = this.state.threads.find(
+				(candidate) => candidate.id === thread.id,
+			);
+			if (
+				currentThread === undefined ||
+				(currentThread.context.memory.origin === "user" &&
+					(currentThread.context.memory !== thread.context.memory ||
+						resolvedMemory.origin !== "user"))
+			)
+				return;
+			const previousState = this.state;
+			if (
+				this.replaceThreadMemoryState(thread.id, () => resolvedMemory) ===
+				undefined
+			)
+				return;
+			try {
+				await this.persist();
+			} catch (error) {
+				this.state = previousState;
+				throw error;
+			}
+			this.broadcastRevision();
+		});
 	}
 
 	private async updateThreadMemory(threadId: string): Promise<void> {
@@ -10807,12 +11223,30 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				await this.inferAndCommitAutomaticThreadMemory(thread, projection);
 				return;
 			}
-			if (
-				this.replaceThreadMemoryState(threadId, () => projected) === undefined
-			)
-				return;
-			await this.persist();
-			this.broadcastRevision();
+			await this.withStateChange(async () => {
+				const currentThread = this.state.threads.find(
+					(candidate) => candidate.id === threadId,
+				);
+				if (currentThread === undefined) return;
+				const currentProjection = projectThreadMemory(this.state, threadId);
+				const currentMemory = mergeThreadMemoryProjection(
+					currentThread.context.memory,
+					currentProjection,
+				);
+				const previousState = this.state;
+				if (
+					this.replaceThreadMemoryState(threadId, () => currentMemory) ===
+					undefined
+				)
+					return;
+				try {
+					await this.persist();
+				} catch (error) {
+					this.state = previousState;
+					throw error;
+				}
+				this.broadcastRevision();
+			});
 		});
 	}
 
@@ -11603,13 +12037,27 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				(!silentPersistedHermesSession && !isMissingNativeSession(error))
 			)
 				throw error;
+			const failedSessionId = input.sessionId;
 			let recover = shouldContinue();
 			if (recover) {
-				this.forgetAgentSession(
-					input.agent.id,
-					input.sessionName,
-					input.sessionId,
-				);
+				await this.withStateChange(async () => {
+					const previousState = this.state;
+					if (
+						!this.forgetAgentSession(
+							input.agent.id,
+							input.sessionName,
+							failedSessionId,
+						)
+					)
+						return;
+					try {
+						await this.persist();
+					} catch (persistError) {
+						this.state = previousState;
+						throw persistError;
+					}
+					this.broadcastRevision();
+				});
 				recover = shouldContinue();
 			}
 			recordOperationException(error instanceof Error ? error : undefined, {
