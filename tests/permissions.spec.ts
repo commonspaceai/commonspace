@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deriveCommonspaceInboxItems } from "@commonspace/shared";
@@ -107,6 +107,21 @@ describe("native permission requests", () => {
 		await expect(
 			service.respondPermission(permission.id, "invented"),
 		).rejects.toThrow("permission option was not advertised");
+		const statePath = join(root, "state.json");
+		await rm(statePath);
+		await mkdir(statePath);
+		await expect(
+			service.respondPermission(permission.id, "allow"),
+		).rejects.toThrow();
+		expect(service.snapshot().permissions[0]?.status).toBe("pending");
+		expect(
+			service
+				.snapshot()
+				.messages["dm:codex"]?.find(
+					(message) => message.id === codex.accepted.id,
+				)?.replyStatus,
+		).toBe("needs_input");
+		await rm(statePath, { recursive: true });
 
 		await service.respondPermission(permission.id, "allow");
 		await service.whenIdle();

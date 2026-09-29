@@ -4072,7 +4072,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private state: CommonspaceState = createInitialState();
 	private routingConfiguration: PrivateRoutingConfiguration = missingRouting;
 	private writeTail = Promise.resolve();
-	private deletionTail = Promise.resolve();
+	private stateChangeTail = Promise.resolve();
 	private routingConfigurationTail: Promise<void> = Promise.resolve();
 	private readonly agentSessionTails = new Map<string, Promise<unknown>>();
 	private readonly channelMemoryTails = new Map<string, Promise<unknown>>();
@@ -4099,7 +4099,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	>();
 	private readonly permissionResolvers = new Map<
 		string,
-		(outcome: AgentPermissionOutcome) => void
+		{ resolve: (outcome: AgentPermissionOutcome) => void }
 	>();
 	private readonly backgroundRuns = new Set<Promise<void>>();
 	private readonly routingIndexes = new Map<string, RoutingMessageIndex>();
@@ -5335,7 +5335,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		request: ApplyRetentionRequest,
 	): Promise<CommonspaceRetentionPreview> {
 		return this.withAdmission(() =>
-			this.withDeletion(async () => {
+			this.withStateChange(async () => {
 				const preview = this.previewRetention(request.conversation);
 				if (
 					!Number.isSafeInteger(request.expectedRevision) ||
@@ -5802,43 +5802,51 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		permissionId: string,
 		optionId: string,
 	): Promise<CommonspacePermissionRequest> {
-		return this.withAdmission(async () => {
-			const selection = validatePermissionSelection(
-				this.state.permissions,
-				permissionId,
-				optionId,
-			);
-			const resolve = this.permissionResolvers.get(selection.permission.id);
-			if (resolve === undefined)
-				throw new Error(
-					"permission request is no longer attached to a native session",
+		return this.withAdmission(() =>
+			this.withStateChange(async () => {
+				const selection = validatePermissionSelection(
+					this.state.permissions,
+					permissionId,
+					optionId,
 				);
-			const resolved: CommonspacePermissionRequest = {
-				...selection.permission,
-				status: "resolved",
-				selectedOptionId: optionId,
-				resolvedAt: now(),
-			};
-			if (selection.permission.conversation.kind === "dm") {
-				this.updateMessageReplyStatus(
-					selection.permission.conversation,
-					selection.permission.sourceMessageId,
-					"running",
-				);
-			}
-			const permissions = [...this.state.permissions];
-			permissions[selection.index] = resolved;
-			this.state = {
-				...this.state,
-				revision: this.state.revision + 1,
-				permissions,
-			};
-			await this.persist();
-			this.permissionResolvers.delete(selection.permission.id);
-			resolve({ optionId });
-			this.broadcastRevision();
-			return structuredClone(resolved);
-		});
+				const resolver = this.permissionResolvers.get(selection.permission.id);
+				if (resolver === undefined)
+					throw new Error(
+						"permission request is no longer attached to a native session",
+					);
+				const resolved: CommonspacePermissionRequest = {
+					...selection.permission,
+					status: "resolved",
+					selectedOptionId: optionId,
+					resolvedAt: now(),
+				};
+				const previousState = this.state;
+				if (selection.permission.conversation.kind === "dm") {
+					this.updateMessageReplyStatus(
+						selection.permission.conversation,
+						selection.permission.sourceMessageId,
+						"running",
+					);
+				}
+				const permissions = [...this.state.permissions];
+				permissions[selection.index] = resolved;
+				this.state = {
+					...this.state,
+					revision: this.state.revision + 1,
+					permissions,
+				};
+				try {
+					await this.persist();
+				} catch (error) {
+					this.state = previousState;
+					throw error;
+				}
+				this.permissionResolvers.delete(selection.permission.id);
+				resolver.resolve({ optionId });
+				this.broadcastRevision();
+				return structuredClone(resolved);
+			}),
+		);
 	}
 
 	private async requestAgentPermission(
@@ -5889,7 +5897,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			permission.kind = request.kind.trim().slice(0, 100);
 		const previousState = this.state;
 		const outcome = new Promise<AgentPermissionOutcome>((resolve) => {
-			this.permissionResolvers.set(permission.id, resolve);
+			this.permissionResolvers.set(permission.id, { resolve });
 		});
 		if (conversation.kind === "dm")
 			this.updateMessageReplyStatus(
@@ -6313,7 +6321,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			),
 		};
 		for (const permissionId of pendingIds) {
-			this.permissionResolvers.get(permissionId)?.({});
+			this.permissionResolvers.get(permissionId)?.resolve({});
 			this.permissionResolvers.delete(permissionId);
 		}
 		return true;
@@ -6641,9 +6649,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			mutation.action === "remove-agent"
 				? await this.acquireRoutingConfigurationLock()
 				: undefined;
-		return this.withAdmission(() => this.commitMutation(mutation)).finally(() =>
-			releaseRoutingConfiguration?.(),
-		);
+		return this.withAdmission(() =>
+			this.withStateChange(() => this.commitMutation(mutation)),
+		).finally(() => releaseRoutingConfiguration?.());
 	}
 
 	private withMessageSubmissionTelemetry(
@@ -6974,13 +6982,13 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 
 	async deleteMessage(messageId: string): Promise<CommonspaceMessage> {
 		return this.withAdmission(() =>
-			this.withDeletion(() => this.commitMessageDeletion(messageId)),
+			this.withStateChange(() => this.commitMessageDeletion(messageId)),
 		);
 	}
 
-	private withDeletion<T>(operation: () => Promise<T>): Promise<T> {
-		const task = this.deletionTail.then(operation);
-		this.deletionTail = task.then(
+	private withStateChange<T>(operation: () => Promise<T>): Promise<T> {
+		const task = this.stateChangeTail.then(operation);
+		this.stateChangeTail = task.then(
 			() => undefined,
 			() => undefined,
 		);
@@ -6992,41 +7000,67 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		markAccepted: () => void,
 	): Promise<SendMessageResponse> {
 		await this.overrides.beforeAcceptSend?.(prepared);
-		const response = await this.acceptSend(prepared);
-		markAccepted();
-		const scopeKey = this.followupScopeKey(
-			prepared.request.conversation,
-			response.thread?.id,
-		);
-		const delivery = prepared.request.delivery ?? "queue";
-		if (this.activeConversationRuns.has(scopeKey)) {
-			const queue = this.pendingFollowups.get(scopeKey) ?? [];
-			const pending = {
-				prepared,
-				response,
-				delivery,
-				telemetryContext: context.active(),
-			};
-			if (delivery === "steer" || delivery === "stop-and-send")
-				queue.unshift(pending);
-			else queue.push(pending);
-			this.pendingFollowups.set(scopeKey, queue);
-			if (delivery === "steer" || delivery === "stop-and-send") {
-				await this.abortConversationRuns(
-					prepared.request.conversation,
-					response.thread?.id,
-					"Stopped for a follow-up.",
-				);
-			}
-		} else {
-			this.startConversationRun(scopeKey, {
-				prepared,
-				response,
-				delivery,
-				telemetryContext: context.active(),
-			});
+		const assertCurrent = () => {
+			if (
+				prepared.schedule !== undefined &&
+				!this.scheduleIsDue(prepared.schedule)
+			)
+				throw new Error("Schedule changed before message acceptance.");
+			if (!this.preparedSendIsCurrent(prepared, prepared.thread))
+				throw new Error("conversation changed before message acceptance");
+		};
+		assertCurrent();
+		await this.persistSendAttachments(prepared);
+		try {
+			await this.overrides.afterPersistSendAttachments?.(prepared);
+			assertCurrent();
+		} catch (error) {
+			await this.removePersistedSendAttachments(prepared);
+			throw error;
 		}
-		return response;
+		return this.withStateChange(async () => {
+			try {
+				assertCurrent();
+			} catch (error) {
+				await this.removePersistedSendAttachments(prepared);
+				throw error;
+			}
+			const response = await this.commitAcceptedSend(prepared);
+			markAccepted();
+			const scopeKey = this.followupScopeKey(
+				prepared.request.conversation,
+				response.thread?.id,
+			);
+			const delivery = prepared.request.delivery ?? "queue";
+			if (this.activeConversationRuns.has(scopeKey)) {
+				const queue = this.pendingFollowups.get(scopeKey) ?? [];
+				const pending = {
+					prepared,
+					response,
+					delivery,
+					telemetryContext: context.active(),
+				};
+				if (delivery === "steer" || delivery === "stop-and-send")
+					queue.unshift(pending);
+				else queue.push(pending);
+				this.pendingFollowups.set(scopeKey, queue);
+				if (delivery === "steer" || delivery === "stop-and-send") {
+					await this.abortConversationRuns(
+						prepared.request.conversation,
+						response.thread?.id,
+						"Stopped for a follow-up.",
+					);
+				}
+			} else {
+				this.startConversationRun(scopeKey, {
+					prepared,
+					response,
+					delivery,
+					telemetryContext: context.active(),
+				});
+			}
+			return response;
+		});
 	}
 
 	private locateFailedRoutingSource(
@@ -8849,32 +8883,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		return response;
 	}
 
-	private async acceptSend(
+	private async commitAcceptedSend(
 		prepared: PreparedSend,
 	): Promise<SendMessageResponse> {
-		if (
-			prepared.schedule !== undefined &&
-			!this.scheduleIsDue(prepared.schedule)
-		)
-			throw new Error("Schedule changed before message acceptance.");
-		if (!this.preparedSendIsCurrent(prepared, prepared.thread)) {
-			throw new Error("conversation changed before message acceptance");
-		}
-		await this.persistSendAttachments(prepared);
-		try {
-			await this.overrides.afterPersistSendAttachments?.(prepared);
-			if (!this.preparedSendIsCurrent(prepared, prepared.thread)) {
-				throw new Error("conversation changed before message acceptance");
-			}
-			if (
-				prepared.schedule !== undefined &&
-				!this.scheduleIsDue(prepared.schedule)
-			)
-				throw new Error("Schedule changed before message acceptance.");
-		} catch (error) {
-			await this.removePersistedSendAttachments(prepared);
-			throw error;
-		}
 		const previousState = this.state;
 		const mutationStartedAt = this.performancePhaseStartedAt();
 		const createdAt = now();

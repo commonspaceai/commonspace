@@ -42,6 +42,7 @@ type AdmissionPoint = "before-accept" | "after-attachments";
 interface AdmissionFixtureOptions {
 	point?: AdmissionPoint;
 	initiallyArmed?: boolean;
+	pauseCount?: number;
 }
 
 async function admissionFixture(options: AdmissionFixtureOptions = {}) {
@@ -51,9 +52,11 @@ async function admissionFixture(options: AdmissionFixtureOptions = {}) {
 	const reached = deferred();
 	const point = options.point ?? "before-accept";
 	let armed = options.initiallyArmed ?? true;
+	let paused = 0;
 	const pauseWhenArmed = async () => {
 		if (!armed) return;
-		reached.resolve();
+		paused += 1;
+		if (paused === (options.pauseCount ?? 1)) reached.resolve();
 		await gate.promise;
 	};
 	const runAgent = vi.fn(async () => "unexpected Agent run");
@@ -87,6 +90,60 @@ async function admissionFixture(options: AdmissionFixtureOptions = {}) {
 }
 
 describe("send admission invariants", () => {
+	it("commits concurrent sends in order", async () => {
+		const { gate, reached, runAgent, service } = await admissionFixture({
+			pauseCount: 2,
+		});
+		const first = service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "first request",
+		});
+		const second = service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "second request",
+		});
+		await reached.promise;
+		gate.resolve();
+
+		await Promise.all([first, second]);
+		await service.whenIdle();
+		expect(
+			service
+				.snapshot()
+				.messages["dm:codex"]?.filter(
+					(message) => message.authorType === "user",
+				)
+				.map((message) => message.text),
+		).toEqual(["first request", "second request"]);
+		expect(runAgent).toHaveBeenCalledTimes(2);
+	});
+
+	it("does not retain concurrent sends whose state writes both fail", async () => {
+		const { gate, reached, root, service } = await admissionFixture({
+			pauseCount: 2,
+		});
+		await rm(join(root, "state.json"));
+		await mkdir(join(root, "state.json"));
+
+		const first = service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "first request",
+		});
+		const second = service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "second request",
+		});
+		await reached.promise;
+		gate.resolve();
+
+		const results = await Promise.allSettled([first, second]);
+		expect(results.map((result) => result.status)).toEqual([
+			"rejected",
+			"rejected",
+		]);
+		expect(service.snapshot().messages["dm:codex"]).toBeUndefined();
+	});
+
 	it("CON-02: rejects a Channel send after its Agent removal commits", async () => {
 		const { gate, reached, runAgent, service } = await admissionFixture();
 		const channel = mustExist(
