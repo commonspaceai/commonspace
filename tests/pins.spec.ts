@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -18,6 +18,35 @@ afterEach(async () => {
 });
 
 describe("shared context pins", () => {
+	it("does not retain a pin when its state write fails", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-pin-save-"));
+		roots.push(root);
+		const service = new CommonspaceHostService({}, { root });
+		await service.initialize();
+		const channel = mustExist(
+			(
+				await service.mutate({
+					action: "create-channel",
+					name: "pins",
+					agentIds: [],
+				})
+			).channels[0],
+		);
+		const statePath = join(root, "state.json");
+		await rm(statePath);
+		await mkdir(statePath);
+		await expect(
+			service.addPin({
+				scope: { kind: "channel", id: channel.id },
+				kind: "note",
+				note: "Do not persist this pin.",
+			}),
+		).rejects.toThrow();
+		expect(service.snapshot().pins).toEqual([]);
+		await rm(statePath, { recursive: true });
+		await service.close();
+	});
+
 	it("inherits active Channel and Thread pins while retaining removed pin history", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-pins-"));
 		roots.push(root);

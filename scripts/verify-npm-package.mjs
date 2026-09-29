@@ -185,11 +185,14 @@ async function verifyRuntime({
 }
 
 async function main() {
-	if (process.argv.length > 3)
-		throw new Error("Usage: node scripts/verify-npm-package.mjs [package.tgz]");
+	if (process.argv.length > 4)
+		throw new Error(
+			"Usage: node scripts/verify-npm-package.mjs [package.tgz] [expected-version]",
+		);
 	const sourceManifest = JSON.parse(
 		await readFile(join(repoRoot, "cli/package.json"), "utf8"),
 	);
+	const expectedVersion = process.argv[3] ?? sourceManifest.version;
 	const archive = resolve(
 		process.argv[2] ??
 			join(
@@ -223,7 +226,7 @@ async function main() {
 		const installedManifest = JSON.parse(
 			await readFile(join(packageRoot, "package.json"), "utf8"),
 		);
-		assert.equal(installedManifest.version, sourceManifest.version);
+		assert.equal(installedManifest.version, expectedVersion);
 		assert.equal(installedManifest.private, undefined);
 		assert(
 			Object.values(installedManifest.dependencies).every(
@@ -245,7 +248,7 @@ async function main() {
 				env: isolatedRuntimeEnv(home),
 			});
 			if (flag === "--version")
-				assert.equal(result.stdout.trim(), sourceManifest.version);
+				assert.equal(result.stdout.trim(), expectedVersion);
 			else assert.match(result.stdout, /Usage: commonspace/u);
 		}
 		const shutdown = process.platform === "win32" ? "ipc-disconnect" : "SIGINT";
@@ -253,7 +256,7 @@ async function main() {
 			entry: join(packageRoot, installedManifest.bin.commonspace),
 			root: runtimeRoot,
 			home,
-			version: sourceManifest.version,
+			version: expectedVersion,
 		};
 		const channelId = await verifyRuntime({ ...runtime, shutdown });
 		await verifyRuntime({ ...runtime, channelId, shutdown: "ipc-disconnect" });
