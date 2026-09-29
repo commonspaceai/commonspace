@@ -200,6 +200,6 @@ The live verifier covers only part of this matrix. Record missing coverage expli
 
 For each finding, keep its evidence, fix the smallest owning component, and inspect the changed state with adjacent states through hot reload. Rerun a focused interaction check when the fix changes behavior or the interaction is settled.
 
-Once the change is ready for integration, run the change-specific checks in [Contributing](../../CONTRIBUTING.md#verify). A server or visible end-to-end change needs `pnpm check` and `pnpm verify:live`; see [Development](../guides/development.md#verification-commands). Do not repeat broad gates or agent reviews between visual edits.
+Once the change is ready for integration, run the change-specific checks in [Contributing](../../CONTRIBUTING.md#verify). A server or visible end-to-end change needs `pnpm check` followed by `pnpm verify:live:built`; see [Development](../guides/development.md#verification-commands). Do not repeat broad gates or agent reviews between visual edits.
 
 A baseline is useful only after review. Do not approve a changed image simply because it matches the current implementation.

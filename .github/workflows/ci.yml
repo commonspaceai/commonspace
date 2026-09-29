@@ -67,6 +67,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Run unit and integration tests
         run: pnpm test
+      - name: Run native adapter integration tests
+        run: pnpm verify:adapters
 
   browser:
     name: Linux browser integration
