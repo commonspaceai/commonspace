@@ -4295,28 +4295,11 @@ esac
 			).channels[0],
 		);
 
-		const sending = service.send({
+		const immediate = await service.send({
 			conversation: { kind: "channel", id: channel.id },
 			text: "Fix the API.",
 		});
-		const immediate = await Promise.race([
-			sending.then((response) => ({ status: "accepted" as const, response })),
-			new Promise<{ status: "blocked" }>((resolve) => {
-				setTimeout(() => {
-					resolve({ status: "blocked" });
-				}, 50);
-			}),
-		]);
-		route.resolve({
-			mode: "parallel",
-			assignments: [{ agentId: "backend", projectIds: [] }],
-			confidence: 0.95,
-			reason: "API work belongs to Backend.",
-		});
-
-		expect(immediate.status).toBe("accepted");
-		if (immediate.status !== "accepted") return;
-		expect(immediate.response.accepted.routing).toMatchObject({
+		expect(immediate.accepted.routing).toMatchObject({
 			source: "ai",
 			status: "pending",
 			startedAt: expect.any(String),
@@ -4327,12 +4310,18 @@ esac
 			reason: "Routing with inference.",
 		});
 		expect(
-			immediate.response.state.messages[`channel:${channel.id}`]?.at(-1)?.text,
+			immediate.state.messages[`channel:${channel.id}`]?.at(-1)?.text,
 		).toBe("Fix the API.");
+		route.resolve({
+			mode: "parallel",
+			assignments: [{ agentId: "backend", projectIds: [] }],
+			confidence: 0.95,
+			reason: "API work belongs to Backend.",
+		});
 		await service.whenIdle();
 		expect(
 			(await service.bootstrap()).state.messages[`channel:${channel.id}`]?.find(
-				(message) => message.id === immediate.response.accepted.id,
+				(message) => message.id === immediate.accepted.id,
 			)?.routing,
 		).toMatchObject({
 			source: "ai",

@@ -48,5 +48,28 @@ describe("notification verification API", () => {
 				"Test notification delivered. Click it to verify Commonspace opens.",
 		});
 		expect(notify).toHaveBeenCalledOnce();
+
+		for (let attempt = 2; attempt <= 5; attempt++) {
+			const repeated = await fetch(
+				new URL("/api/notifications/verify", running.url),
+				{
+					method: "POST",
+					headers: { origin: running.url },
+				},
+			);
+			expect(repeated.status).toBe(200);
+		}
+		const limited = await fetch(
+			new URL("/api/notifications/verify", running.url),
+			{
+				method: "POST",
+				headers: { origin: running.url },
+			},
+		);
+		expect(limited.status).toBe(429);
+		await expect(limited.json()).resolves.toMatchObject({
+			code: "notification_verification_rate_limited",
+		});
+		expect(notify).toHaveBeenCalledTimes(5);
 	});
 });

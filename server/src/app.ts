@@ -375,6 +375,14 @@ function registerWorkspaceRoutes(
 	app.post(
 		"/api/notifications/verify",
 		requireSameOrigin,
+		rateLimit({
+			windowMs: 60_000,
+			limit: 5,
+			message: {
+				code: "notification_verification_rate_limited",
+				error: "Too many test notifications. Try again in a minute.",
+			},
+		}),
 		async (_req, res) => {
 			res.json(await service.verifyDesktopNotifications());
 		},
@@ -1173,11 +1181,22 @@ function registerFallbackRoutes(
 			next();
 		});
 		app.use(express.static(uiRoot, { index: false }));
-		app.get(/^(?!\/api(?:\/|$)).*/u, (_req, res, next) => {
-			res.sendFile("index.html", { root: uiRoot }, (error) => {
-				if (error !== undefined) next(error);
-			});
-		});
+		app.get(
+			/^(?!\/api(?:\/|$)).*/u,
+			rateLimit({
+				windowMs: 60_000,
+				limit: 60,
+				message: {
+					code: "ui_navigation_rate_limited",
+					error: "Too many page requests. Try again in a minute.",
+				},
+			}),
+			(_req, res, next) => {
+				res.sendFile("index.html", { root: uiRoot }, (error) => {
+					if (error !== undefined) next(error);
+				});
+			},
+		);
 	}
 
 	app.get("/", (_req, res) => {

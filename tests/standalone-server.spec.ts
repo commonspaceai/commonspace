@@ -164,6 +164,16 @@ describe("standalone Commonspace server", () => {
 				headers: { origin: running.url },
 			}).then((response) => response.json()),
 		).resolves.toEqual({ code: "not_found", error: "API route not found" });
+		for (let request = 2; request < 60; request++) {
+			const response = await fetch(`${running.url}/project/anything`);
+			expect(response.status).toBe(200);
+			await response.arrayBuffer();
+		}
+		const limited = await fetch(`${running.url}/project/anything`);
+		expect(limited.status).toBe(429);
+		await expect(limited.json()).resolves.toMatchObject({
+			code: "ui_navigation_rate_limited",
+		});
 	});
 
 	it("serves the API without serving a UI build", async () => {
