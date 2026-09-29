@@ -4099,7 +4099,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	>();
 	private readonly permissionResolvers = new Map<
 		string,
-		(outcome: AgentPermissionOutcome) => void
+		{ resolve: (outcome: AgentPermissionOutcome) => void }
 	>();
 	private readonly backgroundRuns = new Set<Promise<void>>();
 	private readonly routingIndexes = new Map<string, RoutingMessageIndex>();
@@ -5809,8 +5809,8 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					permissionId,
 					optionId,
 				);
-				const resolve = this.permissionResolvers.get(permissionId);
-				if (resolve === undefined)
+				const resolver = this.permissionResolvers.get(permissionId);
+				if (resolver === undefined)
 					throw new Error(
 						"permission request is no longer attached to a native session",
 					);
@@ -5842,7 +5842,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					throw error;
 				}
 				this.permissionResolvers.delete(permissionId);
-				resolve({ optionId });
+				resolver.resolve({ optionId });
 				this.broadcastRevision();
 				return structuredClone(resolved);
 			}),
@@ -5897,7 +5897,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			permission.kind = request.kind.trim().slice(0, 100);
 		const previousState = this.state;
 		const outcome = new Promise<AgentPermissionOutcome>((resolve) => {
-			this.permissionResolvers.set(permission.id, resolve);
+			this.permissionResolvers.set(permission.id, { resolve });
 		});
 		if (conversation.kind === "dm")
 			this.updateMessageReplyStatus(
@@ -6321,7 +6321,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			),
 		};
 		for (const permissionId of pendingIds) {
-			this.permissionResolvers.get(permissionId)?.({});
+			this.permissionResolvers.get(permissionId)?.resolve({});
 			this.permissionResolvers.delete(permissionId);
 		}
 		return true;
