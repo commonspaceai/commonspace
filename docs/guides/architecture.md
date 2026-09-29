@@ -49,6 +49,8 @@ A typical Channel send follows this sequence:
 
 A routing or execution failure after acceptance leaves the source message in history. The browser displays the resulting attention state instead of losing the user's request.
 
+Message preparation and attachment storage may overlap across requests. Before acceptance, the service rechecks the conversation and schedule against current state. Acceptance, workspace mutations, message deletion, retention, and permission choices share a commit queue that serializes their state writes and rollback. Agent runs start after acceptance and remain concurrent across independent native sessions.
+
 In development and preview, Vite forwards `/api` to `127.0.0.1:3100`. Production browser assets are built into `ui/dist`. The npm CLI serves its packaged `ui-dist`; the source-based macOS service serves `ui/dist`. Both use Express so the UI and API share one loopback origin.
 
 ### Browser routes
