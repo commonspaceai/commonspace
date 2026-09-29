@@ -199,6 +199,89 @@ describe("CommonspaceClientStore agent discovery", () => {
 	});
 });
 
+describe("CommonspaceClientStore response validation", () => {
+	it("keeps the last valid bootstrap when a refresh contains malformed state", async () => {
+		const malformed = {
+			...storyBootstrap,
+			state: {
+				...storyBootstrap.state,
+				channels: storyBootstrap.state.channels.map((channel, index) =>
+					index === 0 ? { ...channel, agentIds: "invalid" } : channel,
+				),
+			},
+		};
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValueOnce(jsonResponse(storyBootstrap))
+				.mockResolvedValueOnce(Response.json(malformed)),
+		);
+		const store = new CommonspaceClientStore();
+		await store.refresh();
+		const previous = store.getSnapshot().bootstrap;
+
+		await store.refresh();
+
+		expect(store.getSnapshot().bootstrap).toEqual(previous);
+		expect(store.getSnapshot().error).toContain("agentIds");
+	});
+
+	it("keeps a send visible for retry when its state response is malformed", async () => {
+		const admission = threadAdmission();
+		const channel = storyBootstrap.state.channels[0];
+		if (channel === undefined) throw new Error("Missing fixture channel");
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValueOnce(jsonResponse(storyBootstrap))
+				.mockResolvedValueOnce(
+					Response.json({
+						...admission,
+						state: { ...admission.state, messages: [] },
+					}),
+				),
+		);
+		const store = new CommonspaceClientStore();
+		await store.refresh();
+		store.selectConversation({ kind: "channel", id: channel.id });
+		const previous = store.getSnapshot().bootstrap;
+
+		await expect(store.send({ text: "Keep this request." })).rejects.toThrow();
+
+		expect(store.getSnapshot().bootstrap).toEqual(previous);
+		expect(store.getSnapshot().pendingSubmissions).toMatchObject([
+			{ text: "Keep this request.", status: "failed" },
+		]);
+		expect(store.getSnapshot().error).toContain("messages");
+	});
+
+	it("does not clear a pending send without an acceptance receipt", async () => {
+		const channel = storyBootstrap.state.channels[0];
+		if (channel === undefined) throw new Error("Missing fixture channel");
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValueOnce(jsonResponse(storyBootstrap))
+				.mockResolvedValueOnce(Response.json({ state: storyBootstrap.state })),
+		);
+		const store = new CommonspaceClientStore();
+		await store.refresh();
+		store.selectConversation({ kind: "channel", id: channel.id });
+		const previous = store.getSnapshot().bootstrap;
+
+		await expect(store.send({ text: "Keep this request." })).rejects.toThrow();
+
+		expect(store.getSnapshot().bootstrap).toEqual(previous);
+		expect(store.getSnapshot().pendingSubmissions).toMatchObject([
+			{ text: "Keep this request.", status: "failed" },
+		]);
+		expect(store.getSnapshot().error).toContain("accepted");
+	});
+});
+
 it("refreshes changed routing without a workspace revision, including changes during refresh and reconnect", async () => {
 	const events = new EventTarget();
 	vi.stubGlobal(
