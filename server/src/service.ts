@@ -5809,7 +5809,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					permissionId,
 					optionId,
 				);
-				const resolver = this.permissionResolvers.get(permissionId);
+				const resolver = this.permissionResolvers.get(selection.permission.id);
 				if (resolver === undefined)
 					throw new Error(
 						"permission request is no longer attached to a native session",
@@ -5841,7 +5841,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					this.state = previousState;
 					throw error;
 				}
-				this.permissionResolvers.delete(permissionId);
+				this.permissionResolvers.delete(selection.permission.id);
 				resolver.resolve({ optionId });
 				this.broadcastRevision();
 				return structuredClone(resolved);
@@ -7744,7 +7744,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			.flatMap((message) => message.attachments ?? [])
 			.find((candidate) => candidate.id === id);
 		if (attachment === undefined) throw new Error("unknown image attachment");
-		const data = await readFile(join(this.attachmentsRoot, id));
+		const data = await readFile(join(this.attachmentsRoot, attachment.id));
 		if (data.length !== attachment.size)
 			throw new Error("image attachment is unavailable");
 		return { attachment: structuredClone(attachment), data };
@@ -7760,7 +7760,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			.flatMap((message) => message.files ?? [])
 			.find((candidate) => candidate.id === id);
 		if (metadata === undefined) throw new Error("unknown file attachment");
-		const data = await readFile(join(this.attachmentsRoot, id));
+		const data = await readFile(join(this.attachmentsRoot, metadata.id));
 		if (data.length !== metadata.size)
 			throw new Error("file attachment is unavailable");
 		return { metadata: structuredClone(metadata), data };

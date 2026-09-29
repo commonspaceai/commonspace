@@ -40,13 +40,18 @@ function requiredStringArray(value, field) {
 	return value;
 }
 
-export function createNpmPackageManifest(cliManifest, serverManifest) {
+export function createNpmPackageManifest(
+	cliManifest,
+	serverManifest,
+	packageVersion = cliManifest.version,
+) {
 	const name = requiredString(cliManifest.name, "cli/package.json name");
 	const version = requiredString(
 		cliManifest.version,
 		"cli/package.json version",
 	);
 	parseReleaseVersion(version);
+	parseReleaseVersion(packageVersion);
 	if (serverManifest.version !== version)
 		throw new Error(`server/package.json version must be ${version}`);
 	const dependencies = {};
@@ -79,7 +84,7 @@ export function createNpmPackageManifest(cliManifest, serverManifest) {
 	}
 	return {
 		name,
-		version,
+		version: packageVersion,
 		description: requiredString(
 			cliManifest.description,
 			"cli/package.json description",
@@ -151,6 +156,7 @@ async function main() {
 		options: {
 			output: { type: "string" },
 			"check-tag": { type: "string" },
+			"nightly-version": { type: "string" },
 		},
 	});
 	const { root, server, cli } = await releaseManifests();
@@ -161,7 +167,15 @@ async function main() {
 		process.stdout.write(`prerelease=${String(prerelease)}\n`);
 		return;
 	}
-	const manifest = createNpmPackageManifest(cli, server);
+	const packageVersion = values["nightly-version"] ?? root.version;
+	if (
+		values["nightly-version"] !== undefined &&
+		!packageVersion.startsWith(`${root.version.split(/[-+]/u)[0]}-nightly.`)
+	)
+		throw new Error(
+			"Nightly package version must use the source package version",
+		);
+	const manifest = createNpmPackageManifest(cli, server, packageVersion);
 	const output = resolve(values.output ?? join(repoRoot, "artifacts/npm"));
 	await mkdir(output, { recursive: true });
 	const temporary = await mkdtemp(join(tmpdir(), "commonspace-npm-package-"));
