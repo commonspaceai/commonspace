@@ -715,6 +715,62 @@ describe("editable shared Channel context", () => {
 		});
 	});
 
+	it.each(["short", "long"] as const)(
+		"carries a %s user correction into the next Channel compaction",
+		async (length) => {
+			const { service, channel } = await fixture();
+			const marker = "PRESERVE_TAIL_OBLIGATION";
+			const prefix = "Validated context detail. ".repeat(
+				length === "long" ? 350 : 1,
+			);
+			const summary = `${prefix}${marker}`;
+			expect(summary.length).toBeLessThanOrEqual(16_000);
+			expect(summary.indexOf(marker) > 8_000).toBe(length === "long");
+			await service.mutate({
+				action: "set-channel-memory",
+				channelId: channel.id,
+				summary,
+				decisions: [],
+				openQuestions: [],
+			});
+			const stored = mustExist(
+				service.snapshot().channels.find((item) => item.id === channel.id),
+			).memory;
+			expect(stored).toMatchObject({ origin: "user", status: "current" });
+			expect(stored.summary).toHaveLength(summary.length);
+			expect(stored.summary).toContain(marker);
+
+			let prompt: string | undefined;
+			const request = vi.fn(async (input: AgentRunInput) => {
+				prompt = input.message;
+				return inferenceResponse("Refreshed context.");
+			});
+			inferenceRequest = request;
+			await service.compactChannelContext(channel.id);
+			expect(request).toHaveBeenCalledOnce();
+
+			const sections = mustExist(prompt).split("\n\n");
+			const previous = mustExist(
+				sections.find((section) =>
+					section.startsWith("Previous shared context: "),
+				),
+			);
+			const previousMemory: unknown = JSON.parse(
+				previous.slice("Previous shared context: ".length),
+			);
+			expect(previousMemory).toMatchObject({
+				origin: "user",
+				summary: expect.stringContaining(marker),
+			});
+			expect(
+				sections.find((section) => section.startsWith("Pinned context: ")),
+			).not.toContain(marker);
+			expect(
+				sections.find((section) => section.startsWith("Source messages: ")),
+			).not.toContain(marker);
+		},
+	);
+
 	it("uses configured Commonspace inference for manual compaction", async () => {
 		const { service, channel } = await fixture();
 		const request = vi.fn(async (input: AgentRunInput) => {
