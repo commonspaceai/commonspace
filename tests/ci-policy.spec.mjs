@@ -31,6 +31,50 @@ describe("CI policy", () => {
 		});
 	});
 
+	it("verifies the Linux npm candidate before sharing it with Windows", async () => {
+		const workflow = parse(
+			await readFile(new URL(".github/workflows/ci.yml", repoRoot), "utf8"),
+		);
+		const steps = workflow.jobs.static.steps;
+		const packageIndex = steps.findIndex(
+			(step) => step.run === "pnpm package:npm",
+		);
+
+		expect(packageIndex).toBeGreaterThan(-1);
+		expect(steps.slice(packageIndex, packageIndex + 3)).toMatchObject([
+			{ run: "pnpm package:npm" },
+			{ run: "pnpm verify:npm-package" },
+			{
+				uses: expect.stringContaining("actions/upload-artifact@"),
+				with: {
+					name: "commonspace-linux-candidate",
+					path: "artifacts/npm/*.tgz",
+				},
+			},
+		]);
+		expect(steps[packageIndex + 1]).not.toHaveProperty("if");
+		expect(steps[packageIndex + 1]).not.toHaveProperty("continue-on-error");
+		expect(workflow.jobs.static).not.toHaveProperty("continue-on-error");
+		expect(workflow.jobs.check.needs).toContain("static");
+		expect(workflow.jobs["package-windows"].needs).toBe("static");
+		expect(workflow.jobs["package-windows"].steps).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					uses: expect.stringContaining("actions/download-artifact@"),
+					with: {
+						name: "commonspace-linux-candidate",
+						path: "artifacts/npm-linux",
+					},
+				}),
+				expect.objectContaining({
+					run: expect.stringContaining(
+						"node scripts/verify-npm-package.mjs $archives[0].FullName",
+					),
+				}),
+			]),
+		);
+	});
+
 	it("keeps branch protection coupled to the aggregate workflow check", async () => {
 		const workflow = parse(
 			await readFile(new URL(".github/workflows/ci.yml", repoRoot), "utf8"),
