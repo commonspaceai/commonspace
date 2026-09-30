@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { URL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
@@ -7,6 +7,19 @@ const repoRoot = new URL("../", import.meta.url);
 
 async function readJson(path) {
 	return JSON.parse(await readFile(new URL(path, repoRoot), "utf8"));
+}
+
+async function readWorkflows() {
+	const directory = new URL(".github/workflows/", repoRoot);
+	const filenames = (await readdir(directory))
+		.filter((name) => /\.ya?ml$/u.test(name))
+		.sort();
+	return Promise.all(
+		filenames.map(async (filename) => [
+			filename,
+			parse(await readFile(new URL(filename, directory), "utf8")),
+		]),
+	);
 }
 
 describe("CI policy", () => {
@@ -29,6 +42,50 @@ describe("CI policy", () => {
 			name: "Required CI gate",
 			needs: requiredJobs,
 		});
+	});
+
+	it("verifies the Linux npm candidate before sharing it with Windows", async () => {
+		const workflow = parse(
+			await readFile(new URL(".github/workflows/ci.yml", repoRoot), "utf8"),
+		);
+		const steps = workflow.jobs.static.steps;
+		const packageIndex = steps.findIndex(
+			(step) => step.run === "pnpm package:npm",
+		);
+
+		expect(packageIndex).toBeGreaterThan(-1);
+		expect(steps.slice(packageIndex, packageIndex + 3)).toMatchObject([
+			{ run: "pnpm package:npm" },
+			{ run: "pnpm verify:npm-package" },
+			{
+				uses: expect.stringContaining("actions/upload-artifact@"),
+				with: {
+					name: "commonspace-linux-candidate",
+					path: "artifacts/npm/*.tgz",
+				},
+			},
+		]);
+		expect(steps[packageIndex + 1]).not.toHaveProperty("if");
+		expect(steps[packageIndex + 1]).not.toHaveProperty("continue-on-error");
+		expect(workflow.jobs.static).not.toHaveProperty("continue-on-error");
+		expect(workflow.jobs.check.needs).toContain("static");
+		expect(workflow.jobs["package-windows"].needs).toBe("static");
+		expect(workflow.jobs["package-windows"].steps).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					uses: expect.stringContaining("actions/download-artifact@"),
+					with: {
+						name: "commonspace-linux-candidate",
+						path: "artifacts/npm-linux",
+					},
+				}),
+				expect.objectContaining({
+					run: expect.stringContaining(
+						"node scripts/verify-npm-package.mjs $archives[0].FullName",
+					),
+				}),
+			]),
+		);
 	});
 
 	it("keeps branch protection coupled to the aggregate workflow check", async () => {
@@ -68,6 +125,21 @@ describe("CI policy", () => {
 			),
 		);
 		const steps = workflow.jobs.verify.steps;
+		const checkoutIndex = steps.findIndex((step) =>
+			step.uses?.startsWith("actions/checkout@"),
+		);
+		const ancestryCheckIndex = steps.findIndex((step) =>
+			step.run?.includes("git merge-base --is-ancestor HEAD origin/main"),
+		);
+		const projectScriptIndex = steps.findIndex((step) =>
+			step.run?.includes("node scripts/package-npm.mjs"),
+		);
+		expect(checkoutIndex).toBeGreaterThanOrEqual(0);
+		expect(ancestryCheckIndex).toBe(checkoutIndex + 1);
+		expect(projectScriptIndex).toBeGreaterThan(ancestryCheckIndex);
+		expect(
+			steps.filter((step) => step.uses?.startsWith("actions/checkout@")),
+		).toHaveLength(1);
 		expect(steps.some((step) => step.uses?.startsWith("actions/cache@"))).toBe(
 			false,
 		);
@@ -99,5 +171,50 @@ describe("CI policy", () => {
 			{ name: "main", type: "branch" },
 			{ name: "v*", type: "tag" },
 		]);
+	});
+
+	it("pins external Actions and disables checkout credentials", async () => {
+		const workflows = await readWorkflows();
+		expect(workflows.length).toBeGreaterThan(0);
+		for (const [filename, workflow] of workflows) {
+			const steps = Object.values(workflow.jobs).flatMap((job) => [
+				job,
+				...(job.steps ?? []),
+			]);
+			for (const step of steps.filter(
+				({ uses }) => uses !== undefined && !uses.startsWith("./"),
+			)) {
+				expect(step.uses, filename).toMatch(/^[^@\s]+@[0-9a-f]{40}$/u);
+				if (step.uses.toLowerCase().startsWith("actions/checkout@")) {
+					expect(step.with?.["persist-credentials"], filename).toBe(false);
+				}
+			}
+		}
+	});
+
+	it("limits workflow and job token scopes to reviewed needs", async () => {
+		const workflowOverrides = {
+			"codspeed.yml": { contents: "read", "id-token": "write" },
+		};
+		const jobOverrides = {
+			"release.yml": {
+				verify: { contents: "read", actions: "read" },
+				publish: { contents: "read", "id-token": "write" },
+			},
+			"nightly.yml": {
+				publish: { contents: "write" },
+			},
+		};
+
+		for (const [filename, workflow] of await readWorkflows()) {
+			expect(workflow.permissions, filename).toEqual(
+				workflowOverrides[filename] ?? { contents: "read" },
+			);
+			for (const [jobName, job] of Object.entries(workflow.jobs)) {
+				expect(job.permissions, `${filename}:${jobName}`).toEqual(
+					jobOverrides[filename]?.[jobName],
+				);
+			}
+		}
 	});
 });

@@ -6773,8 +6773,14 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 				)
 					this.invalidateAgentExecution(updated.id);
 			}
+			const removedResetFollowups =
+				mutation.action === "reset-dm" &&
+				this.pendingFollowups.delete(
+					this.followupScopeKey({ kind: "dm", id: mutation.agentId }),
+				);
 			this.revokeInvalidMcpCredentials();
 			this.broadcastRevision();
+			if (removedResetFollowups) this.broadcastLiveActivities();
 			return prepared;
 		});
 		try {
