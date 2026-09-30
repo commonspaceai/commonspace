@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { ConversationRetention } from "../ConversationRetention";
 import { buildChannel, codexAgent, designChannel } from "./story-fixtures";
 
@@ -51,9 +51,10 @@ export const ReviewDeletion: Story = {
 		await userEvent.click(
 			page.getByRole("button", { name: "Review deletion" }),
 		);
-		await expect(
-			await page.findByRole("region", { name: "Deletion preview" }),
-		).toBeVisible();
+		const preview = await page.findByRole("region", {
+			name: "Deletion preview",
+		});
+		await waitFor(() => expect(preview).toBeVisible());
 		await expect(
 			page.getByRole("button", { name: "Delete history permanently" }),
 		).toBeEnabled();
