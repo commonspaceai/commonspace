@@ -146,10 +146,10 @@ describe("nightly releases", () => {
 				"utf8",
 			),
 		);
-		expect(workflow.jobs.resolve.if).toContain(
+		expect(workflow.jobs.verify.if).toContain(
 			"github.event_name == 'workflow_dispatch'",
 		);
-		expect(workflow.jobs.resolve.if).toContain(
+		expect(workflow.jobs.verify.if).toContain(
 			"startsWith(github.event.release.tag_name, 'v')",
 		);
 	});

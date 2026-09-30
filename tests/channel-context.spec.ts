@@ -715,6 +715,160 @@ describe("editable shared Channel context", () => {
 		});
 	});
 
+	it.each(["short", "long"] as const)(
+		"carries a %s user correction into the next Channel compaction",
+		async (length) => {
+			const { service, channel } = await fixture();
+			const marker = "PRESERVE_TAIL_OBLIGATION";
+			const prefix = "Validated context detail. ".repeat(
+				length === "long" ? 700 : 1,
+			);
+			const summary = `${
+				length === "long" ? prefix.slice(0, 16_000 - marker.length) : prefix
+			}${marker}`;
+			expect(summary.length).toBeLessThanOrEqual(16_000);
+			if (length === "long") expect(summary).toHaveLength(16_000);
+			expect(summary.indexOf(marker) > 8_000).toBe(length === "long");
+			await service.mutate({
+				action: "set-channel-memory",
+				channelId: channel.id,
+				summary,
+				decisions: [],
+				openQuestions: [],
+			});
+			const stored = mustExist(
+				service.snapshot().channels.find((item) => item.id === channel.id),
+			).memory;
+			expect(stored).toMatchObject({ origin: "user", status: "current" });
+			expect(stored.summary).toBe(summary);
+
+			let prompt: string | undefined;
+			const request = vi.fn(async (input: AgentRunInput) => {
+				prompt = input.message;
+				return inferenceResponse("Refreshed context.");
+			});
+			inferenceRequest = request;
+			await service.compactChannelContext(channel.id);
+			expect(request).toHaveBeenCalledOnce();
+
+			const sections = mustExist(prompt).split("\n\n");
+			const previous = mustExist(
+				sections.find((section) =>
+					section.startsWith("Previous shared context: "),
+				),
+			);
+			const previousMemory: unknown = JSON.parse(
+				previous.slice("Previous shared context: ".length),
+			);
+			expect(previousMemory).toMatchObject({
+				origin: "user",
+				summary,
+			});
+			expect(
+				sections.find((section) => section.startsWith("Pinned context: ")),
+			).not.toContain(marker);
+			expect(
+				sections.find((section) => section.startsWith("Source messages: ")),
+			).not.toContain(marker);
+		},
+	);
+
+	it("carries inferred obligations beyond raw source and supplies pinned evidence independently", async () => {
+		const { service, channel } = await fixture();
+		const thread = mustExist(service.snapshot().threads[0]);
+		const obligation = "PUBLIC_ARCHIVE_FORMAT";
+		const fact = "VALIDATED_COMPATIBILITY";
+		const brief = `Preserve ${obligation} unchanged. ${fact} is confirmed.`;
+		inferenceRequest = vi.fn(async (input: AgentRunInput) =>
+			inferenceResponse(
+				input.message.includes(obligation) && input.message.includes(fact)
+					? brief
+					: "The prior obligation is missing from the prompt.",
+			),
+		);
+		await service.send({
+			conversation: { kind: "channel", id: channel.id },
+			threadId: thread.id,
+			targetAgentId: "codex",
+			text: `Preserve ${obligation} unchanged. ${fact} is confirmed.`,
+		});
+		await service.whenIdle();
+		expect(service.snapshot().channels[0]?.memory).toMatchObject({
+			origin: "inference",
+			status: "current",
+			summary: brief,
+		});
+		const original = mustExist(
+			service
+				.snapshot()
+				.messages[`channel:${channel.id}`]?.find((message) =>
+					message.text.includes(obligation),
+				),
+		);
+
+		for (let index = 0; index < 18; index++) {
+			await service.send({
+				conversation: { kind: "channel", id: channel.id },
+				threadId: thread.id,
+				targetAgentId: "codex",
+				text: `Routine progress ${index}: ${"Verified change. ".repeat(260)}`,
+			});
+			await service.whenIdle();
+		}
+		expect(service.snapshot().channels[0]?.memory.summary).toContain(
+			obligation,
+		);
+		expect(service.snapshot().channels[0]?.memory.summary).toContain(fact);
+
+		let prompt: string | undefined;
+		inferenceRequest = vi.fn(async (input: AgentRunInput) => {
+			prompt = input.message;
+			return inferenceResponse(brief);
+		});
+		await service.compactChannelContext(channel.id);
+		const sections = mustExist(prompt).split("\n\n");
+		const previous = mustExist(
+			sections.find((section) =>
+				section.startsWith("Previous shared context: "),
+			),
+		);
+		const source = mustExist(
+			sections.find((section) => section.startsWith("Source messages: ")),
+		);
+		expect(source).toContain("Routine progress 17");
+		expect(source).not.toContain(original.id);
+		expect(source).not.toContain(obligation);
+		expect(previous).toContain(obligation);
+		expect(previous).toContain(fact);
+		expect(
+			sections.find((section) => section.startsWith("Pinned context: ")),
+		).not.toContain(obligation);
+
+		await service.addPin({
+			scope: { kind: "channel", id: channel.id },
+			kind: "note",
+			note: `Preserve ${obligation} unchanged.`,
+		});
+		let pinnedPrompt: string | undefined;
+		inferenceRequest = vi.fn(async (input: AgentRunInput) => {
+			pinnedPrompt = input.message;
+			return inferenceResponse(brief);
+		});
+		await service.compactChannelContext(channel.id);
+		const pinnedSections = mustExist(pinnedPrompt).split("\n\n");
+		expect(
+			pinnedSections.find((section) => section.startsWith("Pinned context: ")),
+		).toContain(obligation);
+		expect(
+			pinnedSections.find((section) =>
+				section.startsWith("Previous shared context: "),
+			),
+		).not.toContain(obligation);
+		expect(
+			pinnedSections.find((section) => section.startsWith("Source messages: ")),
+		).not.toContain(obligation);
+	});
+
 	it("uses configured Commonspace inference for manual compaction", async () => {
 		const { service, channel } = await fixture();
 		const request = vi.fn(async (input: AgentRunInput) => {

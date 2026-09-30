@@ -68,6 +68,21 @@ describe("CI policy", () => {
 			),
 		);
 		const steps = workflow.jobs.verify.steps;
+		const checkoutIndex = steps.findIndex((step) =>
+			step.uses?.startsWith("actions/checkout@"),
+		);
+		const ancestryCheckIndex = steps.findIndex((step) =>
+			step.run?.includes("git merge-base --is-ancestor HEAD origin/main"),
+		);
+		const projectScriptIndex = steps.findIndex((step) =>
+			step.run?.includes("node scripts/package-npm.mjs"),
+		);
+		expect(checkoutIndex).toBeGreaterThanOrEqual(0);
+		expect(ancestryCheckIndex).toBe(checkoutIndex + 1);
+		expect(projectScriptIndex).toBeGreaterThan(ancestryCheckIndex);
+		expect(
+			steps.filter((step) => step.uses?.startsWith("actions/checkout@")),
+		).toHaveLength(1);
 		expect(steps.some((step) => step.uses?.startsWith("actions/cache@"))).toBe(
 			false,
 		);
