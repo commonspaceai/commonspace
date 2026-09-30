@@ -4,7 +4,9 @@ Check your operating system under [Published package](#published-package), then 
 
 ## Published package
 
-The `commonspace` npm package requires Node.js 22 or newer. npm installs external runtime dependencies for the current computer; Commonspace does not publish separate operating-system archives.
+The `commonspace` npm package declares Node.js 22 or newer. npm installs external runtime dependencies for the current computer; Commonspace does not publish separate operating-system archives.
+
+CI and release jobs that run Commonspace use Node 22. The published `0.2.0` tarball also passed clean-install and restart verification with Node 24.21.0 on macOS arm64. These checks do not cover every admitted Node and operating-system combination.
 
 | Computer                 | Published-package coverage                                                                                                | Background operation                                               |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
@@ -27,7 +29,7 @@ Commonspace does not currently ship a desktop app wrapper. Follow [Installation]
 
 | Requirement or tool | Current coverage |
 | --- | --- |
-| Node.js | Source requires Node 22.13+ within 22.x, or 24+. Node 22 is the CI baseline; see [package.json](../../package.json). |
+| Node.js | Source declares Node 22.13+ within 22.x, or 24+; see [package.json](../../package.json). CI uses Node 22. At commit `be934c8`, Node 24.21.0 on macOS arm64 passed a locked install, tests, build, and clean verification of the built npm candidate. |
 | pnpm | Use version 10.34.5 and `pnpm install --frozen-lockfile`. |
 | Git and Corepack | Source workflows need Git. Corepack can provide pnpm and is required by the macOS service installer. Published-package users need npm or `npx`. |
 | macOS and Linux | Supported source-development environments. Linux runs the main CI checks; macOS also has service checks. |
