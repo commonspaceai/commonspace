@@ -8,13 +8,18 @@ The `commonspace` npm package declares Node.js 22 or newer. npm installs externa
 
 CI and release jobs that run Commonspace use Node 22. The published `0.2.0` tarball also passed clean-install and restart verification with Node 24.21.0 on macOS arm64. These checks do not cover every admitted Node and operating-system combination.
 
-| Computer                   | Published-package coverage                                                                                                | Background operation                                               |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| Apple Silicon or Intel Mac | Supported npm installation                                                                                                | Foreground package; source checkout can install a per-user service |
-| Linux                      | Supported npm installation                                                                                                | Foreground package                                                 |
-| Windows x64                | Candidate tarball verified on Windows Server 2025 x64; see [Windows evidence and limits](../guides/windows-validation.md) | Foreground only; no Windows service installer                      |
+| Computer                 | Published-package coverage                                                                                                | Background operation                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Apple Silicon Mac        | Supported npm installation; previously verified on native `darwin/arm64`                                                  | Foreground package; source checkout can install a per-user service |
+| Intel Mac (`darwin/x64`) | Not yet verified for npm installation                                                                                     | Source service validation is separate                              |
+| Linux                    | Supported npm installation                                                                                                | Foreground package                                                 |
+| Windows x64              | Candidate tarball verified on Windows Server 2025 x64; see [Windows evidence and limits](../guides/windows-validation.md) | Foreground only; no Windows service installer                      |
 
-The release workflow installs one npm tarball in a clean Linux prefix, then validates that exact tarball on Windows before publication. It exercises the npm command, API, UI assets, saved-state restart, and graceful shutdown. Windows uses private IPC disconnect for automated shutdown; terminal Ctrl+C needs separate acceptance. macOS service behavior remains a separate source-based check. See workflow results and release notes for evidence about a particular version.
+The release workflow installs one npm tarball in a clean Linux prefix, then validates that exact tarball on Windows before publication. It does not run a macOS package check for each release. A [prior native Apple Silicon package smoke](https://github.com/commonspaceai/commonspace/pull/25) covered clean installation, saved-state restart, and shutdown on `darwin/arm64`.
+
+Native Intel `darwin/x64` needs its own package smoke before its npm installation can be listed as verified. On a disposable Intel Mac with Node 22, run `node scripts/verify-npm-package.mjs <published-tarball> <published-version>` from a source checkout and record the platform, versions, tarball digest, and runtime results. Apple Silicon under Rosetta and Windows x64 do not establish native Intel support.
+
+The package check exercises the npm command, API, UI assets, saved-state restart, and graceful shutdown. Windows uses private IPC disconnect for automated shutdown; terminal Ctrl+C needs separate acceptance. macOS service behavior remains a separate source-based check. See workflow results and release notes for evidence about a particular version.
 
 The optional local routing classifier uses the pinned ONNX native runtime on Apple Silicon, Linux, and Windows. That runtime has no Intel Mac binding; Intel Macs continue to use the configured inference Agent for routing.
 

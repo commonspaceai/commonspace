@@ -572,6 +572,98 @@ describe("Commonspace direct-message host sessions", () => {
 		expect(service.snapshot().agentSessions["codex"]).toBeUndefined();
 	});
 
+	it("removes old DM follow-ups immediately after reset without affecting another queue", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-reset-dm-queue-"));
+		roots.push(root);
+		const oldRun = deferred<{ text: string; sessionId: string }>();
+		const otherRun = deferred<{ text: string; sessionId: string }>();
+		const runAgent = vi.fn(async (input: AgentRunInput) => {
+			if (input.message === "Old active") return oldRun.promise;
+			if (input.message === "Other active") return otherRun.promise;
+			return {
+				text: `Reply to ${input.message}`,
+				sessionId: "123e4567-e89b-42d3-a456-426614174000",
+			};
+		});
+		const service = new CommonspaceHostService(
+			{},
+			{ root },
+			{ discoverAgents: discoverTestHarnesses, runAgent },
+		);
+		await service.initialize();
+		await addTestHarness(service, "codex", "Review Bot");
+		await addTestHarness(service, "hermes", "Design Critic");
+
+		const first = await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "Old active",
+		});
+		await vi.waitFor(() => {
+			expect(runAgent).toHaveBeenCalledWith(
+				expect.objectContaining({ message: "Old active" }),
+			);
+		});
+		const queued = await service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "Old queued",
+			delivery: "queue",
+		});
+		await service.send({
+			conversation: { kind: "dm", id: "hermes" },
+			text: "Other active",
+		});
+		await vi.waitFor(() => {
+			expect(runAgent).toHaveBeenCalledWith(
+				expect.objectContaining({ message: "Other active" }),
+			);
+		});
+		const otherQueued = await service.send({
+			conversation: { kind: "dm", id: "hermes" },
+			text: "Other queued",
+			delivery: "queue",
+		});
+		expect(
+			(await service.bootstrap()).queuedFollowups?.map(
+				(item) => item.messageId,
+			),
+		).toEqual([queued.accepted.id, otherQueued.accepted.id]);
+
+		await service.mutate({ action: "reset-dm", agentId: "codex" });
+		expect(
+			(await service.bootstrap()).queuedFollowups?.map(
+				(item) => item.messageId,
+			),
+		).toEqual([otherQueued.accepted.id]);
+		for (const messageId of [first.accepted.id, queued.accepted.id]) {
+			expect(
+				service
+					.snapshot()
+					.messages["dm:codex"]?.find((message) => message.id === messageId),
+			).toMatchObject({
+				replyStatus: "error",
+				replyError: "Interrupted by /new.",
+			});
+		}
+
+		oldRun.resolve({
+			text: "Stale reply",
+			sessionId: "123e4567-e89b-42d3-a456-426614174000",
+		});
+		otherRun.resolve({
+			text: "Other reply",
+			sessionId: "223e4567-e89b-42d3-a456-426614174000",
+		});
+		await service.whenIdle();
+		expect(runAgent.mock.calls.map(([input]) => input.message)).toEqual([
+			"Old active",
+			"Other active",
+			"Other queued",
+		]);
+		expect(
+			service.snapshot().messages["dm:codex"]?.map((message) => message.text),
+		).toEqual(["Old active", "Old queued", "New session started"]);
+	});
+
 	it("rejects a user message when the DM resets between preparation and acceptance", async () => {
 		const root = await mkdtemp(
 			join(tmpdir(), "commonspace-reset-dm-accept-race-"),

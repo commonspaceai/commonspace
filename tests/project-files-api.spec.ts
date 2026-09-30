@@ -371,8 +371,11 @@ describe("project file API", () => {
 	});
 
 	it("rejects traversal and symlink file reads", async () => {
-		const { running, projectId } = await fixture();
+		const { running, projectId, workspace } = await fixture();
 		const headers = { origin: running.url };
+		const sibling = `${workspace}-extra.txt`;
+		await writeFile(sibling, "host private\n");
+		await symlink(sibling, join(workspace, "sibling-link.txt"));
 
 		const traversal = await fetch(
 			projectUrl(running, projectId, "file", { path: "../outside.txt" }),
@@ -392,12 +395,23 @@ describe("project file API", () => {
 			code: "invalid_project_path",
 		});
 
-		const symlink = await fetch(
+		const outsideSymlink = await fetch(
 			projectUrl(running, projectId, "file", { path: "outside-link.txt" }),
 			{ headers },
 		);
-		expect(symlink.status).toBe(403);
-		await expect(symlink.json()).resolves.toMatchObject({
+		expect(outsideSymlink.status).toBe(403);
+		await expect(outsideSymlink.json()).resolves.toMatchObject({
+			code: "project_path_outside_root",
+		});
+
+		const siblingSymlink = await fetch(
+			projectUrl(running, projectId, "file", {
+				path: "sibling-link.txt",
+			}),
+			{ headers },
+		);
+		expect(siblingSymlink.status).toBe(403);
+		await expect(siblingSymlink.json()).resolves.toMatchObject({
 			code: "project_path_outside_root",
 		});
 	});
