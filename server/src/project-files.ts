@@ -272,9 +272,10 @@ async function resolveProjectPath(
 		);
 	const relativePath = safeRelativePath(path, allowRoot);
 	const root = await realpath(configuredRoot);
+	if (relativePath === "") return { root, absolutePath: root, relativePath };
 	const candidate = resolve(root, relativePath);
 	const rootPrefix = root.endsWith(sep) ? root : `${root}${sep}`;
-	if (candidate !== root && !candidate.startsWith(rootPrefix)) {
+	if (!candidate.startsWith(rootPrefix)) {
 		throw new ProjectFileError(
 			403,
 			"project_path_outside_root",
