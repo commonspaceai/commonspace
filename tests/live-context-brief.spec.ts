@@ -6,7 +6,11 @@ import {
 	CommonspaceRoutingProvider,
 } from "@commonspace/shared";
 import { describe, expect, it } from "vitest";
-import type { CompactedChannelContext } from "../server/src/context.ts";
+import {
+	buildChannelContextCompactionPrompt,
+	type CompactedChannelContext,
+} from "../server/src/context.ts";
+import { projectChannelMemory } from "../server/src/memory.ts";
 import { CommonspaceHostService } from "../server/src/service.ts";
 import {
 	createInitialState,
@@ -15,7 +19,10 @@ import {
 } from "../server/src/state.ts";
 import { createThreadContext } from "../server/src/thread-context.ts";
 
-function expectCurrentDecisionBrief(brief: CompactedChannelContext) {
+function expectCurrentDecisionBrief(
+	brief: CompactedChannelContext,
+	extraKnownDecisionTokens: readonly string[] = [],
+) {
 	const decisions = brief.decisions.join("\n");
 	const openQuestions = brief.openQuestions.join("\n");
 	const context = [brief.summary, decisions].join("\n");
@@ -36,8 +43,10 @@ function expectCurrentDecisionBrief(brief: CompactedChannelContext) {
 	);
 	expect(activePolling).toBe(false);
 	expect(
-		brief.decisions.every((decision) =>
-			/\b(?:WebSockets|polling|3100|AUTH_PROTOCOL)\b/i.test(decision),
+		brief.decisions.every(
+			(decision) =>
+				/\b(?:WebSockets|polling|3100|AUTH_PROTOCOL)\b/i.test(decision) ||
+				extraKnownDecisionTokens.some((token) => decision.includes(token)),
 		),
 	).toBe(true);
 	expect(
@@ -62,6 +71,39 @@ function expectCurrentDecisionBrief(brief: CompactedChannelContext) {
 	);
 }
 
+function expectDurableContext(candidate: CompactedChannelContext) {
+	expectCurrentDecisionBrief(candidate, [
+		"PUBLIC_ARCHIVE_FORMAT",
+		"VALIDATED_COMPATIBILITY",
+	]);
+	const statements = [candidate.summary, ...candidate.decisions];
+	const text = statements.join("\n");
+	expect(text).toMatch(
+		/\b(?:preserve|keep|retain)\s+(?:the\s+)?PUBLIC_ARCHIVE_FORMAT\b|\bPUBLIC_ARCHIVE_FORMAT\b.{0,40}\b(?:unchanged|intact|preserved|retained)\b/i,
+	);
+	expect(text).not.toMatch(
+		/\b(?:do not|don't|no longer|never)\s+(?:preserve|keep|retain)\s+(?:the\s+)?PUBLIC_ARCHIVE_FORMAT\b|\bPUBLIC_ARCHIVE_FORMAT\b.{0,30}\b(?:may|can|should|must)\s+(?:change|be\s+(?:dropped|removed))\b/i,
+	);
+	const changesFormat = statements.some((statement) => {
+		const change =
+			/\b(?:change|drop|remove|replace)\s+(?:the\s+)?PUBLIC_ARCHIVE_FORMAT\b/i.test(
+				statement,
+			);
+		const explicitlyRejected =
+			/\b(?:do not|don't|never|must not|cannot)\s+(?:change|drop|remove|replace)\s+(?:the\s+)?PUBLIC_ARCHIVE_FORMAT\b/i.test(
+				statement,
+			);
+		return change && !explicitlyRejected;
+	});
+	expect(changesFormat).toBe(false);
+	expect(text).toMatch(
+		/\bVALIDATED_COMPATIBILITY\b.{0,50}\b(?:confirmed|confirmation|validated|verified|passed|passes)\b|\b(?:confirmed|confirmation|validated|verified|passed|passes)\b.{0,50}\bVALIDATED_COMPATIBILITY\b/i,
+	);
+	expect(text).not.toMatch(
+		/\b(?:no|not|without)\b.{0,35}\bVALIDATED_COMPATIBILITY\b|\bVALIDATED_COMPATIBILITY\b.{0,35}\b(?:unconfirmed|unverified|false|invalid)\b/i,
+	);
+}
+
 const validDecisionBrief: CompactedChannelContext = {
 	summary: "Keep AUTH_PROTOCOL unchanged during release.",
 	decisions: ["Use WebSockets instead of polling on port 3100."],
@@ -69,6 +111,21 @@ const validDecisionBrief: CompactedChannelContext = {
 };
 
 describe("current Channel decision brief evaluator", () => {
+	it("rejects a contradicted format obligation", () => {
+		const brief: CompactedChannelContext = {
+			...validDecisionBrief,
+			summary:
+				"Keep AUTH_PROTOCOL unchanged. Preserve PUBLIC_ARCHIVE_FORMAT unchanged. User confirmed VALIDATED_COMPATIBILITY.",
+		};
+		expectDurableContext(brief);
+		expect(() =>
+			expectDurableContext({
+				...brief,
+				decisions: [...brief.decisions, "Change PUBLIC_ARCHIVE_FORMAT now."],
+			}),
+		).toThrow();
+	});
+
 	it("accepts a current brief and an equivalent paraphrase", () => {
 		expectCurrentDecisionBrief(validDecisionBrief);
 		expectCurrentDecisionBrief({
@@ -163,6 +220,7 @@ describe.skipIf(process.env.COMMONSPACE_LIVE_CONTEXT !== "1")(
 					"I can help with coding, files, and explanations.",
 				],
 				empty: true,
+				multiGeneration: false,
 			},
 			{
 				name: "answered question and superseded decision",
@@ -174,10 +232,23 @@ describe.skipIf(process.env.COMMONSPACE_LIVE_CONTEXT !== "1")(
 					"Agreed: WebSockets on 3100. I still need to choose the rollout date.",
 				],
 				empty: false,
+				multiGeneration: false,
+			},
+			{
+				name: "durable context over three generations",
+				messages: [
+					"Initial decision: use polling. Preserve AUTH_PROTOCOL and PUBLIC_ARCHIVE_FORMAT unchanged. VALIDATED_COMPATIBILITY is confirmed. Will the Linux package smoke test pass? When should rollout begin?",
+					"Polling was the initial transport choice. The Linux package smoke result and rollout date remain open.",
+					"Replace the polling decision: use WebSockets on port 3100. Keep AUTH_PROTOCOL and PUBLIC_ARCHIVE_FORMAT unchanged.",
+					"WebSockets on port 3100 is accepted. VALIDATED_COMPATIBILITY is confirmed. The Linux package smoke result and rollout date are still open.",
+					"Agreed. Preserve the accepted transport and both obligations. We still need the Linux package smoke result and rollout date.",
+				],
+				empty: false,
+				multiGeneration: true,
 			},
 		])(
 			"keeps useful context from $name",
-			async ({ messages, empty }) => {
+			async ({ messages, empty, multiGeneration }) => {
 				const root = await mkdtemp(join(tmpdir(), "commonspace-live-brief-"));
 				const state = createInitialState();
 				const createdAt = "2026-09-01T00:00:00.000Z";
@@ -226,7 +297,7 @@ describe.skipIf(process.env.COMMONSPACE_LIVE_CONTEXT !== "1")(
 					}),
 				);
 				await writeFile(join(root, "state.json"), JSON.stringify(state));
-				const service = new CommonspaceHostService({}, { root });
+				let service = new CommonspaceHostService({}, { root });
 				try {
 					await service.initialize();
 					await service.updateRoutingConfiguration({
@@ -243,12 +314,129 @@ describe.skipIf(process.env.COMMONSPACE_LIVE_CONTEXT !== "1")(
 					} else {
 						expectCurrentDecisionBrief(brief);
 					}
+					if (multiGeneration) {
+						const hasOpenLinuxSmoke = (candidate: CompactedChannelContext) =>
+							candidate.openQuestions.some(
+								(question) =>
+									question.toLowerCase().includes("linux") &&
+									question.toLowerCase().includes("smoke"),
+							);
+						expectDurableContext(brief);
+						expect(hasOpenLinuxSmoke(brief)).toBe(true);
+
+						const afterFirst = service.snapshot();
+						const key = "channel:sample";
+						afterFirst.messages[key] = [
+							...(afterFirst.messages[key] ?? []),
+							...Array.from(
+								{ length: 18 },
+								(_, index): CommonspaceMessage => ({
+									id: `progress-${index}`,
+									conversation: { kind: "channel", id: "sample" },
+									threadId: "thread",
+									authorType: "user",
+									authorId: "user",
+									authorName: "User",
+									text:
+										"Routine progress " +
+										index +
+										": " +
+										"Verified change. ".repeat(260),
+									createdAt: new Date(
+										Date.parse(createdAt) + (index + 10) * 1000,
+									).toISOString(),
+								}),
+							),
+						];
+						const nextPrompt = buildChannelContextCompactionPrompt(
+							afterFirst,
+							"sample",
+							projectChannelMemory(
+								afterFirst,
+								"sample",
+								afterFirst.defaults.memoryThreads,
+							),
+						);
+						const sections = nextPrompt.split("\n\n");
+						const previous = sections.find((section) =>
+							section.startsWith("Previous shared context: "),
+						);
+						const source = sections.find((section) =>
+							section.startsWith("Source messages: "),
+						);
+						expect(previous).toContain("PUBLIC_ARCHIVE_FORMAT");
+						expect(source).toContain("Routine progress 17");
+						expect(source).not.toContain("PUBLIC_ARCHIVE_FORMAT");
+
+						await service.close();
+						await writeFile(
+							join(root, "state.json"),
+							JSON.stringify(afterFirst),
+						);
+						service = new CommonspaceHostService({}, { root });
+						await service.initialize();
+						const second = await service.compactChannelContext("sample");
+						expectDurableContext(second);
+						expect(hasOpenLinuxSmoke(second)).toBe(true);
+
+						const afterSecond = service.snapshot();
+						afterSecond.messages[key] = [
+							...(afterSecond.messages[key] ?? []),
+							{
+								id: "linux-smoke-complete",
+								conversation: { kind: "channel", id: "sample" },
+								threadId: "thread",
+								authorType: "user",
+								authorId: "user",
+								authorName: "User",
+								text: "LINUX_PACKAGE_SMOKE_PASSED is verified on Node 24. This answers the Linux package smoke question. The rollout date remains unresolved.",
+								createdAt: new Date(
+									Date.parse(createdAt) + 100_000,
+								).toISOString(),
+							},
+						];
+						const finalPrompt = buildChannelContextCompactionPrompt(
+							afterSecond,
+							"sample",
+							projectChannelMemory(
+								afterSecond,
+								"sample",
+								afterSecond.defaults.memoryThreads,
+							),
+						);
+						const finalSections = finalPrompt.split("\n\n");
+						const finalPrevious = finalSections.find((section) =>
+							section.startsWith("Previous shared context: "),
+						);
+						const finalSource = finalSections.find((section) =>
+							section.startsWith("Source messages: "),
+						);
+						expect(finalPrevious).toContain("PUBLIC_ARCHIVE_FORMAT");
+						expect(finalPrevious).toContain("VALIDATED_COMPATIBILITY");
+						expect(finalSource).toContain("LINUX_PACKAGE_SMOKE_PASSED");
+						expect(finalSource).not.toContain("PUBLIC_ARCHIVE_FORMAT");
+						expect(finalSource).not.toContain("VALIDATED_COMPATIBILITY");
+						expect(finalSource).not.toContain("WebSockets");
+						await service.close();
+						await writeFile(
+							join(root, "state.json"),
+							JSON.stringify(afterSecond),
+						);
+						service = new CommonspaceHostService({}, { root });
+						await service.initialize();
+						const third = await service.compactChannelContext("sample");
+						expectDurableContext(third);
+						expect([third.summary, ...third.decisions].join("\n")).toContain(
+							"LINUX_PACKAGE_SMOKE_PASSED",
+						);
+						expect(hasOpenLinuxSmoke(third)).toBe(false);
+					}
 				} finally {
 					await service.close();
 					await rm(root, { recursive: true, force: true });
 				}
 			},
-			120_000,
+			300_000,
 		);
 	},
 );

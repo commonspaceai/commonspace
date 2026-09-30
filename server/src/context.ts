@@ -196,7 +196,7 @@ export function buildChannelContextCompactionPrompt(
 		`Saved Channel notes: ${channel.instructions || "none"}`,
 		`Current agents: ${JSON.stringify(compactionRoster(state, channelId))}`,
 		`Pinned context: ${JSON.stringify(compactionPins(state, channelId))}`,
-		`Previous shared context: ${JSON.stringify(channel.memory.origin === "automatic" || channel.memory.origin === undefined ? null : { origin: channel.memory.origin, summary: channel.memory.summary.slice(0, 8_000), decisions: channel.memory.decisions, openQuestions: channel.memory.openQuestions })}`,
+		`Previous shared context: ${JSON.stringify(channel.memory.origin === "automatic" || channel.memory.origin === undefined ? null : { origin: channel.memory.origin, summary: channel.memory.summary, decisions: channel.memory.decisions, openQuestions: channel.memory.openQuestions })}`,
 		`Source messages: ${JSON.stringify(bounded)}`,
 	].join("\n\n");
 }
