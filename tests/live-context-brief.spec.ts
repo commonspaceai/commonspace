@@ -6,6 +6,7 @@ import {
 	CommonspaceRoutingProvider,
 } from "@commonspace/shared";
 import { describe, expect, it } from "vitest";
+import type { CompactedChannelContext } from "../server/src/context.ts";
 import { CommonspaceHostService } from "../server/src/service.ts";
 import {
 	createInitialState,
@@ -13,6 +14,141 @@ import {
 	emptyRoutingMemory,
 } from "../server/src/state.ts";
 import { createThreadContext } from "../server/src/thread-context.ts";
+
+function expectCurrentDecisionBrief(brief: CompactedChannelContext) {
+	const decisions = brief.decisions.join("\n");
+	const openQuestions = brief.openQuestions.join("\n");
+	const context = [brief.summary, decisions].join("\n");
+	const activePolling = [brief.summary, ...brief.decisions].some((decision) => {
+		const presentedAsCurrent =
+			/\b(?:use|using|keep|choose|adopt)\s+polling\b|\bpolling\b.{0,30}\b(?:current|active|selected|chosen)\b/i.test(
+				decision,
+			);
+		const explicitlyRejected =
+			/\b(?:do not|no longer|never|stop)\s+(?:use|using|keep|choose|adopt)\s+polling\b|\bpolling\b.{0,30}\b(?:not|no longer)\s+(?:current|active|selected|chosen)\b/i.test(
+				decision,
+			);
+		return presentedAsCurrent && !explicitlyRejected;
+	});
+	expect(decisions).toMatch(/\bWebSockets\b/i);
+	expect(context).not.toMatch(
+		/\b(?:do not|no longer|avoid|reject)\s+(?:use\s+)?WebSockets\b/i,
+	);
+	expect(activePolling).toBe(false);
+	expect(
+		brief.decisions.every((decision) =>
+			/\b(?:WebSockets|polling|3100|AUTH_PROTOCOL)\b/i.test(decision),
+		),
+	).toBe(true);
+	expect(
+		brief.decisions.some(
+			(decision) =>
+				/\b3100\b/.test(decision) &&
+				/\b(?:use|on|port|listener|selected|chosen|decided)\b/i.test(
+					decision,
+				) &&
+				!/\b(?:maybe|might|could|possibly|proposed|consider)\b/i.test(decision),
+		),
+	).toBe(true);
+	expect(openQuestions).toMatch(/\brollout\b/i);
+	expect(openQuestions).not.toMatch(
+		/\b(?:port|3100|listener|endpoint|polling|transport)\b/i,
+	);
+	expect(context).toMatch(
+		/\b(?:preserve|keep|retain)\s+(?:the\s+)?AUTH_PROTOCOL\b|\bAUTH_PROTOCOL\b.{0,30}\b(?:unchanged|intact|preserved|retained)\b/i,
+	);
+	expect(context).not.toMatch(
+		/\b(?:do not|don't|no longer|never)\s+(?:preserve|keep|retain)\s+(?:the\s+)?AUTH_PROTOCOL\b|\b(?:may|can|should|must)\s+(?:change|drop|remove)\s+(?:the\s+)?AUTH_PROTOCOL\b|\bAUTH_PROTOCOL\b.{0,30}\b(?:not|no longer|may|can|should)\s+(?:be\s+)?(?:preserved|kept|retained|unchanged|changed|removed|dropped|change)\b/i,
+	);
+}
+
+const validDecisionBrief: CompactedChannelContext = {
+	summary: "Keep AUTH_PROTOCOL unchanged during release.",
+	decisions: ["Use WebSockets instead of polling on port 3100."],
+	openQuestions: ["When should rollout begin?"],
+};
+
+describe("current Channel decision brief evaluator", () => {
+	it("accepts a current brief and an equivalent paraphrase", () => {
+		expectCurrentDecisionBrief(validDecisionBrief);
+		expectCurrentDecisionBrief({
+			summary: "AUTH_PROTOCOL must remain intact.",
+			decisions: [
+				"WebSockets is the active transport on listener 3100.",
+				"Polling was superseded.",
+			],
+			openQuestions: ["What date should rollout start?"],
+		});
+	});
+
+	it.each([
+		{
+			name: "polling presented as equally current",
+			brief: {
+				...validDecisionBrief,
+				decisions: [
+					...validDecisionBrief.decisions,
+					"Use polling for this service.",
+				],
+			},
+		},
+		{
+			name: "polling described as active without an imperative",
+			brief: {
+				...validDecisionBrief,
+				decisions: [...validDecisionBrief.decisions, "Polling remains active."],
+			},
+		},
+		{
+			name: "polling presented as current in the summary",
+			brief: {
+				...validDecisionBrief,
+				summary: `${validDecisionBrief.summary} Polling remains active.`,
+			},
+		},
+		{
+			name: "the decided port reopened with different words",
+			brief: {
+				...validDecisionBrief,
+				openQuestions: [
+					...validDecisionBrief.openQuestions,
+					"Which listener should we choose?",
+				],
+			},
+		},
+		{
+			name: "the unresolved rollout removed",
+			brief: { ...validDecisionBrief, openQuestions: [] },
+		},
+		{
+			name: "the preservation obligation negated",
+			brief: {
+				...validDecisionBrief,
+				summary: "Do not preserve AUTH_PROTOCOL.",
+			},
+		},
+		{
+			name: "the preservation token left without an obligation",
+			brief: { ...validDecisionBrief, summary: "AUTH_PROTOCOL may change." },
+		},
+		{
+			name: "a hedged port answer presented as a decision",
+			brief: {
+				...validDecisionBrief,
+				decisions: ["Use WebSockets. Maybe use port 3100."],
+			},
+		},
+		{
+			name: "an unrelated decision invented",
+			brief: {
+				...validDecisionBrief,
+				decisions: [...validDecisionBrief.decisions, "Deploy to Mercury."],
+			},
+		},
+	])("rejects $name", ({ brief }) => {
+		expect(() => expectCurrentDecisionBrief(brief)).toThrow();
+	});
+});
 
 describe.skipIf(process.env.COMMONSPACE_LIVE_CONTEXT !== "1")(
 	"live context brief quality through Codex ACP",
@@ -105,13 +241,7 @@ describe.skipIf(process.env.COMMONSPACE_LIVE_CONTEXT !== "1")(
 							openQuestions: [],
 						});
 					} else {
-						expect(JSON.stringify(brief)).toContain("AUTH_PROTOCOL");
-						expect(brief.decisions.join(" ")).toMatch(/WebSockets/i);
-						expect(brief.decisions.join(" ")).toContain("3100");
-						expect(brief.openQuestions.join(" ")).toMatch(/rollout/i);
-						expect(brief.openQuestions.join(" ")).not.toMatch(
-							/which port|can we use polling|help you/i,
-						);
+						expectCurrentDecisionBrief(brief);
 					}
 				} finally {
 					await service.close();
