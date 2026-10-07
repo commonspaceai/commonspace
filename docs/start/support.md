@@ -35,7 +35,7 @@ The published npm package uses a desktop browser. The first Electron release tar
 | macOS and Linux | Supported source-development environments. Linux runs the main CI checks; macOS also has service checks. |
 | Windows x64 | CI uses Node 22 on `windows-2025` for types/builds, the focused platform suite, Storybook smoke, E2E, live browser verification, and npm packaging. This is not the full native-runtime suite; see [evidence and manual checks](../guides/windows-validation.md). |
 
-During development, Vite serves the UI at `127.0.0.1:5173` and forwards API requests to the Express server at `127.0.0.1:3100`. Follow [Development setup](../guides/development.md#setup) for commands.
+During development, Vite serves the UI at `127.0.0.1:5173` and forwards API requests to the Express server at `127.0.0.1:47321`. Follow [Development setup](../guides/development.md#setup) for commands.
 
 Start with [Contributing](../../CONTRIBUTING.md) for a fresh checkout and [Development](../guides/development.md) for day-to-day commands.
 

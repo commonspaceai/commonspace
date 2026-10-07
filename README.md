@@ -32,7 +32,7 @@ Requirements: macOS or Linux and Node.js 22 or newer.
 npx --yes commonspace@latest
 ```
 
-Open `http://127.0.0.1:3100` in your browser and keep the terminal running.
+Open the address printed by the command in your browser and keep the terminal running.
 
 1. [Install and sign in to one runtime](https://github.com/commonspaceai/commonspace/blob/main/docs/start/runtimes.md), then choose **Add Agent**.
 2. Select that agent as the **workspace inference agent** and choose **Use selected agent** to finish setup. It also routes Channel messages and summarizes shared context.

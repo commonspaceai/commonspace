@@ -20,7 +20,7 @@ Run the latest published version. npm installs the package and its runtime depen
 npx --yes commonspace@latest
 ```
 
-Open `http://127.0.0.1:3100` in your desktop browser. Keep the terminal open while using the app. Press Ctrl+C to stop Commonspace and its active agent work.
+Open the address printed by the command in your desktop browser. Keep the terminal open while using the app. Press Ctrl+C to stop Commonspace and its active agent work.
 
 On supported computers, the first launch downloads about 613 MB for the local classifier in the background. Intel Macs use the inference Agent without downloading the classifier. Add `--no-classifier` to skip it elsewhere; see [classifier operation](../guides/operations.md#local-routing-classifier) for cache and fallback behavior.
 
@@ -79,11 +79,11 @@ The `.cmd` suffix selects npm's Windows launcher if PowerShell blocks the accomp
 
 ```powershell
 $env:COMMONSPACE_HOME = Join-Path $HOME "Commonspace trial"
-$env:COMMONSPACE_PORT = "3100"
+$env:COMMONSPACE_PORT = "47321"
 npx.cmd --yes commonspace@latest
 ```
 
-Open `http://127.0.0.1:3100`, keep the terminal open, and continue with [your first answer](#get-your-first-answer).
+Open the address printed by the command, keep the terminal open, and continue with [your first answer](#get-your-first-answer).
 
 Commonspace does not install a Windows service. Read the [validation guide](../guides/windows-validation.md) for candidate tarball/source commands, console shutdown checks, and the remaining native integration checks. Windows application smoke coverage does not establish support for each agent runtime.
 

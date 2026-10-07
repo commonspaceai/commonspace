@@ -29,7 +29,7 @@ export const COMMONSPACE_SERVICE_LABEL = "dev.commonspace.service";
 export const DEFAULT_COMMONSPACE_SOURCE =
 	"git@github.com:commonspaceai/commonspace.git";
 
-const DEFAULT_PORT = 3100;
+const DEFAULT_PORT = 47321;
 
 function writeLine(message) {
 	process.stdout.write(`${message}\n`);

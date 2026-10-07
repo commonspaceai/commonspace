@@ -13,7 +13,7 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-Open the UI at `http://127.0.0.1:5173`. The API runs at `http://127.0.0.1:3100`. Vite forwards `/api` requests to the server, so browser code uses relative, same-origin API paths. The development API server does not serve the browser application; use the Vite URL.
+Open the UI at `http://127.0.0.1:5173`. The API runs at `http://127.0.0.1:47321`. Vite forwards `/api` requests to the server, so browser code uses relative, same-origin API paths. The development API server does not serve the browser application; use the Vite URL.
 
 A new workspace starts empty. Agent credentials are optional for application development: unit tests, Storybook, and the standard live verifier do not require an authenticated harness. Use `COMMONSPACE_HOME` to keep development data separate from an existing workspace; see [runtime configuration](operations.md#runtime-configuration).
 
@@ -55,7 +55,7 @@ pnpm build
 pnpm start:web
 ```
 
-Open `http://127.0.0.1:3100` in your desktop browser. Both local and optional remote listeners bind to loopback. Use [Private browser access](remote-access.md) for Tailscale configuration. Use `pnpm dev` for the separate Vite and API development servers described above.
+Open `http://127.0.0.1:47321` in your desktop browser. Both local and optional remote listeners bind to loopback. Use [Private browser access](remote-access.md) for Tailscale configuration. Use `pnpm dev` for the separate Vite and API development servers described above.
 
 ## Shared contract reference
 

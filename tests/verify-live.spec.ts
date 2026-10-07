@@ -14,9 +14,9 @@ describe("live verifier startup output", () => {
 	it("keeps matching plain server output", () => {
 		expect(
 			findStartupUrl(
-				"Commonspace is running at http://127.0.0.1:3100",
+				"Commonspace is running at http://127.0.0.1:47321",
 				/Commonspace is running at (http:\/\/127\.0\.0\.1:\d+)/,
 			),
-		).toBe("http://127.0.0.1:3100");
+		).toBe("http://127.0.0.1:47321");
 	});
 });

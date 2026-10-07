@@ -20,7 +20,7 @@ A Project selects local folders used for work. Add it with `@@` in your message 
 
 ## The page will not open
 
-Run `npx --yes commonspace@latest` and leave that terminal open. Use the address printed there, normally `http://127.0.0.1:3100`. If the port is occupied, stop the old Commonspace process or select another `COMMONSPACE_PORT`. Do not run two servers against the same data directory.
+Run `npx --yes commonspace@latest` and leave that terminal open. Use the address printed there. If the port is occupied, stop the old Commonspace process or select another `COMMONSPACE_PORT`. Do not run two servers against the same data directory.
 
 ## My agent was found but cannot answer
 

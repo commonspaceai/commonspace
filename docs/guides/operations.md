@@ -21,7 +21,7 @@ In a second terminal, start the built UI:
 pnpm --filter @commonspace/ui preview
 ```
 
-Open the preview URL printed by Vite. The source server binds to `127.0.0.1:3100` and serves the API and root health check. It does not serve UI assets unless `COMMONSPACE_UI_ROOT` is set. The npm command and installed macOS service set that directory automatically so the UI and API share one origin.
+Open the preview URL printed by Vite. The source server binds to `127.0.0.1:47321` and serves the API and root health check. It does not serve UI assets unless `COMMONSPACE_UI_ROOT` is set. The npm command and installed macOS service set that directory automatically so the UI and API share one origin.
 
 ## Runtime configuration
 
@@ -31,12 +31,12 @@ The server reads these variables at startup. They apply to the foreground proces
 
 | Variable | Default or behavior |
 | --- | --- |
-| `COMMONSPACE_PORT` | API port; defaults to `3100`. Accepts `0` for an operating-system-assigned port. |
+| `COMMONSPACE_PORT` | API port; defaults to `47321`. Accepts `0` for an operating-system-assigned port. |
 | `COMMONSPACE_HOME` | Local state directory; defaults to `~/.commonspace`. Use a separate directory for development or verification. |
 | `COMMONSPACE_UI_ROOT` | Built browser asset directory. The source server serves no UI when unset; npm/service launchers set it. |
 | `COMMONSPACE_REMOTE_ORIGIN` | Exact HTTPS origin served by Tailscale. Requires `COMMONSPACE_REMOTE_OWNER_LOGIN`; unset disables the private browser listener. |
 | `COMMONSPACE_REMOTE_OWNER_LOGIN` | Exact Tailscale login accepted by the private browser listener. Requires `COMMONSPACE_REMOTE_ORIGIN`. |
-| `COMMONSPACE_REMOTE_PORT` | Private browser listener port on loopback; defaults to `3101` when remote access is configured. Use the same nonzero port in the Serve target. |
+| `COMMONSPACE_REMOTE_PORT` | Private browser listener port on loopback; defaults to `47322` when remote access is configured. Use the same nonzero port in the Serve target. |
 | `COMMONSPACE_LOG_LEVEL` | Server log level; defaults to `info`. |
 | `COMMONSPACE_OTLP_ENDPOINT` | Optional OTLP/HTTP collector origin on loopback, such as `http://127.0.0.1:4318`. Unset by default; remote hosts, paths, credentials, and query strings are rejected. |
 
@@ -157,7 +157,7 @@ Use `commonspace --no-classifier` to disable it. Stopping Commonspace cancels do
 
 ## Installed macOS service
 
-The managed service requires Corepack, Git, the pinned pnpm version, and SSH repository access. It installs committed `main`, not uncommitted checkout edits. Stop any foreground Commonspace process so port `3100` is free, then run from a source checkout:
+The managed service requires Corepack, Git, the pinned pnpm version, and SSH repository access. It installs committed `main`, not uncommitted checkout edits. Stop any foreground Commonspace process so port `47321` is free, then run from a source checkout:
 
 ```bash
 pnpm service:install
@@ -258,7 +258,7 @@ Message deletion and retention save private attachment cleanup IDs atomically wi
 For a running instance:
 
 ```bash
-curl http://127.0.0.1:3100/api/health
+curl http://127.0.0.1:47321/api/health
 ```
 
 A healthy response is `{"status":"ok"}`. Adjust the port if configured differently. This checks server availability; it does not establish that an agent is authenticated or that a browser interaction works.
@@ -277,7 +277,7 @@ Use **Send test notification** to check macOS delivery. When native delivery fai
 
 ### UI development cannot reach the API
 
-Run `pnpm dev` from the repository root. Confirm that the API is on port `3100` and open the Vite UI on port `5173`. If using a custom API port, check the development proxy configuration as well.
+Run `pnpm dev` from the repository root. Confirm that the API is on port `47321` and open the Vite UI on port `5173`. If using a custom API port, check the development proxy configuration as well.
 
 ### No supported agent appears
 

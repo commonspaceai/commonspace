@@ -25,12 +25,12 @@ COMMONSPACE_REMOTE_OWNER_LOGIN=you@example.com \
 pnpm start
 ```
 
-The local client uses `http://127.0.0.1:3100`. The private browser listener uses `127.0.0.1:3101`; it accepts only requests with the configured Tailscale identity and HTTPS Host.
+The local client uses `http://127.0.0.1:47321`. The private browser listener uses `127.0.0.1:47322`; it accepts only requests with the configured Tailscale identity and HTTPS Host.
 
 In another terminal on the Mac, configure the private Serve proxy:
 
 ```bash
-tailscale serve --bg http://127.0.0.1:3101
+tailscale serve --bg http://127.0.0.1:47322
 tailscale serve status
 ```
 

@@ -28,7 +28,7 @@ async function main(): Promise<void> {
 	}
 	if (command === "--help") {
 		process.stdout.write(
-			`${usage}\nStarts Commonspace at http://127.0.0.1:3100.\nA local Laya ONNX classifier sidecar prepares in the background; the first launch downloads its model.\nUse --no-classifier for harness-only routing.\nSet COMMONSPACE_PORT or COMMONSPACE_HOME to override runtime defaults.\n`,
+			`${usage}\nStarts Commonspace at http://127.0.0.1:47321.\nA local Laya ONNX classifier sidecar prepares in the background; the first launch downloads its model.\nUse --no-classifier for harness-only routing.\nSet COMMONSPACE_PORT or COMMONSPACE_HOME to override runtime defaults.\n`,
 		);
 		return;
 	}

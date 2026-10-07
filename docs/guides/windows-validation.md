@@ -84,7 +84,7 @@ $env:COMMONSPACE_HOME = Join-Path $env:TEMP "Commonspace Windows trial"
 pnpm.cmd dev
 ```
 
-Open `http://127.0.0.1:5173`. For the installed package, use the same isolated home with the [foreground npm command](../start/install.md#windows-foreground-setup) and open port 3100. Record each result independently:
+Open `http://127.0.0.1:5173`. For the installed package, use the same isolated home with the [foreground npm command](../start/install.md#windows-foreground-setup) and open the address it prints. Record each result independently:
 
 1. **Saved work and paths:** create a Channel and a Project whose folder includes spaces and non-ASCII characters. Refresh/restart and confirm their state restores. Check nested Git folder resolution, attachments, and export/import with explicit Project remapping.
 2. **Development restart:** in source mode, edit a server source file while a synthetic turn is active. Verify the accepted turn finishes before the supervisor restarts, then verify browser reconnection. The focused suite covers the watcher protocol; this step checks the assembled `pnpm dev` process tree.

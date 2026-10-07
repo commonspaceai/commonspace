@@ -11,7 +11,7 @@ export const RemoteAccessConfigurationSchema = z.strictObject({
 		}
 	}, "Remote access requires an exact HTTPS origin without a path."),
 	ownerLogin: z.string().trim().min(1).max(320),
-	port: z.number().int().min(0).max(65_535).default(3101),
+	port: z.number().int().min(0).max(65_535).default(47322),
 });
 export type RemoteAccessConfiguration = z.input<
 	typeof RemoteAccessConfigurationSchema

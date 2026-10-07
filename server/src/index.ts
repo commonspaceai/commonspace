@@ -139,7 +139,7 @@ export async function startCommonspaceServer(
 	let remoteLoopbackUrl: string | undefined;
 	let locator: PrivateHostLocator;
 	try {
-		url = await listenOnLoopback(server, options.port ?? 3100);
+		url = await listenOnLoopback(server, options.port ?? 47321);
 		if (remoteListener !== undefined)
 			remoteLoopbackUrl = await listenOnLoopback(
 				remoteListener.server,
@@ -233,7 +233,7 @@ export async function startCommonspaceServer(
 }
 
 function configuredPort(value: string | undefined): number {
-	if (value === undefined || value === "") return 3100;
+	if (value === undefined || value === "") return 47321;
 	const port = Number(value);
 	if (!Number.isInteger(port) || port < 0 || port > 65_535) {
 		throw new Error("COMMONSPACE_PORT must be an integer from 0 to 65535");

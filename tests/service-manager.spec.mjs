@@ -198,7 +198,7 @@ describe("installed Commonspace service manager", () => {
 			for (const setting of expectedRemoteEnvironment)
 				expect(plist).toContain(setting);
 			expect(plist).toContain(
-				"<key>COMMONSPACE_PORT</key><string>3100</string>",
+				"<key>COMMONSPACE_PORT</key><string>47321</string>",
 			);
 			expect(await readFile(recordPath, "utf8")).toBe(record);
 		}
@@ -253,7 +253,9 @@ describe("installed Commonspace service manager", () => {
 		await rollbackRelease({ appRoot }, dependencies);
 		const plist = await readFile(layout.launchAgentPath, "utf8");
 		expect(plist).not.toContain("COMMONSPACE_REMOTE_");
-		expect(plist).toContain("<key>COMMONSPACE_PORT</key><string>3100</string>");
+		expect(plist).toContain(
+			"<key>COMMONSPACE_PORT</key><string>47321</string>",
+		);
 	});
 
 	it("restores the previous remote configuration when activation fails", async () => {
@@ -446,7 +448,7 @@ describe("installed Commonspace service manager", () => {
 			loaded: true,
 			healthy: true,
 			release: "commit-1",
-			url: "http://127.0.0.1:3100",
+			url: "http://127.0.0.1:47321",
 		});
 	});
 

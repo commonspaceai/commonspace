@@ -1,7 +1,8 @@
 import type { IncomingHttpHeaders } from "node:http";
 import type { ProxyOptions } from "vite";
 
-const apiTarget = process.env.COMMONSPACE_API_TARGET ?? "http://127.0.0.1:3100";
+const apiTarget =
+	process.env.COMMONSPACE_API_TARGET ?? "http://127.0.0.1:47321";
 
 interface ProxyRequestHeaders {
 	setHeader(name: string, value: string): void;
