@@ -24,6 +24,7 @@ describe("release verification", () => {
 			["test:visual:built"],
 			["test:messaging:built"],
 			["test:e2e:built"],
+			["verify:desktop:built"],
 			["verify:live:built"],
 			["package:npm"],
 			["verify:npm-package"],

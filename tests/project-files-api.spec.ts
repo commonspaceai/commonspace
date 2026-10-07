@@ -2,12 +2,14 @@
 import { execFile } from "node:child_process";
 import {
 	chmod,
+	copyFile,
 	mkdir,
 	mkdtemp,
 	readFile,
 	realpath,
 	rename,
 	rm,
+	stat,
 	symlink,
 	writeFile,
 } from "node:fs/promises";
@@ -15,6 +17,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { PRIVATE_HOST_LOCATOR_FILE_NAME } from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -174,6 +177,43 @@ describe("project file API", () => {
 		for (const endpoint of ["file", "diff"]) {
 			const response = await fetch(
 				projectUrl(running, projectId, endpoint, { path: "innocent.txt" }),
+				{ headers: { origin: running.url } },
+			);
+			expect(response.status).toBe(403);
+			await expect(response.json()).resolves.toMatchObject({
+				code: "project_file_sensitive",
+			});
+		}
+	});
+
+	it("blocks published and temporary host locators in a Project containing host storage", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-host-preview-"));
+		roots.push(root);
+		const running = await startCommonspaceServer({
+			root,
+			port: 0,
+			logger: { warn: () => undefined, info: () => undefined },
+		});
+		servers.push(running);
+		await running.service.mutate({
+			action: "create-project",
+			name: "Host storage",
+			paths: [root],
+		});
+		const project = running.service.snapshot().projects[0];
+		if (project === undefined) throw new Error("project fixture missing");
+		const locatorPath = join("host", PRIVATE_HOST_LOCATOR_FILE_NAME);
+		expect((await stat(join(root, locatorPath))).isFile()).toBe(true);
+		const temporaryPath = join(
+			"host",
+			`.${PRIVATE_HOST_LOCATOR_FILE_NAME}.pending.tmp`,
+		);
+		await copyFile(join(root, locatorPath), join(root, temporaryPath));
+		await symlink(locatorPath, join(root, "host-identity.json"));
+
+		for (const path of [locatorPath, temporaryPath, "host-identity.json"]) {
+			const response = await fetch(
+				projectUrl(running, project.id, "file", { path }),
 				{ headers: { origin: running.url } },
 			);
 			expect(response.status).toBe(403);

@@ -161,6 +161,7 @@ describe("workspace recovery boundaries", () => {
 		const primary = JSON.stringify({
 			...saved,
 			version: 35,
+			messageSubmissions: undefined,
 			schedules: undefined,
 		});
 		const prior = structuredClone(saved);
@@ -170,6 +171,7 @@ describe("workspace recovery boundaries", () => {
 		const backup = JSON.stringify({
 			...prior,
 			version: 35,
+			messageSubmissions: undefined,
 			schedules: undefined,
 		});
 		await writeFile(join(root, "state.json"), primary);
@@ -177,7 +179,7 @@ describe("workspace recovery boundaries", () => {
 
 		const service = await openWorkspace(root);
 		const state = service.snapshot();
-		expect(state.version).toBe(36);
+		expect(state.version).toBe(37);
 		expect(state.schedules).toEqual([]);
 		expect(state.projects[0]?.emoji).toBe("🧭");
 		expect(state.channels[0]?.emoji).toBe("🧩");
@@ -219,6 +221,7 @@ describe("workspace recovery boundaries", () => {
 			const raw = JSON.stringify({
 				...saved,
 				version: 35,
+				messageSubmissions: undefined,
 				schedules: undefined,
 			});
 			await writeFile(
@@ -227,7 +230,7 @@ describe("workspace recovery boundaries", () => {
 			);
 
 			const service = await openWorkspace(root);
-			expect(service.snapshot().version).toBe(36);
+			expect(service.snapshot().version).toBe(37);
 			expect(service.snapshot().schedules).toEqual([]);
 			expect(service.snapshot().projects[0]?.emoji).toBe("🧭");
 			expect(service.snapshot().messages["dm:codex"]?.[0]?.text).toBe(
@@ -256,6 +259,7 @@ describe("workspace recovery boundaries", () => {
 			const primary = JSON.stringify({
 				...saved,
 				version: 35,
+				messageSubmissions: undefined,
 				schedules: undefined,
 			});
 			const backupState = structuredClone(saved);
@@ -265,6 +269,7 @@ describe("workspace recovery boundaries", () => {
 			const backup = JSON.stringify({
 				...backupState,
 				version: 35,
+				messageSubmissions: undefined,
 				schedules: [],
 			});
 			await writeFile(join(root, "state.json"), primary);
@@ -288,7 +293,12 @@ describe("workspace recovery boundaries", () => {
 	it("preserves an invalid strict primary and an emoji-version-35 backup", async () => {
 		const root = await workspaceRoot();
 		const saved = savedConversation("Newer primary conversation.");
-		const primary = JSON.stringify({ ...saved, version: 35, schedules: {} });
+		const primary = JSON.stringify({
+			...saved,
+			version: 35,
+			messageSubmissions: undefined,
+			schedules: {},
+		});
 		const older = savedConversation("Older backup conversation.");
 		older.projects = [
 			{
@@ -302,6 +312,7 @@ describe("workspace recovery boundaries", () => {
 		const backup = JSON.stringify({
 			...older,
 			version: 35,
+			messageSubmissions: undefined,
 			schedules: undefined,
 		});
 		await writeFile(join(root, "state.json"), primary);
@@ -328,10 +339,16 @@ describe("workspace recovery boundaries", () => {
 				createdAt: timestamp,
 			},
 		];
-		const primary = JSON.stringify(saved);
-		const backup = JSON.stringify(
-			savedConversation("Older backup conversation."),
-		);
+		const primary = JSON.stringify({
+			...saved,
+			version: 36,
+			messageSubmissions: undefined,
+		});
+		const backup = JSON.stringify({
+			...savedConversation("Older backup conversation."),
+			version: 36,
+			messageSubmissions: undefined,
+		});
 		await writeFile(join(root, "state.json"), primary);
 		await writeFile(join(root, "state.backup.json"), backup);
 

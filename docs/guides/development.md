@@ -25,6 +25,38 @@ pnpm exec playwright install chromium
 
 Read [Architecture](architecture.md) for package ownership before a change that crosses boundaries.
 
+## Electron desktop preview
+
+After installing dependencies, launch the source preview:
+
+```bash
+pnpm start
+```
+
+The preview attaches to a running source host for the same workspace after verifying its private locator. It starts a detached host when none is running. An older host without this control contract must be stopped or updated first.
+
+`start` runs `start:desktop`, which builds shared contracts, the CLI, UI, and desktop entry point before opening Electron. The first launch downloads Electron if its runtime is not cached. The renderer is the production React client. Workspace data and Agent execution stay in the independent host.
+
+Closing the window or choosing **Quit Commonspace** leaves that host and active Agent work running. Use **Open Workspace**, Dock activation, or relaunch Electron to return. Choose **Stop Hosting** to stop the host. Signed Mac installers, automatic updates, and the separate Expo app are planned. Source private browser setup is documented in [Private browser access](remote-access.md).
+
+Build and run the native smoke check separately:
+
+```bash
+pnpm build:desktop
+pnpm verify:desktop:built
+```
+
+`pnpm verify:desktop` builds before the same smoke check. Use `verify:desktop:built` after a current build to reuse it. The smoke check uses an isolated workspace. It checks launch, window reopening, Quit with a surviving host, relaunch, independent CLI attachment, persistence, and explicit host stop. It does not require agent credentials.
+
+To run the host without Electron:
+
+```bash
+pnpm build
+pnpm start:web
+```
+
+Open `http://127.0.0.1:3100` in your desktop browser. Both local and optional remote listeners bind to loopback. Use [Private browser access](remote-access.md) for Tailscale configuration. Use `pnpm dev` for the separate Vite and API development servers described above.
+
 ## Shared contract reference
 
 Run `pnpm docs:contracts` from the repository root to generate TypeDoc for the public exports of `packages/shared/src/index.ts`. Browse `artifacts/docs/contracts/index.html`, or use `artifacts/docs/contracts.json` as a machine-readable TypeDoc reflection. Both outputs are local build artifacts and are not committed. The [HTTP API reference](../api/README.md) maps routes to these contracts and to server-owned request validation where no shared type exists. The TypeDoc JSON describes exported code types; it is not an OpenAPI specification or a runtime validator.
@@ -42,6 +74,7 @@ During visual exploration, use the [Fast UI loop](#fast-ui-loop) below. For beha
 | UI component                     | `pnpm test:storybook:watch -- Conversation`                                        | Isolated interactions and accessibility; assembled behavior needs browser flows |
 | ACP lifecycle                    | `pnpm test tests/acp-runtime.spec.ts`                                              | Protocol fixtures, not authenticated harness compatibility                      |
 | Portable scripts or installation | `pnpm test:platform`                                                               | Account-free platform behavior; packaging also needs clean tarball verification |
+| Electron host and window lifecycle | `pnpm verify:desktop` | Native source-preview launch and shutdown with isolated workspace data; installers and authenticated Agents need separate evidence |
 | Documentation or templates       | Check relative links, referenced commands, Markdown syntax, and `git diff --check` | No application test run is required for prose-only changes                      |
 
 The Node test workers disable native Web Storage so jsdom owns isolated browser storage. This keeps UI tests consistent across supported Node versions without writing browser-like state to a host storage file.

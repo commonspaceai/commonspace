@@ -250,6 +250,7 @@ export function createInitialState(): CommonspaceState {
 		agents: [],
 		dmSessions: {},
 		agentSessions: {},
+		messageSubmissions: {},
 		projects: [],
 		channels: [],
 		threads: [],

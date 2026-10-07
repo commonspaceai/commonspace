@@ -775,6 +775,11 @@ function createStoryStoreHandlers({
 		},
 		selectProject: () => undefined,
 		selectDirectory: async () => null,
+		importGitHubProject: async () => {
+			throw new Error(
+				"Use the connected Workspace preview to import a GitHub repository.",
+			);
+		},
 		verifyDesktopNotifications: async () =>
 			options.notificationVerification ?? {
 				status: "delivered" as const,

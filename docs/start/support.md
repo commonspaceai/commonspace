@@ -23,7 +23,7 @@ The package check exercises the npm command, API, UI assets, saved-state restart
 
 The optional local routing classifier uses the pinned ONNX native runtime on Apple Silicon, Linux, and Windows. That runtime has no Intel Mac binding; Intel Macs continue to use the configured inference Agent for routing.
 
-Commonspace does not currently ship a desktop app wrapper. Follow [Installation](install.md) to run it in your browser.
+The published npm package uses a desktop browser. The first Electron release targets Mac; a source checkout has an [Electron desktop preview](../guides/development.md#electron-desktop-preview). [Private browser access](../guides/remote-access.md) connects other devices to that Mac. Signed Mac installers and the separate Expo app remain planned. Native distribution and real phone acceptance need candidate-specific evidence.
 
 ## Development environments
 

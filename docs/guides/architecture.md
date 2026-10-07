@@ -1,12 +1,12 @@
 # Architecture
 
-Commonspace is a local service with a browser UI. The server owns durable conversation state and connects to supported agent harnesses; the browser presents that state through shared API contracts. This guide explains where behavior belongs and which boundaries a change must preserve.
+Commonspace has an Electron desktop client and a shared React web client over one user-controlled host. The server owns durable conversation state and connects to supported agent harnesses. Clients present that state through shared API contracts. This guide explains where behavior belongs and which boundaries a change must preserve.
 
 Read the [Product model](../specs/product.md) for the domain and [Development](development.md) for setup and verification.
 
 ## Shape
 
-The pnpm workspace has four packages:
+The pnpm workspace separates these responsibilities:
 
 | Package | Responsibility |
 | --- | --- |
@@ -14,12 +14,23 @@ The pnpm workspace has four packages:
 | `server` | Express API, persistence, routing, context, and local agent execution |
 | `ui` | Vite/React browser application |
 | `cli` | npm command, packaged server startup, and bundled UI location |
+| `packages/desktop` | Electron window and local host start, attach, and stop control |
 
 The product consists of Projects, Channels, Direct Messages, Agents, messages, Threads, and their shared context. Keep feature logic near its owner and use `packages/shared` as the single source for cross-process types.
 
 The server can optionally export OpenTelemetry operation spans and exception logs to a loopback OTLP collector. This operational telemetry is distinct from persisted Agent activity traces and contains no conversation content. See [Operations](operations.md#opentelemetry) for configuration and field policy.
 
 Two protocols connect agent work to the workspace. Agent Client Protocol (ACP) carries native session requests, responses, activity, and permission choices over local child-process input/output. Model Context Protocol (MCP) exposes scoped Commonspace context and progress tools over authenticated loopback HTTP.
+
+## Host and clients
+
+One host owns workspace persistence, agent processes, native-session mappings, and project files. Harness credentials stay with the runtimes on that host. The Electron renderer uses the same React client and same-origin HTTP API as the browser. Desktop lifecycle belongs to Electron, while accepted messages, Agent execution, and recovery remain server behavior.
+
+The source preview starts or attaches to one independently running Mac host. Closing or quitting Electron leaves that host running. A viewing device does not run another copy of the Agents or synchronize a separate transcript. Reconnect refreshes the host's state and continues its exact native sessions.
+
+`server/src/index.ts` can start a second loopback listener for private browser access through Tailscale Serve. It shares the same service, workspace lease, and saved state. `remote-access.ts` owns configuration and browser guards. The remote listener checks exact HTTPS Host, owner identity, and browser origin. It excludes scoped MCP, private host control, native directory selection, and editor launch. Mobile uses this web client; Expo is deferred. See [Private browser access](remote-access.md) for setup.
+
+Local folders remain Project resources. `project-import.ts` clones a validated GitHub source into managed host storage and registers its checkout through the existing Project folder contract. The service tracks the import through shutdown. Agents, file previews, and Git inspection use that checkout. Clients receive Project-scoped API responses without arbitrary host filesystem access or a second repository copy.
 
 ## Where changes belong
 
@@ -34,6 +45,7 @@ Two protocols connect agent work to the workspace. Agent Client Protocol (ACP) c
 | Scoped MCP behavior | `server/src/commonspace-mcp.ts` | Shared contracts, ACP tests, and context documentation |
 | Browser state or API coordination | `ui/src/commonspace-store.ts` | Shared contracts and client tests |
 | Desktop UI and interaction | `ui/src` and `ui/src/stories` | Storybook states, accessibility checks, and integrated browser flows |
+| Electron launch, window, or local host control | `packages/desktop` | Private locator contract, focused lifecycle tests, and native Electron smoke |
 
 A coordinator can call another feature's capability, but should not duplicate its rules or state.
 
@@ -41,8 +53,8 @@ A coordinator can call another feature's capability, but should not duplicate it
 
 A typical Channel send follows this sequence:
 
-1. The UI sends a request to `/api/send`.
-2. The server validates the request and persists the accepted message and any new Thread.
+1. The UI sends a request with a unique submission ID to `/api/send`.
+2. The server validates the request and atomically persists the accepted message, any new Thread, and a private submission receipt. An identical retry returns the original acceptance without another run.
 3. For an unaddressed message, inference selects participants, mode, order, and Project scopes. Explicit `@agent` mentions remain authoritative.
 4. The server sends each assignment to its native session. Different sessions may run concurrently; work for the same session is serialized.
 5. ACP updates provide activity, permissions, and replies. Durable outcomes are persisted, and revision events tell the browser to refresh.
@@ -126,6 +138,14 @@ Per-category failures do not erase categories that were successfully inspected. 
 
 `cli/src/index.ts` is the published npm entry point. Its build bundles Commonspace-owned server and shared code, packages the built UI, and leaves external runtime libraries as ordinary npm dependencies.
 
+The source Electron preview launches the built `cli/dist/index.js` as a detached process with file-backed logs. It uses Electron's Node mode. The CLI serves its built UI and API on one loopback origin. Every source host publishes a private, atomic locator only after startup succeeds. Electron verifies its workspace, PID, instance ID, and local control capability before attaching. Local start and stop operations share a controller lock.
+
+Closing the window or choosing **Quit Commonspace** leaves the host running. **Open Workspace** or Dock activation reopens the window. **Stop Hosting** requests host shutdown through the authenticated local control endpoint. The locator remains private and is removed only for that host instance after shutdown.
+
+Host startup acquires a lease inside the canonical workspace directory and reserves its loopback port before loading saved state. Shutdown keeps that lease until admitted requests, native work, and persistence have settled. This prevents a second host from overwriting an active workspace. A crashed owner's lease becomes available after its stale timeout, normally ten seconds.
+
+`pnpm start` launches this Mac desktop preview. `pnpm start:web` retains foreground host startup. Signed installers and automatic updates remain planned. See [Electron desktop preview](development.md#electron-desktop-preview) for source commands.
+
 `scripts/commonspace-service.mjs` manages the source-installed macOS service. It stages committed source builds in owner-only storage, writes the LaunchAgent atomically, requires a successful health check before accepting an update, and keeps one rollback release. It invokes external commands with argument arrays.
 
 Workspace state lives outside the release directories. Switching application versions never replaces user data, and rolling back application code does not reverse a state migration. See [Operations](operations.md#backup-and-rollback).
@@ -204,7 +224,7 @@ Project scope is inferred unless the user supplies visible `@@project` reference
 
 ## Persistence
 
-The current internal state version is 36 (`COMMONSPACE_STATE_VERSION`). Persisted workspace state includes scheduled Channel messages, optional Project and Channel emoji, and the chosen Project scope on each routing correction. Multiple corrections from one assignment are preserved. Older corrections inherit the scope from their target assignment.
+The current internal state version is 37 (`COMMONSPACE_STATE_VERSION`). Persisted workspace state includes scheduled Channel messages, optional Project and Channel emoji, the chosen Project scope on each routing correction, and private submission receipts. Multiple corrections from one assignment are preserved. Older corrections inherit the scope from their target assignment.
 
 Persisted state includes the roster, appearance, workspace coordination defaults, host-private native sessions, bounded activity, Inbox read/unread/saved state, notification preferences, attachments, routing decisions and memory, Project references, Channel/Thread context, schedules, pins, message versions, deletion markers, permissions, and execution state. Native model and reasoning settings are not Commonspace state.
 
@@ -213,7 +233,8 @@ Migration preserves conversation history while supplying explicit defaults for o
 - Older routing receives deterministic delivery references. Prior assignment wording is retained as optional `legacySubRequest`, never used for delivery, and cleared with deleted content. Migration retains IDs, scopes, corrections, replies, and private native sessions.
 - Older Threads receive an empty inherited snapshot and current memory derived from their transcript, rather than an invented historical snapshot.
 - Workspaces without pin, permission, or notification fields receive empty history and opt-in notification defaults.
-- Versions before 35 without saved schedules load with an empty schedule list. Versions 35 and 36 require canonical schedules, except for the narrowly identified version-35 work-in-progress recovery path described in [Automatic state recovery](operations.md#automatic-state-recovery).
+- Versions before 35 without saved schedules load with an empty schedule list. Versions 35 and later require canonical schedules, except for the narrowly identified version-35 work-in-progress recovery path described in [Automatic state recovery](operations.md#automatic-state-recovery).
+- Versions before 37 receive an empty submission-receipt map. Version 37 requires it; a missing or malformed map triggers normal saved-state recovery.
 - Loaded pending permissions become interrupted because their native requests do not survive a process restart.
 
 ### Durability and privacy
@@ -222,7 +243,7 @@ Accepted messages, branches, routing attempts, pin removal records, and permissi
 
 Deleting delivered content removes its body, routing wording, attachment metadata and bytes, traces, and automatic projections while retaining delivery and branch metadata. Attachment bytes and the managed projectless workspace use owner-only storage.
 
-State writes use a `0600` temporary file followed by atomic rename. The prior valid state is kept as `state.backup.json`. If the primary is invalid and the backup is valid, startup preserves the invalid file as `state.corrupt.json` and restores the backup. Bounded traces redact host details before persistence. Browser snapshots remove MCP capabilities, source file URIs, and native-session references.
+State writes use a `0600` temporary file followed by atomic rename. The prior valid state is kept as `state.backup.json`. If the primary is invalid and the backup is valid, startup preserves the invalid file as `state.corrupt.json` and restores the backup. Bounded traces redact host details before persistence. Browser snapshots remove MCP capabilities, source file URIs, native-session references, and submission receipts.
 
 ### Notifications and archives
 

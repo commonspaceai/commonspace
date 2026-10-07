@@ -2,7 +2,7 @@ import type { AgentAdapterKind } from "./agent-adapters.js";
 
 export type { AgentAdapterKind } from "./agent-adapters.js";
 
-export const COMMONSPACE_STATE_VERSION = 36 as const;
+export const COMMONSPACE_STATE_VERSION = 37 as const;
 export const COMMONSPACE_EXPORT_VERSION = 4 as const;
 
 export interface CommonspaceDefaults {
@@ -638,6 +638,11 @@ export interface CommonspaceState {
 	agentSessions: Record<string, Record<string, string>>;
 	/** Host-private cleanup intent, committed with deletion before removing bytes. */
 	pendingAttachmentDeletions?: { imageIds: string[]; fileIds: string[] };
+	/** Host-private submission receipts retained after content removal. */
+	messageSubmissions?: Record<
+		string,
+		{ fingerprint: string; messageId: string }
+	>;
 	projects: CommonspaceProject[];
 	channels: CommonspaceChannel[];
 	threads: CommonspaceThread[];
@@ -753,6 +758,8 @@ export type CommonspaceMutation =
 	| { action: "delete-schedule"; id: string };
 
 export interface SendMessageRequest {
+	/** Required for HTTP clients; reuse unchanged when retrying one submission. */
+	submissionId?: string | undefined;
 	conversation: ConversationRef;
 	text: string;
 	/** Zero, one, or many explicit Project references. */

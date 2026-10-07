@@ -1,8 +1,9 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deriveCommonspaceInboxItems } from "@commonspace/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { startCommonspaceServer } from "../server/src/index.ts";
 import {
 	type AgentRunInput,
 	CommonspaceHostService,
@@ -19,6 +20,64 @@ afterEach(async () => {
 });
 
 describe("native permission requests", () => {
+	it("completes shutdown before reporting an interrupted-run persistence failure", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-run-close-save-"));
+		roots.push(root);
+		let runStarted = false;
+		let runAborted = false;
+		const running = await startCommonspaceServer({
+			root,
+			port: 0,
+			logger: { warn: () => undefined, info: () => undefined },
+			dependencies: {
+				discoverAgents: discoverTestHarnesses,
+				runAgent: async ({ signal }) => {
+					runStarted = true;
+					await new Promise<void>((resolve) => {
+						signal.addEventListener(
+							"abort",
+							() => {
+								runAborted = true;
+								resolve();
+							},
+							{ once: true },
+						);
+					});
+					return { text: "Stopped." };
+				},
+			},
+		});
+		await addTestHarness(running.service, "codex", "Codex");
+		await running.service.send({
+			conversation: { kind: "dm", id: "codex" },
+			text: "Keep this accepted request.",
+		});
+		await vi.waitFor(() => expect(runStarted).toBe(true));
+		const statePath = join(root, "state.json");
+		const savedPath = join(root, "saved-state.json");
+		const accepted = await readFile(statePath);
+		await rename(statePath, savedPath);
+		await mkdir(statePath);
+		await expect(running.close()).rejects.toMatchObject({ code: "EISDIR" });
+		expect(runAborted).toBe(true);
+		expect(running.service.isClosed).toBe(true);
+		expect(await readFile(savedPath)).toEqual(accepted);
+		await rm(statePath, { recursive: true });
+		await rename(savedPath, statePath);
+		const restarted = await startCommonspaceServer({ root, port: 0 });
+		try {
+			expect(
+				restarted.service
+					.snapshot()
+					.messages["dm:codex"]?.some(
+						(message) => message.text === "Keep this accepted request.",
+					),
+			).toBe(true);
+		} finally {
+			await restarted.close();
+		}
+	});
+
 	it("rejects a late permission request after its Agent is removed", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-late-permission-"));
 		roots.push(root);
@@ -317,14 +376,14 @@ describe("native permission requests", () => {
 		await service.close();
 	});
 
-	it("closes native processes when permission status cannot be saved", async () => {
+	it("releases a stopped server after permission status cannot be saved", async () => {
 		const root = await mkdtemp(join(tmpdir(), "commonspace-permission-close-"));
 		roots.push(root);
 		let permissionSettled = false;
-		const service = new CommonspaceHostService(
-			{},
-			{ root },
-			{
+		const running = await startCommonspaceServer({
+			root,
+			port: 0,
+			dependencies: {
 				discoverAgents: discoverTestHarnesses,
 				runAgent: async (input) => {
 					await mustExist(input.onPermissionRequest)({
@@ -338,8 +397,8 @@ describe("native permission requests", () => {
 					return { text: "Stopped." };
 				},
 			},
-		);
-		await service.initialize();
+		});
+		const service = running.service;
 		await addTestHarness(service, "codex", "Codex");
 		await service.send({
 			conversation: { kind: "dm", id: "codex" },
@@ -370,11 +429,24 @@ describe("native permission requests", () => {
 				await persist.call(service, scope);
 			},
 		});
-		await expect(service.close()).rejects.toThrow(
+		await expect(running.close()).rejects.toThrow(
 			"simulated status write failure",
 		);
 		expect(permissionSettled).toBe(true);
 		expect(closeProcess).toHaveBeenCalledOnce();
 		expect(service.snapshot().permissions[0]?.status).toBe("interrupted");
+		expect(service.isClosed).toBe(true);
+		const restarted = await startCommonspaceServer({ root, port: 0 });
+		try {
+			expect(
+				restarted.service
+					.snapshot()
+					.messages["dm:codex"]?.some(
+						(message) => message.text === "Wait for permission.",
+					),
+			).toBe(true);
+		} finally {
+			await restarted.close();
+		}
 	});
 });

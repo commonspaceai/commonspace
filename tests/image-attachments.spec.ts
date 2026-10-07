@@ -136,6 +136,7 @@ describe("managed chat image attachments", () => {
 		await addTestHarness(running.service, "codex", "Review Bot");
 
 		const sendResponse = await post(running, "/api/send", {
+			submissionId: crypto.randomUUID(),
 			conversation: { kind: "dm", id: "codex" },
 			text: "",
 			attachments: [
@@ -201,6 +202,7 @@ describe("managed chat image attachments", () => {
 		await addTestHarness(running.service, "codex", "Review Bot");
 
 		const response = await post(running, "/api/send", {
+			submissionId: crypto.randomUUID(),
 			conversation: { kind: "dm", id: "codex" },
 			text: "Inspect this",
 			attachments: [

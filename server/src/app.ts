@@ -31,6 +31,7 @@ import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import type { CommonspaceMcpGateway } from "./commonspace-mcp.js";
 import { selectLocalDirectory } from "./directory-picker.js";
+import { bearerMatches, requestHasBrowserHeaders } from "./host-locator.js";
 import type { JsonValue } from "./json.js";
 import {
 	listProjectFiles,
@@ -42,9 +43,19 @@ import {
 	projectGitStatus,
 	streamProjectFile,
 } from "./project-files.js";
+import { ProjectImportError } from "./project-import.js";
+import {
+	type ConfiguredRemoteAccess,
+	requestIsRemoteOwner,
+	requestMatchesRemoteOrigin,
+} from "./remote-access.js";
 import { RoutingConfigurationRequest } from "./routing-configuration.js";
 import { searchCommonspace } from "./search.js";
-import type { CommonspaceHostService } from "./service.js";
+import {
+	type CommonspaceHostService,
+	MessageSubmissionConflictError,
+	MessageSubmissionGoneError,
+} from "./service.js";
 import {
 	MAX_WORKSPACE_IMPORT_BODY_BYTES,
 	WorkspacePortabilitySizeError,
@@ -106,6 +117,7 @@ const mcpAuthenticationRequestSchema = z.strictObject({
 	serverName: z.string().min(1).max(120),
 });
 const sendMessageRequestSchema = z.strictObject({
+	submissionId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u),
 	conversation: conversationSchema,
 	text: z.string(),
 	projectIds: z.array(z.string()).optional(),
@@ -221,7 +233,23 @@ export interface CreateCommonspaceAppOptions {
 	uiRoot?: string;
 	/** Deterministic transport-boundary test override. */
 	workspaceImportBodyLimitBytes?: number;
+	ingress?: CommonspaceAppIngress;
 }
+
+export interface CommonspaceHostControl {
+	id: string;
+	token: string;
+	stop(): void;
+}
+
+export type CommonspaceAppIngress =
+	| {
+			kind: "local";
+			hostControl?: CommonspaceHostControl;
+	  }
+	| { kind: "remote"; remoteAccess: ConfiguredRemoteAccess };
+
+const remoteRequestAuthorization = new WeakMap<IncomingMessage, boolean>();
 
 export function requestIsSameOrigin(
 	req: Pick<IncomingMessage, "headers">,
@@ -255,7 +283,7 @@ function requireSameOrigin(
 	res: Response,
 	next: NextFunction,
 ): void {
-	if (!requestIsSameOrigin(req)) {
+	if (!(remoteRequestAuthorization.get(req) ?? requestIsSameOrigin(req))) {
 		res
 			.status(403)
 			.json({ code: "origin_denied", error: "same-origin request required" });
@@ -320,8 +348,12 @@ function sendProjectError(res: Response, cause: unknown): void {
 function configureApiTransport(
 	app: Express,
 	workspaceImportBodyLimitBytes: number,
+	ingress: CommonspaceAppIngress,
 ): void {
 	app.disable("x-powered-by");
+	if (ingress.kind === "remote") {
+		configureRemoteTransport(app, ingress.remoteAccess);
+	}
 
 	app.use("/api", (req, res, next) => {
 		if (!requestIsLoopback(req)) {
@@ -340,6 +372,82 @@ function configureApiTransport(
 		express.json({ limit: workspaceImportBodyLimitBytes }),
 	);
 	app.use("/api", express.json({ limit: MAX_BODY_BYTES }));
+}
+
+function configureRemoteTransport(
+	app: Express,
+	remoteAccess: ConfiguredRemoteAccess,
+): void {
+	app.use((req, res, next) => {
+		if (!requestIsLoopback(req) || !requestIsRemoteOwner(req, remoteAccess)) {
+			res.status(403).json({
+				code: "remote_access_denied",
+				error: "The configured Tailscale owner and HTTPS host are required.",
+			});
+			return;
+		}
+		let pathname: string;
+		try {
+			pathname = new URL(
+				decodeURIComponent(req.path)
+					.replaceAll("\\", "/")
+					.replace(/\/{2,}/gu, "/"),
+				remoteAccess.origin,
+			).pathname
+				.toLowerCase()
+				.replace(/\/{2,}/gu, "/");
+		} catch {
+			res.status(400).json({ code: "invalid_path", error: "Invalid path." });
+			return;
+		}
+		if (
+			/^\/api\/(?:mcp|host)(?:\/|$)/u.test(pathname) ||
+			/^\/api\/select-directory\/?$/u.test(pathname) ||
+			/^\/api\/projects\/[^/]+\/open(?:\/|$)/u.test(pathname)
+		) {
+			res.status(403).json({
+				code: "local_control_required",
+				error: "This capability is available only on the host.",
+			});
+			return;
+		}
+		remoteRequestAuthorization.set(
+			req,
+			requestMatchesRemoteOrigin(req, remoteAccess.origin),
+		);
+		next();
+	});
+}
+
+function registerLocalHostRoutes(
+	app: Express,
+	hostControl: CommonspaceHostControl | undefined,
+): void {
+	if (hostControl === undefined) return;
+	const requireHostControl = (
+		req: Request,
+		res: Response,
+		next: NextFunction,
+	) => {
+		if (
+			requestHasBrowserHeaders(req) ||
+			!bearerMatches(req.headers.authorization, hostControl.token)
+		) {
+			res.status(403).json({
+				code: "host_control_denied",
+				error: "Private host control authorization is required.",
+			});
+			return;
+		}
+		next();
+	};
+	app.get("/api/host/control", requireHostControl, (_req, res) => {
+		res.json({ id: hostControl.id, pid: process.pid });
+	});
+	app.post("/api/host/control/stop", requireHostControl, (_req, res) => {
+		res.once("finish", () => setImmediate(hostControl.stop));
+		res.status(202).json({ status: "stopping" });
+	});
 }
 
 function registerWorkspaceRoutes(
@@ -658,6 +766,26 @@ function registerProjectRoutes(
 	app: Express,
 	service: CommonspaceHostService,
 ): void {
+	app.post(
+		"/api/projects/import-github",
+		requireSameOrigin,
+		async (req, res) => {
+			try {
+				res.status(201).json(await service.importGitHubProject(req.body));
+			} catch (error) {
+				if (error instanceof ProjectImportError) {
+					res
+						.status(error.status)
+						.json({ code: error.code, error: error.message });
+					return;
+				}
+				res.status(500).json({
+					code: "project_import_failed",
+					error: "Commonspace could not import this repository.",
+				});
+			}
+		},
+	);
 	app.get(
 		"/api/projects/:projectId/files",
 		requireSameOrigin,
@@ -938,8 +1066,17 @@ function registerDeliveryRoutes(
 				.status(202)
 				.json(await service.send(sendMessageRequestSchema.parse(req.body)));
 		} catch (error) {
-			res.status(400).json({
-				code: "send_failed",
+			let status = 400;
+			let code = "send_failed";
+			if (error instanceof MessageSubmissionConflictError) {
+				status = 409;
+				code = "message_submission_conflict";
+			} else if (error instanceof MessageSubmissionGoneError) {
+				status = 410;
+				code = "message_submission_gone";
+			}
+			res.status(status).json({
+				code,
 				error: requestErrorMessage(error),
 			});
 		}
@@ -1230,11 +1367,18 @@ export function createCommonspaceApp({
 	directoryPicker,
 	uiRoot,
 	workspaceImportBodyLimitBytes = MAX_WORKSPACE_IMPORT_BODY_BYTES,
+	ingress = { kind: "local" },
 }: CreateCommonspaceAppOptions): Express {
 	const app = express();
 	const pickDirectory = directoryPicker ?? selectLocalDirectory;
-	configureApiTransport(app, workspaceImportBodyLimitBytes);
-	registerWorkspaceRoutes(app, service, mcpGateway);
+	configureApiTransport(app, workspaceImportBodyLimitBytes, ingress);
+	if (ingress.kind === "local")
+		registerLocalHostRoutes(app, ingress.hostControl);
+	registerWorkspaceRoutes(
+		app,
+		service,
+		ingress.kind === "local" ? mcpGateway : undefined,
+	);
 	registerRetentionAndSearchRoutes(app, service);
 	registerRoutingRoutes(app, service);
 	registerChannelContextRoutes(app, service);

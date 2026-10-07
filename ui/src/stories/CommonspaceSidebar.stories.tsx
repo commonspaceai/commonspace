@@ -897,7 +897,11 @@ export const CreateChannelRequest: Story = {
 			await userEvent.click(
 				page.getByRole("button", { name: `Create ${kind}` }),
 			);
-			await userEvent.click(page.getByRole("button", { name: "Cancel" }));
+			await userEvent.click(
+				page.getByRole("button", {
+					name: kind === "project" ? "Close" : "Cancel",
+				}),
+			);
 			await userEvent.click(
 				canvas.getByRole("button", { name: "Add channel" }),
 			);

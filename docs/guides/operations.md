@@ -34,6 +34,9 @@ The server reads these variables at startup. They apply to the foreground proces
 | `COMMONSPACE_PORT` | API port; defaults to `3100`. Accepts `0` for an operating-system-assigned port. |
 | `COMMONSPACE_HOME` | Local state directory; defaults to `~/.commonspace`. Use a separate directory for development or verification. |
 | `COMMONSPACE_UI_ROOT` | Built browser asset directory. The source server serves no UI when unset; npm/service launchers set it. |
+| `COMMONSPACE_REMOTE_ORIGIN` | Exact HTTPS origin served by Tailscale. Requires `COMMONSPACE_REMOTE_OWNER_LOGIN`; unset disables the private browser listener. |
+| `COMMONSPACE_REMOTE_OWNER_LOGIN` | Exact Tailscale login accepted by the private browser listener. Requires `COMMONSPACE_REMOTE_ORIGIN`. |
+| `COMMONSPACE_REMOTE_PORT` | Private browser listener port on loopback; defaults to `3101` when remote access is configured. Use the same nonzero port in the Serve target. |
 | `COMMONSPACE_LOG_LEVEL` | Server log level; defaults to `info`. |
 | `COMMONSPACE_OTLP_ENDPOINT` | Optional OTLP/HTTP collector origin on loopback, such as `http://127.0.0.1:4318`. Unset by default; remote hosts, paths, credentials, and query strings are rejected. |
 
@@ -196,6 +199,8 @@ An update clones `git@github.com:commonspaceai/commonspace.git` over SSH and bui
 
 The npm package runs in the foreground on Linux. A managed Linux background service is not included.
 
+Install and update accept `--remote-origin`, `--remote-owner-login`, and optional `--remote-port`. The origin and owner must be supplied together. Without these flags, updates retain the LaunchAgent's saved remote configuration. `--disable-remote` removes it. Explicit rollback retains the current configuration; a failed activation restores the previous one. See [Private browser access](remote-access.md) for source setup. The service installs committed source, so the selected revision must include this contract.
+
 ## Local data
 
 | Path | Contents |
@@ -207,11 +212,14 @@ The npm package runs in the foreground on Linux. A managed Linux background serv
 | `~/.commonspace/classifier` | Disposable pinned ONNX classifier model cache |
 | `~/.commonspace/workspace` | Managed directory for projectless work |
 | `~/.commonspace/attachments` | Private image and general-file bytes |
+| `~/.commonspace/projects` | GitHub checkouts imported onto this host |
+| `~/.commonspace/host/host-control-token.json` | Private host identity and local control capability; never share or attach it |
+| `~/.commonspace/host/host.log`, `host.error.log` | Detached desktop-launched host logs |
 | Harness-owned locations | Native credentials and transcripts |
 
 `COMMONSPACE_HOME` changes the Commonspace data root. Startup enforces `0700` on this directory, and state writes use `0600` files and atomic replacement.
 
-Agent Client Protocol (ACP) runs over local child-process input/output. Commonspace's Model Context Protocol (MCP) endpoint is authenticated and loopback-only. Its bearer capabilities exist only in memory and are never persisted.
+Agent Client Protocol (ACP) runs over local child-process input/output. Commonspace's Model Context Protocol (MCP) endpoint is authenticated and loopback-only. Its bearer capabilities exist only in memory. The separate local host-control capability is stored in the private host locator while that instance runs.
 
 ## Export, import, and retention
 
@@ -341,7 +349,7 @@ Replace `YYYYMMDD` with your backup date, and adjust the source if using `COMMON
 
 ### Automatic state recovery
 
-On startup, the host migrates persisted workspaces to state version 36. Migration preserves conversations, native-session mappings, and routing history. Older corrections inherit their target assignment's Project scope. Versions before 35 without schedule data load with no scheduled messages; versions 35 and 36 normally require canonical schedules.
+On startup, the host migrates persisted workspaces to state version 37. Migration preserves conversations, native-session mappings, and routing history. Versions before 37 gain an empty private submission-receipt map. Canonical version 37 requires that map; missing or malformed receipts trigger normal recovery instead of silently discarding retry protection. Receipts are saved atomically with accepted messages and omitted from browser snapshots and portable exports. Older corrections inherit their target assignment's Project scope. Versions before 35 without schedule data load with no scheduled messages; versions 35 and later normally require canonical schedules.
 
 A transitional version-35 build could write `state.json` and `state.backup.json` without `schedules`. Automatic recovery accepts the pair when both files have the work-in-progress shape and each contains a positive, canonical Project or Channel emoji marker. It also accepts one such marked file when the other file is absent. It adds empty schedules during migration while preserving conversation and native-session relationships. A primary missing schedules with a strict backup, an invalid strict primary with a work-in-progress backup, or a pair without the emoji evidence is ambiguous. Startup stops without moving, replacing, or rewriting either raw file. A valid primary can load with an older work-in-progress backup after migration. Keep a private full backup and reconcile ambiguous pairs and any schedule history manually before restarting.
 

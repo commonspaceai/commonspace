@@ -172,18 +172,21 @@ class LocalClassifier implements RunningClassifier {
 		this.ready = new Promise((resolve, reject) => {
 			this.readiness = { resolve, reject };
 		});
+		const env: NodeJS.ProcessEnv = {
+			TMPDIR: process.env.TMPDIR,
+			LANG: "en_US.UTF-8",
+			HF_HUB_DISABLE_TELEMETRY: "1",
+			SYSTEMROOT: process.env.SYSTEMROOT,
+		};
+		if (process.env.ELECTRON_RUN_AS_NODE === "1")
+			env.ELECTRON_RUN_AS_NODE = "1";
 		this.child = spawn(
 			process.execPath,
 			[join(assetDirectory, "worker.js"), modelDirectory],
 			{
 				stdio: ["pipe", "pipe", "pipe"],
 				windowsHide: true,
-				env: {
-					TMPDIR: process.env.TMPDIR,
-					LANG: "en_US.UTF-8",
-					HF_HUB_DISABLE_TELEMETRY: "1",
-					SYSTEMROOT: process.env.SYSTEMROOT,
-				},
+				env,
 			},
 		);
 		this.exited = new Promise((resolve) =>

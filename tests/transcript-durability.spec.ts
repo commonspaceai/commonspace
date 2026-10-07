@@ -52,6 +52,7 @@ async function stateRoot(messageCount: number): Promise<string> {
 			],
 			dmSessions: {},
 			agentSessions: {},
+			messageSubmissions: {},
 			projects: [],
 			channels: [],
 			threads: [],

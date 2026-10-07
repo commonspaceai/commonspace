@@ -14,6 +14,7 @@ import {
 	type ConversationRef,
 	DEFAULT_COMMONSPACE_NOTIFICATION_SETTINGS,
 	deriveCommonspaceInboxItems,
+	type ImportGitHubProjectRequest,
 	type UpdateRoutingConfigurationRequest,
 } from "@commonspace/shared";
 import {
@@ -558,10 +559,24 @@ export function CommonspaceSidebar({
 		null,
 	);
 	const creationRevision = useRef(0);
-	const [formError, setFormError] = useState<string | null>(null);
+	const [creationOperation, setCreationOperation] = useState<SettingsOperation>(
+		{
+			status: SettingsOperationStatus.Idle,
+		},
+	);
+	const creating = creationOperation.status === SettingsOperationStatus.Running;
+	const formError =
+		creationOperation.status === SettingsOperationStatus.Failed
+			? creationOperation.message
+			: null;
 	const [name, setName] = useState("");
 	const [creationEmoji, setCreationEmoji] = useState("");
 	const [path, setPath] = useState("");
+	const [projectSource, setProjectSource] = useState<"folder" | "github">(
+		"folder",
+	);
+	const [repositoryUrl, setRepositoryUrl] = useState("");
+	const [projectBranch, setProjectBranch] = useState("");
 	const [selectingPath, setSelectingPath] = useState(false);
 	const [pathProjectId, setPathProjectId] = useState<string | null>(null);
 	const [pathDraft, setPathDraft] = useState("");
@@ -673,10 +688,13 @@ export function CommonspaceSidebar({
 		creationRevision.current += 1;
 		setSettingsOpen(false);
 		setForm(kind);
-		setFormError(null);
+		setCreationOperation({ status: SettingsOperationStatus.Idle });
 		setName("");
 		setCreationEmoji("");
 		setPath("");
+		setProjectSource("folder");
+		setRepositoryUrl("");
+		setProjectBranch("");
 		setAgentIds([]);
 		setChannelAgentQuery("");
 		setChannelAgentFilter("all");
@@ -1134,25 +1152,42 @@ export function CommonspaceSidebar({
 
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
-		setFormError(null);
-		let mutation: CommonspaceMutation;
+		if (creating) return;
+		let request: CommonspaceMutation | ImportGitHubProjectRequest;
 		if (form === "project") {
-			if (name.trim() === "" || path.trim() === "") {
-				setFormError("Project name and local folder are required.");
+			if (
+				name.trim() === "" ||
+				(projectSource === "folder" ? path : repositoryUrl).trim() === ""
+			) {
+				setCreationOperation({
+					status: SettingsOperationStatus.Failed,
+					message:
+						projectSource === "folder"
+							? "Project name and local folder are required."
+							: "Project name and GitHub repository are required.",
+				});
 				return;
 			}
-			mutation = {
-				action: "create-project",
-				name,
-				paths: [path],
-				emoji: creationEmoji,
-			};
+			if (projectSource === "github") {
+				request = { name, repositoryUrl: repositoryUrl.trim() };
+				if (projectBranch.trim() !== "") request.branch = projectBranch.trim();
+			} else {
+				request = {
+					action: "create-project",
+					name,
+					paths: [path],
+					emoji: creationEmoji,
+				};
+			}
 		} else if (form === "channel") {
 			if (name.trim() === "") {
-				setFormError("Channel name is required.");
+				setCreationOperation({
+					status: SettingsOperationStatus.Failed,
+					message: "Channel name is required.",
+				});
 				return;
 			}
-			mutation = {
+			request = {
 				action: "create-channel",
 				name,
 				agentIds,
@@ -1160,21 +1195,39 @@ export function CommonspaceSidebar({
 			};
 		} else return;
 		const submittedRevision = creationRevision.current;
+		setCreationOperation(
+			form === "project"
+				? {
+						status: SettingsOperationStatus.Running,
+						message:
+							"action" in request
+								? "Creating…"
+								: "Cloning repository on the host…",
+					}
+				: { status: SettingsOperationStatus.Idle },
+		);
+		let importedProjectId: string | null = null;
 		try {
-			await store.mutate(mutation);
+			if ("action" in request) await store.mutate(request);
+			else importedProjectId = await store.importGitHubProject(request);
 		} catch (error) {
 			if (submittedRevision !== creationRevision.current) return;
-			// Keep the form open while the application-level toast shows the error.
-			setFormError(error instanceof Error ? error.message : String(error));
+			setCreationOperation({
+				status: SettingsOperationStatus.Failed,
+				message: error instanceof Error ? error.message : String(error),
+			});
 			return;
 		}
 		if (submittedRevision !== creationRevision.current) return;
 		setForm(null);
-		setFormError(null);
+		setCreationOperation({ status: SettingsOperationStatus.Idle });
 		setName("");
 		setCreationEmoji("");
 		setPath("");
+		setRepositoryUrl("");
+		setProjectBranch("");
 		setAgentIds([]);
+		if (importedProjectId !== null) onOpenProject?.(importedProjectId);
 	};
 
 	const submitPath = async (event: FormEvent, targetProjectId: string) => {
@@ -2211,7 +2264,9 @@ export function CommonspaceSidebar({
 										required
 										onChange={(event) => {
 											setName(event.target.value);
-											setFormError(null);
+											setCreationOperation({
+												status: SettingsOperationStatus.Idle,
+											});
 										}}
 									/>
 								</label>
@@ -3076,8 +3131,9 @@ export function CommonspaceSidebar({
 					{form === "project" && (
 						<SidebarDialog
 							title="Add a project"
-							description="Bind conversations to local folders."
+							description="Choose a folder or clone a GitHub repository on the host."
 							onClose={() => {
+								creationRevision.current += 1;
 								setForm(null);
 							}}
 						>
@@ -3087,68 +3143,186 @@ export function CommonspaceSidebar({
 									void submit(event);
 								}}
 							>
-								<label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-									Project name
-									<input
-										aria-label="Project name"
-										placeholder="Project name"
-										value={name}
-										required
-										onChange={(event) => {
-											setName(event.target.value);
-											setFormError(null);
-										}}
-									/>
-								</label>
-								<div className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-									<span>Project emoji</span>
-									<EmojiPicker
-										value={creationEmoji}
-										label="Choose project emoji"
-										onChange={setCreationEmoji}
-									/>
-								</div>
-								<label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-									Local folder
-									<span className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-										<input
-											aria-label="Project path"
-											placeholder="Choose a local folder"
-											value={path}
-											required
-											onChange={(event) => {
-												setPath(event.target.value);
-												setFormError(null);
-											}}
-										/>
+								<fieldset className="grid gap-3" disabled={creating}>
+									<legend className="sr-only">Project details</legend>
+									<fieldset className="grid grid-cols-2 gap-2">
+										<legend className="sr-only">Project source</legend>
 										<button
 											type="button"
-											aria-label="Choose project folder"
-											disabled={selectingPath}
+											aria-pressed={projectSource === "folder"}
+											className={cn(
+												"hover:bg-muted",
+												projectSource === "folder" && "bg-muted font-semibold",
+											)}
 											onClick={() => {
-												void chooseProjectDirectory();
+												setProjectSource("folder");
+												setCreationOperation({
+													status: SettingsOperationStatus.Idle,
+												});
 											}}
 										>
-											{selectingPath ? "Opening…" : "Browse folders"}
+											Local folder
 										</button>
-									</span>
-								</label>
+										<button
+											type="button"
+											aria-pressed={projectSource === "github"}
+											className={cn(
+												"hover:bg-muted",
+												projectSource === "github" && "bg-muted font-semibold",
+											)}
+											onClick={() => {
+												setProjectSource("github");
+												setCreationOperation({
+													status: SettingsOperationStatus.Idle,
+												});
+											}}
+										>
+											GitHub repository
+										</button>
+									</fieldset>
+									<label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
+										Project name
+										<input
+											aria-label="Project name"
+											placeholder="Project name"
+											value={name}
+											required
+											onChange={(event) => {
+												setName(event.target.value);
+												setCreationOperation({
+													status: SettingsOperationStatus.Idle,
+												});
+											}}
+										/>
+									</label>
+									{projectSource === "folder" ? (
+										<>
+											<div className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
+												<span>Project emoji</span>
+												<EmojiPicker
+													value={creationEmoji}
+													label="Choose project emoji"
+													onChange={setCreationEmoji}
+												/>
+											</div>
+											<label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
+												Local folder
+												<span className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+													<input
+														aria-label="Project path"
+														placeholder="Choose a local folder"
+														value={path}
+														required
+														onChange={(event) => {
+															setPath(event.target.value);
+															setCreationOperation({
+																status: SettingsOperationStatus.Idle,
+															});
+														}}
+													/>
+													<button
+														type="button"
+														aria-label="Choose project folder"
+														disabled={selectingPath}
+														onClick={() => {
+															void chooseProjectDirectory();
+														}}
+													>
+														{selectingPath ? "Opening…" : "Browse folders"}
+													</button>
+												</span>
+											</label>
+										</>
+									) : (
+										<>
+											<label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
+												GitHub repository URL
+												<input
+													aria-label="GitHub repository URL"
+													placeholder="https://github.com/owner/repository"
+													value={repositoryUrl}
+													required
+													aria-describedby="github-repository-help"
+													onChange={(event) => {
+														setRepositoryUrl(event.target.value);
+														setCreationOperation({
+															status: SettingsOperationStatus.Idle,
+														});
+													}}
+												/>
+											</label>
+											<p
+												id="github-repository-help"
+												className="text-xs leading-5 text-muted-foreground"
+											>
+												Use an HTTPS or SSH URL. Cloning uses the host's
+												existing GitHub access.
+											</p>
+											<label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
+												Branch (optional)
+												<input
+													aria-label="GitHub branch"
+													placeholder="Repository default branch"
+													value={projectBranch}
+													aria-describedby="github-branch-help"
+													onChange={(event) => {
+														setProjectBranch(event.target.value);
+														setCreationOperation({
+															status: SettingsOperationStatus.Idle,
+														});
+													}}
+												/>
+											</label>
+											<p
+												id="github-branch-help"
+												className="text-xs leading-5 text-muted-foreground"
+											>
+												Leave empty to use the repository's default branch.
+											</p>
+										</>
+									)}
+								</fieldset>
+								{creationOperation.status ===
+									SettingsOperationStatus.Running && (
+									<p
+										role="status"
+										className="text-xs leading-5 text-muted-foreground"
+									>
+										{creationOperation.message}
+										{projectSource === "github" &&
+											" Import continues if you close this dialog."}
+									</p>
+								)}
+								<FormError message={formError} />
 								<div className="mt-2 flex items-end justify-end gap-2 border-t pt-3">
-									<FormError message={formError} />
 									<button
 										type="button"
 										onClick={() => {
+											creationRevision.current += 1;
 											setForm(null);
 										}}
 									>
-										Cancel
+										{creating ? "Close" : "Cancel"}
 									</button>
 									<button
 										type="submit"
-										disabled={name.trim() === "" || path.trim() === ""}
+										disabled={
+											creating ||
+											name.trim() === "" ||
+											(projectSource === "folder"
+												? path
+												: repositoryUrl
+											).trim() === ""
+										}
 										className="border-primary bg-primary text-primary-foreground"
 									>
-										Create project
+										{projectSource === "github"
+											? creating
+												? "Importing…"
+												: "Import repository"
+											: creating
+												? "Creating…"
+												: "Create project"}
 									</button>
 								</div>
 							</form>

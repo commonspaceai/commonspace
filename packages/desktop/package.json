@@ -1,0 +1,24 @@
+{
+	"name": "@commonspace/desktop",
+	"version": "0.2.1",
+	"private": true,
+	"type": "module",
+	"main": "dist/index.js",
+	"scripts": {
+		"build": "esbuild src/index.ts --bundle --platform=node --format=esm --packages=external --target=node24 --outdir=dist --sourcemap",
+		"start": "electron .",
+		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"clean": "node ../../scripts/clean.mjs dist"
+	},
+	"dependencies": {
+		"@commonspace/shared": "workspace:*",
+		"commonspace": "workspace:*",
+		"proper-lockfile": "4.1.2"
+	},
+	"devDependencies": {
+		"@types/proper-lockfile": "4.1.4",
+		"electron": "44.5.1",
+		"esbuild": "0.28.2",
+		"typescript": "6.0.3"
+	}
+}

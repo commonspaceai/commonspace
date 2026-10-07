@@ -108,6 +108,13 @@ export function launchAgentPlist(layout, dependencies = {}) {
 		stdout: join(layout.logsRoot, "service.log"),
 		stderr: join(layout.logsRoot, "service.error.log"),
 	};
+	const remoteAccess = dependencies.remoteAccess;
+	const remoteEnvironment =
+		remoteAccess === undefined
+			? ""
+			: `    <key>COMMONSPACE_REMOTE_ORIGIN</key><string>${xml(remoteAccess.origin)}</string>
+    <key>COMMONSPACE_REMOTE_OWNER_LOGIN</key><string>${xml(remoteAccess.ownerLogin)}</string>
+${remoteAccess.port === undefined ? "" : `    <key>COMMONSPACE_REMOTE_PORT</key><string>${String(remoteAccess.port)}</string>\n`}`;
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -120,7 +127,7 @@ export function launchAgentPlist(layout, dependencies = {}) {
   <dict>
     <key>COMMONSPACE_HOME</key><string>${xml(layout.stateRoot)}</string>
     <key>COMMONSPACE_PORT</key><string>${String(DEFAULT_PORT)}</string>
-    <key>COMMONSPACE_UI_ROOT</key><string>${xml(values.uiRoot)}</string>
+${remoteEnvironment}    <key>COMMONSPACE_UI_ROOT</key><string>${xml(values.uiRoot)}</string>
     <key>HOME</key><string>${xml(layout.home)}</string>
     <key>PATH</key><string>${xml(pathEnvironment)}</string>
   </dict>
@@ -270,7 +277,7 @@ async function waitForHealth(runtime, layout) {
 	);
 }
 
-async function writeRegistration(layout, runtime) {
+async function writeRegistration(layout, runtime, remoteAccess) {
 	await mkdir(layout.appRoot, { recursive: true, mode: 0o700 });
 	await chmod(layout.appRoot, 0o700);
 	await mkdir(join(layout.home, "Library", "LaunchAgents"), {
@@ -283,9 +290,11 @@ async function writeRegistration(layout, runtime) {
 	});
 	const temporaryPlist = `${layout.launchAgentPath}.${String(process.pid)}.tmp`;
 	try {
-		await writeFile(temporaryPlist, launchAgentPlist(layout, runtime), {
-			mode: 0o600,
-		});
+		await writeFile(
+			temporaryPlist,
+			launchAgentPlist(layout, { ...runtime, remoteAccess }),
+			{ mode: 0o600 },
+		);
 		await requiredRun(runtime, "/usr/bin/plutil", ["-lint", temporaryPlist]);
 		await rename(temporaryPlist, layout.launchAgentPath);
 	} finally {
@@ -469,7 +478,7 @@ export async function startService(options = {}, overrides = {}) {
 	return layout;
 }
 
-async function activateRelease(layout, runtime, staging) {
+async function activateRelease(layout, runtime, staging, configuration) {
 	await stopService({ appRoot: layout.appRoot }, runtime);
 	if (await exists(layout.previous)) {
 		await removeManaged(layout, layout.previous);
@@ -479,7 +488,7 @@ async function activateRelease(layout, runtime, staging) {
 	if (hadCurrent) await rename(layout.current, layout.previous);
 	await rename(staging, layout.current);
 	try {
-		await writeRegistration(layout, runtime);
+		await writeRegistration(layout, runtime, configuration.remoteAccess);
 		await startService({ appRoot: layout.appRoot }, runtime);
 	} catch (error) {
 		await stopService({ appRoot: layout.appRoot }, runtime);
@@ -490,7 +499,11 @@ async function activateRelease(layout, runtime, staging) {
 		await rename(layout.current, failed);
 		if (hadCurrent) {
 			await rename(layout.previous, layout.current);
-			await writeRegistration(layout, runtime);
+			await writeRegistration(
+				layout,
+				runtime,
+				configuration.previousRemoteAccess,
+			);
 			await startService({ appRoot: layout.appRoot }, runtime);
 		} else {
 			await rm(layout.launchAgentPath, { force: true });
@@ -513,6 +526,75 @@ function releaseInput(options) {
 	return { source };
 }
 
+function remoteAccessInput(options) {
+	const { remoteOrigin, remoteOwnerLogin, remotePort } = options;
+	const configured =
+		remoteOrigin !== undefined ||
+		remoteOwnerLogin !== undefined ||
+		remotePort !== undefined;
+	if (!configured) return undefined;
+	if (remoteOrigin === undefined || remoteOwnerLogin === undefined)
+		throw new Error(
+			"Remote origin and owner login must be configured together",
+		);
+	let origin;
+	try {
+		origin = new URL(remoteOrigin);
+	} catch {
+		throw new Error(
+			"Remote access requires an exact HTTPS origin without a path",
+		);
+	}
+	if (origin.protocol !== "https:" || origin.origin !== remoteOrigin)
+		throw new Error(
+			"Remote access requires an exact HTTPS origin without a path",
+		);
+	if (
+		typeof remoteOwnerLogin !== "string" ||
+		remoteOwnerLogin.trim() === "" ||
+		remoteOwnerLogin.trim().length > 320
+	)
+		throw new Error(
+			"Remote owner login must be nonempty and at most 320 characters",
+		);
+	let port = remotePort;
+	if (typeof port === "string" && /^\d+$/u.test(port)) port = Number(port);
+	if (
+		port !== undefined &&
+		(!Number.isInteger(port) || port < 0 || port > 65_535)
+	)
+		throw new Error("Remote port must be an integer from 0 to 65535");
+	return {
+		origin: remoteOrigin,
+		ownerLogin: remoteOwnerLogin.trim(),
+		port,
+	};
+}
+
+async function savedRemoteAccess(layout, runtime) {
+	if (!(await exists(layout.launchAgentPath))) return undefined;
+	const result = await requiredRun(runtime, "/usr/bin/plutil", [
+		"-extract",
+		"EnvironmentVariables",
+		"json",
+		"-o",
+		"-",
+		layout.launchAgentPath,
+	]);
+	const environment = JSON.parse(result.stdout);
+	if (
+		environment === null ||
+		typeof environment !== "object" ||
+		Array.isArray(environment)
+	)
+		throw new Error("Commonspace LaunchAgent environment must be a dictionary");
+	return remoteAccessInput({
+		remoteOrigin: environment.COMMONSPACE_REMOTE_ORIGIN,
+		remoteOwnerLogin: environment.COMMONSPACE_REMOTE_OWNER_LOGIN,
+		remotePort: environment.COMMONSPACE_REMOTE_PORT,
+	});
+}
+
 export async function installOrUpdate(options = {}, overrides = {}) {
 	const runtime = dependencies(overrides);
 	requireMacOwner(runtime);
@@ -520,6 +602,11 @@ export async function installOrUpdate(options = {}, overrides = {}) {
 	if (mode !== "install" && mode !== "update")
 		throw new Error("service mode must be install or update");
 	const input = releaseInput(options);
+	const configuredRemoteAccess = remoteAccessInput(options);
+	if (options.disableRemote === true && configuredRemoteAccess !== undefined)
+		throw new Error(
+			"--disable-remote cannot be combined with remote configuration",
+		);
 	const layout = serviceLayout({
 		...options,
 		home: runtime.home,
@@ -527,8 +614,16 @@ export async function installOrUpdate(options = {}, overrides = {}) {
 	});
 	if (mode === "update" && !(await exists(layout.current)))
 		throw new Error("Commonspace is not installed; run install first");
+	const previousRemoteAccess = await savedRemoteAccess(layout, runtime);
+	const remoteAccess =
+		options.disableRemote === true
+			? undefined
+			: (configuredRemoteAccess ?? previousRemoteAccess);
 	const staging = await prepareRelease(layout, runtime, input);
-	await activateRelease(layout, runtime, staging);
+	await activateRelease(layout, runtime, staging, {
+		remoteAccess,
+		previousRemoteAccess,
+	});
 	const metadata = JSON.parse(await readFile(layout.releaseMetadata, "utf8"));
 	runtime.log(
 		`${mode === "install" ? "Installed" : "Updated"} Commonspace ${String(metadata.version ?? metadata.revision)}.`,
@@ -548,6 +643,7 @@ export async function rollbackRelease(options = {}, overrides = {}) {
 	});
 	if (!(await exists(layout.current)) || !(await exists(layout.previous)))
 		throw new Error("no Commonspace rollback release is available");
+	const remoteAccess = await savedRemoteAccess(layout, runtime);
 	await stopService({ appRoot: layout.appRoot }, runtime);
 	const swap = join(
 		layout.appRoot,
@@ -556,7 +652,7 @@ export async function rollbackRelease(options = {}, overrides = {}) {
 	await rename(layout.current, swap);
 	await rename(layout.previous, layout.current);
 	await rename(swap, layout.previous);
-	await writeRegistration(layout, runtime);
+	await writeRegistration(layout, runtime, remoteAccess);
 	await startService({ appRoot: layout.appRoot }, runtime);
 	runtime.log("Rolled Commonspace back to the previous release.");
 	return layout;
@@ -591,19 +687,37 @@ export async function serviceStatus(options = {}, overrides = {}) {
 function parsedCli(argv) {
 	const [command = "help", ...rest] = argv;
 	const options = {};
+	const valueOptions = new Map([
+		["--source", "source"],
+		["--app-root", "appRoot"],
+		["--remote-origin", "remoteOrigin"],
+		["--remote-owner-login", "remoteOwnerLogin"],
+		["--remote-port", "remotePort"],
+	]);
 	for (let index = 0; index < rest.length; index += 1) {
 		const flag = rest[index];
-		const value = rest[index + 1];
-		if (flag === "--source" && value !== undefined) {
-			options.source = value;
-			index += 1;
-		} else if (flag === "--app-root" && value !== undefined) {
-			options.appRoot = value;
-			index += 1;
-		} else {
-			throw new Error(`unknown Commonspace service option: ${String(flag)}`);
+		if (flag === "--disable-remote") {
+			options.disableRemote = true;
+			continue;
 		}
+		const option = valueOptions.get(flag);
+		const value = rest[index + 1];
+		if (option === undefined)
+			throw new Error(`unknown Commonspace service option: ${String(flag)}`);
+		if (value === undefined || value.startsWith("--"))
+			throw new Error(`Commonspace service option requires a value: ${flag}`);
+		options[option] = value;
+		index += 1;
 	}
+	if (
+		command !== "install" &&
+		command !== "update" &&
+		(options.remoteOrigin !== undefined ||
+			options.remoteOwnerLogin !== undefined ||
+			options.remotePort !== undefined ||
+			options.disableRemote === true)
+	)
+		throw new Error("Remote configuration flags require install or update");
 	return { command, options };
 }
 
@@ -644,7 +758,7 @@ async function runCli() {
 		}
 		default:
 			writeLine(
-				"Usage: commonspace <install|update|start|stop|restart|status|rollback> [--source <git-url>] [--app-root <path>]",
+				"Usage: commonspace <install|update|start|stop|restart|status|rollback> [--source <git-url>] [--app-root <path>]\nInstall/update remote access: --remote-origin <https-origin> --remote-owner-login <login> [--remote-port <port>], or --disable-remote",
 			);
 	}
 }

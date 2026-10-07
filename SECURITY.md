@@ -22,6 +22,8 @@ Security fixes target `main` and the latest release. Older versions do not have 
 ## How Commonspace protects local data
 
 - The server listens only on `127.0.0.1`. Requests that change data must pass the same-origin browser checks.
+- Optional private browser access uses a separate loopback listener behind Tailscale Serve. It accepts only the configured owner identity and exact HTTPS Host, and checks browser origin for API requests. Scoped MCP, host control, native directory selection, and editor launch remain local.
+- The local host-control capability lives in an owner-only, credential-bearing locator file. Project previews and file attachments reject it through the existing credential-file boundary.
 - Project folders are resolved to their real filesystem locations before they are passed to an agent.
 - Agent commands run without a shell, with limits on input, output, and execution time.
 - Commonspace stores references to agent sessions. The agents retain their own credentials and session stores.

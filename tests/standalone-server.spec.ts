@@ -1,4 +1,12 @@
-import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	rename,
+	rm,
+	writeFile,
+} from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -31,6 +39,39 @@ afterEach(async () => {
 });
 
 describe("standalone Commonspace server", () => {
+	it("rejects an occupied legacy host port before changing saved state", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-occupied-port-"));
+		roots.push(root);
+		const running = await startCommonspaceServer({ root, port: 0 });
+		await running.service.mutate({
+			action: "create-channel",
+			name: "preserve on failed launch",
+			agentIds: [],
+		});
+		await running.close();
+		const before = await readFile(join(root, "state.json"));
+		const legacyHost = createServer();
+		await new Promise<void>((resolve) =>
+			legacyHost.listen(0, "127.0.0.1", resolve),
+		);
+		try {
+			const address = legacyHost.address();
+			if (address === null || typeof address === "string")
+				throw new Error("Missing legacy host address");
+			await expect(
+				startCommonspaceServer({ root, port: address.port }),
+			).rejects.toMatchObject({ code: "EADDRINUSE" });
+			expect(await readFile(join(root, "state.json"))).toEqual(before);
+		} finally {
+			await new Promise<void>((resolve, reject) =>
+				legacyHost.close((error) => {
+					if (error === undefined) resolve();
+					else reject(error);
+				}),
+			);
+		}
+	});
+
 	it.each(["state.json", "state.backup.json"])(
 		"keeps %s persistence failures private and restores the last durable state",
 		async (failedFile) => {

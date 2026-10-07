@@ -13,6 +13,7 @@ Choose the path for what you want to do. New users can follow the first four gui
 
 - [Help and common questions](start/help.md) — common setup problems, pricing, and privacy questions.
 - [Operations](guides/operations.md) — configuration, local data, background service, backups, and recovery.
+- [Private browser access](guides/remote-access.md) covers one Mac host, Tailscale Serve, phone access, and host-side GitHub import.
 - [Support matrix](start/support.md) — current platform and agent-runtime coverage.
 
 ## Understand the product

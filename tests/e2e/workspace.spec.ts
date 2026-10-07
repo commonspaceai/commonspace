@@ -724,6 +724,7 @@ test("refreshes the Inbox, captures native delivery, and opens the exact notific
 	const send = await page.request.post("/api/send", {
 		headers: { origin: page.url() },
 		data: {
+			submissionId: crypto.randomUUID(),
 			conversation: { kind: "channel", id: channel.id },
 			text: "@review-bot Verify the complete notification path.",
 		},

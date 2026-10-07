@@ -70,6 +70,28 @@ afterEach(async () => {
 	);
 });
 
+async function fixturePlistEnvironment(path) {
+	const plist = await readFile(path, "utf8");
+	const environment =
+		/<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/u.exec(
+			plist,
+		)?.[1];
+	if (environment === undefined) throw new Error("missing fixture environment");
+	return Object.fromEntries(
+		[
+			...environment.matchAll(/<key>([^<]+)<\/key><string>([^<]*)<\/string>/gu),
+		].map(([, key, value]) => [
+			key,
+			value
+				.replaceAll("&lt;", "<")
+				.replaceAll("&gt;", ">")
+				.replaceAll("&quot;", '"')
+				.replaceAll("&apos;", "'")
+				.replaceAll("&amp;", "&"),
+		]),
+	);
+}
+
 async function fixture() {
 	const home = await mkdtemp(join(tmpdir(), "commonspace-service-manager-"));
 	roots.push(home);
@@ -92,6 +114,13 @@ async function fixture() {
 		},
 		run: async (command, args, options = {}) => {
 			calls.push({ command, args, options });
+			if (command === "/usr/bin/plutil" && args[0] === "-extract") {
+				return {
+					exitCode: 0,
+					stdout: JSON.stringify(await fixturePlistEnvironment(args.at(-1))),
+					stderr: "",
+				};
+			}
 			if (command === "/bin/launchctl") {
 				switch (args[0]) {
 					case "bootstrap":
@@ -137,6 +166,191 @@ async function fixture() {
 }
 
 describe("installed Commonspace service manager", () => {
+	it("preserves remote access and workspace records through update and rollback", async () => {
+		const { appRoot, dependencies, home } = await fixture();
+		const layout = serviceLayout({ appRoot, home, uid: dependencies.uid });
+		const recordPath = join(layout.stateRoot, "fixture-workspace.json");
+		const record =
+			'{"message":"accepted request","nativeSessionId":"fixture-session"}\n';
+		await mkdir(layout.stateRoot, { recursive: true });
+		await writeFile(recordPath, record);
+		const expectedRemoteEnvironment = [
+			"<key>COMMONSPACE_REMOTE_ORIGIN</key><string>https://fixture.tail.example</string>",
+			"<key>COMMONSPACE_REMOTE_OWNER_LOGIN</key><string>owner&amp;fixture@example.test</string>",
+			"<key>COMMONSPACE_REMOTE_PORT</key><string>4311</string>",
+		];
+		for (const transition of [
+			() =>
+				installOrUpdate(
+					{
+						appRoot,
+						remoteOrigin: "https://fixture.tail.example",
+						remoteOwnerLogin: "owner&fixture@example.test",
+						remotePort: "4311",
+					},
+					dependencies,
+				),
+			() => installOrUpdate({ mode: "update", appRoot }, dependencies),
+			() => rollbackRelease({ appRoot }, dependencies),
+		]) {
+			await transition();
+			const plist = await readFile(layout.launchAgentPath, "utf8");
+			for (const setting of expectedRemoteEnvironment)
+				expect(plist).toContain(setting);
+			expect(plist).toContain(
+				"<key>COMMONSPACE_PORT</key><string>3100</string>",
+			);
+			expect(await readFile(recordPath, "utf8")).toBe(record);
+		}
+	});
+
+	it("keeps the current remote configuration when rolling back an older release", async () => {
+		const { appRoot, dependencies, home } = await fixture();
+		const layout = serviceLayout({ appRoot, home, uid: dependencies.uid });
+		await installOrUpdate({ appRoot }, dependencies);
+		await installOrUpdate(
+			{
+				mode: "update",
+				appRoot,
+				remoteOrigin: "https://changed.tail.example",
+				remoteOwnerLogin: "changed@example.test",
+			},
+			dependencies,
+		);
+		await rollbackRelease({ appRoot }, dependencies);
+		const plist = await readFile(layout.launchAgentPath, "utf8");
+		expect(plist).toContain(
+			"<key>COMMONSPACE_REMOTE_ORIGIN</key><string>https://changed.tail.example</string>",
+		);
+		expect(plist).toContain(
+			"<key>COMMONSPACE_REMOTE_OWNER_LOGIN</key><string>changed@example.test</string>",
+		);
+		expect(plist).not.toContain("COMMONSPACE_REMOTE_PORT");
+	});
+
+	it("disables saved remote access across update and rollback", async () => {
+		const { appRoot, dependencies, home } = await fixture();
+		const layout = serviceLayout({ appRoot, home, uid: dependencies.uid });
+		await installOrUpdate(
+			{
+				appRoot,
+				remoteOrigin: "https://fixture.tail.example",
+				remoteOwnerLogin: "owner@example.test",
+				remotePort: 4311,
+			},
+			dependencies,
+		);
+		expect(await readFile(layout.launchAgentPath, "utf8")).toContain(
+			"COMMONSPACE_REMOTE_ORIGIN",
+		);
+		await installOrUpdate(
+			{ mode: "update", appRoot, disableRemote: true },
+			dependencies,
+		);
+		expect(await readFile(layout.launchAgentPath, "utf8")).not.toContain(
+			"COMMONSPACE_REMOTE_",
+		);
+		await rollbackRelease({ appRoot }, dependencies);
+		const plist = await readFile(layout.launchAgentPath, "utf8");
+		expect(plist).not.toContain("COMMONSPACE_REMOTE_");
+		expect(plist).toContain("<key>COMMONSPACE_PORT</key><string>3100</string>");
+	});
+
+	it("restores the previous remote configuration when activation fails", async () => {
+		const { appRoot, dependencies, home } = await fixture();
+		const layout = serviceLayout({ appRoot, home, uid: dependencies.uid });
+		await installOrUpdate(
+			{
+				appRoot,
+				remoteOrigin: "https://fixture.tail.example",
+				remoteOwnerLogin: "owner@example.test",
+				remotePort: 4311,
+			},
+			dependencies,
+		);
+		const previousPlist = await readFile(layout.launchAgentPath, "utf8");
+		dependencies.health = async () => {
+			if (
+				(await readFile(join(layout.current, "release-marker"), "utf8")) === "2"
+			)
+				throw new Error("fixture activation failure");
+			return true;
+		};
+		await expect(
+			installOrUpdate(
+				{ mode: "update", appRoot, disableRemote: true },
+				dependencies,
+			),
+		).rejects.toThrow("fixture activation failure");
+		expect(await readFile(layout.launchAgentPath, "utf8")).toBe(previousPlist);
+		expect(await readFile(join(layout.current, "release-marker"), "utf8")).toBe(
+			"1",
+		);
+	});
+
+	it("rejects incomplete saved remote configuration without stopping the installed release", async () => {
+		const { appRoot, dependencies, home } = await fixture();
+		const layout = serviceLayout({ appRoot, home, uid: dependencies.uid });
+		await installOrUpdate({ appRoot }, dependencies);
+		const invalidPlist = (
+			await readFile(layout.launchAgentPath, "utf8")
+		).replace(
+			"<key>EnvironmentVariables</key>\n  <dict>",
+			"<key>EnvironmentVariables</key>\n  <dict>\n    <key>COMMONSPACE_REMOTE_ORIGIN</key><string>https://fixture.tail.example</string>",
+		);
+		await writeFile(layout.launchAgentPath, invalidPlist);
+		await expect(
+			installOrUpdate({ mode: "update", appRoot }, dependencies),
+		).rejects.toThrow(
+			"Remote origin and owner login must be configured together",
+		);
+		expect(await readFile(layout.launchAgentPath, "utf8")).toBe(invalidPlist);
+		await expect(
+			serviceStatus({ appRoot }, dependencies),
+		).resolves.toMatchObject({
+			loaded: true,
+			healthy: true,
+			release: "commit-1",
+		});
+	});
+
+	it.each([
+		{ remoteOrigin: "https://fixture.tail.example" },
+		{ remoteOwnerLogin: "owner@example.test" },
+		{ remotePort: 4311 },
+		{
+			remoteOrigin: "http://fixture.tail.example",
+			remoteOwnerLogin: "owner@example.test",
+		},
+		{
+			remoteOrigin: "https://fixture.tail.example/path",
+			remoteOwnerLogin: "owner@example.test",
+		},
+		{
+			remoteOrigin: "https://fixture.tail.example",
+			remoteOwnerLogin: " ",
+		},
+		{
+			remoteOrigin: "https://fixture.tail.example",
+			remoteOwnerLogin: "owner@example.test",
+			remotePort: 65_536,
+		},
+		{
+			remoteOrigin: "https://fixture.tail.example",
+			remoteOwnerLogin: "owner@example.test",
+			disableRemote: true,
+		},
+	])(
+		"rejects invalid remote configuration before replacing a release",
+		async (options) => {
+			const { appRoot, dependencies } = await fixture();
+			await expect(
+				installOrUpdate({ appRoot, ...options }, dependencies),
+			).rejects.toThrow(/remote/iu);
+			await expect(lstat(join(appRoot, "current"))).rejects.toThrow();
+		},
+	);
+
 	it("rejects removed packaged-release input", async () => {
 		const { appRoot, dependencies } = await fixture();
 		await expect(

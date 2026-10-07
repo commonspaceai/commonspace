@@ -88,7 +88,7 @@ describe("routing state migration", () => {
 		];
 		await writeFile(
 			join(root, "state.json"),
-			JSON.stringify({ ...state, version: 33 }),
+			JSON.stringify({ ...state, version: 33, messageSubmissions: undefined }),
 		);
 		const service = new CommonspaceHostService(
 			{},
@@ -416,6 +416,7 @@ describe("routing state migration", () => {
 				agents: [],
 				dmSessions: {},
 				agentSessions: {},
+				messageSubmissions: {},
 				projects: [],
 				channels: [
 					{

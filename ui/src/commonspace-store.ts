@@ -19,6 +19,7 @@ import type {
 	EditMessageRequest,
 	FollowupQueueResponse,
 	HarnessCapabilityInventory,
+	ImportGitHubProjectRequest,
 	RerouteAssignmentRequest,
 	RetryRoutingRequest,
 	SelectDirectoryResponse,
@@ -31,6 +32,7 @@ import type {
 } from "@commonspace/shared";
 import {
 	conversationKey,
+	ImportGitHubProjectResponseSchema,
 	isAgentAdapterKind,
 	parseCommonspaceBootstrap,
 	parseCommonspaceState,
@@ -90,6 +92,7 @@ export interface CommonspacePendingSubmission {
 }
 
 export interface CommonspaceSendOptions {
+	submissionId?: string | undefined;
 	text: string;
 	threadId?: string | undefined;
 	attachments?: readonly SendImageAttachment[] | undefined;
@@ -408,6 +411,7 @@ function prepareMessageAdmission(
 	const attachments = [...(options.attachments ?? [])];
 	const files = [...(options.files ?? [])];
 	const request: SendMessageRequest = {
+		submissionId,
 		conversation,
 		text: options.text,
 	};
@@ -456,7 +460,6 @@ export class CommonspaceClientStore {
 		activeThreadId: null,
 	};
 	private readonly listeners = new Set<Listener>();
-	private submissionRequest = 0;
 	private navigationRevision = 0;
 	private refreshPromise: Promise<void> | null = null;
 	private discoveryRequest = 0;
@@ -617,6 +620,33 @@ export class CommonspaceClientStore {
 		}
 	}
 
+	async importGitHubProject(
+		request: ImportGitHubProjectRequest,
+	): Promise<string> {
+		try {
+			const result = await requestJson(
+				"/api/projects/import-github",
+				{ method: "POST", body: JSON.stringify(request) },
+				ImportGitHubProjectResponseSchema.parse,
+			);
+			const bootstrap = this.snapshot.bootstrap;
+			if (bootstrap === null) {
+				await this.refresh();
+				return result.projectId;
+			}
+			const merged = this.mergeBootstrap({ ...bootstrap, state: result.state });
+			this.set({
+				...this.snapshot,
+				bootstrap: merged,
+				activeProjectId: this.resolveActiveProject(merged),
+				error: null,
+			});
+			return result.projectId;
+		} catch (error) {
+			this.recordRequestFailure(error);
+		}
+	}
+
 	async updateRoutingConfiguration(
 		request: UpdateRoutingConfigurationRequest,
 	): Promise<void> {
@@ -762,6 +792,17 @@ export class CommonspaceClientStore {
 
 	async sendDirectReply(options: CommonspaceDirectReplyOptions): Promise<void> {
 		return this.sendMessage(options);
+	}
+
+	async retryPendingSubmission(submissionId: string): Promise<void> {
+		const submission = this.snapshot.pendingSubmissions.find(
+			(candidate) => candidate.id === submissionId,
+		);
+		if (submission === undefined || submission.status !== "failed") return;
+		return this.sendMessage(
+			{ ...submission, submissionId: submission.id },
+			submission.conversation,
+		);
 	}
 
 	dismissPendingSubmission(submissionId: string): void {
@@ -1099,18 +1140,29 @@ export class CommonspaceClientStore {
 		}
 	}
 
-	private async sendMessage(options: CommonspaceMessageOptions): Promise<void> {
-		const conversation = this.snapshot.activeConversation;
+	private async sendMessage(
+		options: CommonspaceMessageOptions,
+		conversation = this.snapshot.activeConversation,
+	): Promise<void> {
 		if (conversation === null) return;
 		const navigationRevision = ++this.navigationRevision;
 		const { request, submission } = prepareMessageAdmission(
 			conversation,
-			`submission-${String(++this.submissionRequest)}`,
+			options.submissionId ?? `submission-${crypto.randomUUID()}`,
 			options,
 		);
+		const existing = this.snapshot.pendingSubmissions.find(
+			(candidate) => candidate.id === submission.id,
+		);
+		if (existing !== undefined) submission.createdAt = existing.createdAt;
 		this.set({
 			...this.snapshot,
-			pendingSubmissions: [...this.snapshot.pendingSubmissions, submission],
+			pendingSubmissions:
+				existing === undefined
+					? [...this.snapshot.pendingSubmissions, submission]
+					: this.snapshot.pendingSubmissions.map((candidate) =>
+							candidate.id === submission.id ? submission : candidate,
+						),
 			sending: true,
 			error: null,
 		});

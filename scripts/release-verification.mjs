@@ -11,6 +11,7 @@ export const releaseVerificationSteps = Object.freeze(
 		["Verify reviewed macOS visual baselines", ["test:visual:built"]],
 		["Verify Storybook messaging flows", ["test:messaging:built"]],
 		["Verify the built application browser flows", ["test:e2e:built"]],
+		["Verify the built desktop lifecycle", ["verify:desktop:built"]],
 		["Verify the built live application flow", ["verify:live:built"]],
 		["Build the npm candidate", ["package:npm"]],
 		["Verify the npm candidate in a clean install", ["verify:npm-package"]],

@@ -18,7 +18,9 @@ Use this specification by topic:
 
 ## 1. Product definition
 
-Commonspace is an MIT-licensed, local-first workspace for one person working with several local agents. It connects the agents the user already has, shares conversation context, sends each agent the relevant request, and continues the correct agent session.
+Commonspace is an MIT-licensed Electron workspace for one person working with several agents on a user-controlled host. It connects the agents the user already has, shares conversation context, sends each agent the relevant request, and continues the correct agent session.
+
+One running Mac owns workspace state, project files, agent execution, and native-session mappings for the first release. Electron and private browser clients use the same host API. The source host supports Tailscale Serve access and GitHub import. Both listeners remain loopback-only. A separate Expo app is deferred to the roadmap.
 
 Conversation is the work record: requests, replies, decisions, and follow-ups stay in messages and threads. There is no separate task-management system.
 
@@ -39,7 +41,7 @@ Commonspace solves this by providing:
 
 ### Primary user
 
-The intended user is one technical person who already uses supported local ACP runtimes. They want several agents to work across one or more codebases while keeping the conversation and results together.
+The intended user is one technical person who already uses supported ACP runtimes on their host. They want several agents to work across codebases and to check or continue that work from another device.
 
 ### Core job to be done
 
@@ -69,19 +71,21 @@ A user can open Commonspace, talk naturally in a Channel or DM, and trust that:
 | G6 | Keep agent collaboration peer-to-peer and visible through mentions. |
 | G7 | Surface normalized harness activity, results, and permission choices without replacing the harness. |
 | G8 | Remain local-first, recoverable, portable, and fully open source. |
+| G9 | Let one person access the same host workspace from desktop, remote browser, and mobile clients. |
+| G10 | Keep local folders and import GitHub repositories as checkouts on the host. |
 
 ### Explicit non-goals
 
 - Tasks, tickets, goals, objectives, priorities, assignees, workflows, kanban, budgets, or approval pipelines.
 - Company simulation, org charts, agent employees, managers, captains, or a required coordinator agent.
-- Multi-human accounts, roles, remote workspace sync, or hosted collaboration.
+- Hosted team collaboration or transcript synchronization between independent hosts.
 - Replacing agent runtimes, models, tools, credentials, private memory, or native sessions.
 - Wrapping arbitrary unsupported CLIs. Commonspace supports known ACP harnesses through first-party integrations.
 - Agent-created Channels, Projects, or workspace structure.
 - A standalone agent-management dashboard or agent profile pages.
 - A full Git client, terminal, execution manager, or raw harness debugger.
 - Generic plugins or third-party extension lifecycle.
-- Resource types beyond local folders, although the Project model must leave room for them later.
+- Resource types beyond local folders and GitHub imports that create host checkouts.
 - Reactions, agent-suggested durable context, and automatic acceptance of agent-written memory.
 - A relational transcript store before measured scale requires one.
 
@@ -95,7 +99,7 @@ A user can open Commonspace, talk naturally in a Channel or DM, and trust that:
 6. **Inference is a service function.** Commonspace tries local classification for bounded routing decisions. One selected workspace Agent handles uncertain or unsupported routing and summarizes shared context and routing corrections through its native harness.
 7. **Harness capabilities are authoritative.** Runtime controls come from ACP. Read-only capability browsing may also use native inventory commands or native configuration metadata, with the source and scope visible. Configured capabilities are not proof of availability in a particular session.
 8. **Parallel by default.** Different native sessions may run concurrently. Only work targeting the same native session is serialized.
-9. **Local authority.** Commonspace stores workspace data and native-session references locally. Connected runtimes control model-service traffic and credentials, including inference traffic from the selected workspace Agent.
+9. **Host authority.** One user-controlled host stores workspace data, project files, and native-session references. Connected clients present that state. Runtimes on the host control model-service traffic and credentials, including inference traffic from the selected workspace Agent.
 10. **Show actual outcomes.** Display routing failures, preserve delivered history, reflect granted permissions, and distinguish interrupted runs from completed runs.
 
 ## 4. Conceptual model
@@ -114,7 +118,7 @@ flowchart TD
 
 | Object | Product meaning | Key rule |
 | --- | --- | --- |
-| Workspace | One local Commonspace installation and its durable state. | One human is the authority in the current product. |
+| Workspace | One Commonspace host and its durable state. | One human is the authority in the current product. Multiple clients connect to that host. |
 | Agent | A supported local ACP runtime explicitly added to the workspace. | The same Agent is reused across Projects and conversations; Commonspace does not clone it per Project. |
 | Project | A named context container with one or more resources. | Projects are references, not task owners. Local folders are the only current resource type. |
 | Channel | A shared conversation with a chosen set of agents, instructions, and shared context. | A Channel may be projectless and does not permanently belong to one Project. Model and reasoning remain owned by each native runtime and session. |
@@ -149,9 +153,9 @@ Refresh does not run a model turn, change native configuration, or persist inven
 
 ### 5.1 First run and Agent addition
 
-1. The local Commonspace service starts and the browser or desktop client connects to it.
+1. The Electron app starts the local Commonspace host, or a browser client connects to a running host.
 2. The workspace starts without silently importing every installed Agent.
-3. When the user chooses **Add Agent**, Commonspace scans only for supported ACP harnesses.
+3. When the user chooses **Add Agent**, Commonspace scans the host only for supported ACP harnesses.
 4. The user explicitly selects the harness identity to add.
 5. Commonspace may assign a local display name, emoji/avatar, and accent color without renaming or altering the harness identity or configuration. The emoji picker opens on all base emoji through Unicode Emoji 17 and supports search, categories, recent choices, and skin tones.
 6. The Agent becomes available for DMs, Channel membership, mentions, and routing.
@@ -162,11 +166,13 @@ Refresh does not run a model turn, change native configuration, or persist inven
 
 1. The user creates a Project with a name and one or more local folders.
 2. The first folder is the primary working directory and later folders are additional context roots.
-3. Commonspace canonicalizes and validates every folder locally.
+3. Commonspace canonicalizes and validates every folder on the host.
 4. Creating a Project does not create a Channel, task, or Project-specific Agent copy.
 5. The Project is available as a visible reference in any Channel, Thread, or DM.
 6. The user may choose or clear a Project emoji at creation or in Project settings. It changes the Project's display icon only.
 7. The user may rename a Project in Project settings or from its collection menu; its folders and ID-based conversation references stay attached.
+
+GitHub import clones the selected repository onto the host before registering its checkout as a Project folder. Agents work on that checkout. Connected clients browse files and Git changes through the host's existing Project APIs. Commit, push, and pull-request work stays in agent conversations.
 
 ### 5.3 Unaddressed Channel message
 
@@ -242,10 +248,11 @@ Compaction summarizes context so it fits within input limits. It does not delete
 
 ### 5.10 Closing and reopening Commonspace
 
-1. Closing the client does not stop the local service or active Agent sessions.
-2. Reopening the client reconstructs the workspace from the service's durable state.
-3. Restarting Commonspace or the machine resumes stored native sessions when the harness supports it.
-4. A turn that was interrupted and cannot be resumed is marked interrupted or failed, never silently completed.
+1. Closing the desktop window or browser client leaves the host and active Agent sessions running.
+2. Reopening the client reconstructs the workspace from the host's durable state.
+3. Choosing **Quit Commonspace** closes Electron and leaves the host running. **Stop Hosting** explicitly stops the host and active work.
+4. Restarting Commonspace or the host machine resumes stored native sessions when the harness supports it.
+5. A turn that was interrupted and cannot be resumed is marked interrupted or failed, never silently completed.
 
 ## 6. Functional requirements
 
@@ -255,6 +262,7 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | --- | --- |
 | Current | Required product behavior. |
 | Capability-dependent | Required only when the connected runtime advertises the relevant ACP capability. |
+| Planned | Accepted product direction that is not available in the current release. |
 | Later | Deliberately outside the current product scope. |
 
 ### 6.1 Workspace and lifecycle
@@ -266,8 +274,11 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | WRK-03 | Current | Limit structural workspace mutations to the human. | Agents cannot create/delete Projects, Channels, DMs, or Agents through current context tools. |
 | WRK-04 | Current | Restore durable state after service or machine restart. | Conversations, context, read state, and resumable native-session mappings survive restart. |
 | WRK-05 | Current | Support a one-command local installation/update path. | A clean supported machine can install, start, stop, and update Commonspace without repository knowledge. |
-| WRK-06 | Later | Offer a desktop application over the same service contract. | The desktop distribution does not fork the domain or persistence model. |
+| WRK-06 | Current | Offer a source-launch Mac Electron application over the same host API. | The app starts or verifies attachment to the host without a second domain or persistence model. Window close and Quit keep the host alive; relaunch restores the workspace; Stop Hosting ends the verified host. |
 | WRK-07 | Current | Support desktop keyboard operation and persistent Light/Dark/System appearance. | Workspace settings receive focus, covered conversation controls are inert, and closing restores a usable focus target. Appearance applies immediately, survives browser reload, and System follows live OS changes, including native controls. |
+| WRK-08 | Current | Connect private browser clients to one Mac through Tailscale Serve. | HTTPS, exact owner identity, Host, and browser-origin checks guard the remote listener. Tailscale owns device removal. Clients share conversation state and exact native sessions without transcript synchronization or client-side Agent execution. Scoped MCP and native host controls remain local. |
+| WRK-09 | Current | Support phone access through the shared web client. | A connected phone can inspect Agent activity, answer permission requests, continue conversations, import Projects, and review files and diffs. Disconnecting a client does not stop work. Real phone acceptance is recorded per release candidate. |
+| WRK-10 | Planned | Distribute installable Electron desktop releases. | A clean supported machine can install, update, and recover the app through the platform's supported signed distribution path. |
 
 ### 6.2 Agents and harnesses
 
@@ -293,6 +304,7 @@ Each row gives a stable requirement ID, its scope target, the required behavior,
 | PRJ-07 | Current | Keep projectless conversation genuinely projectless. | An Agent in a no-Project turn receives no Project filesystem roots and starts in a neutral configured working directory. |
 | PRJ-08 | Later | Add non-folder Project resource kinds. | New resource kinds extend the Project resource contract without turning Projects into tasks. |
 | PRJ-09 | Current | Allow Project names to change from settings and collection menus. | Renaming preserves the Project's folders and ID-based references; names remain unique. |
+| PRJ-10 | Current | Import a GitHub repository by cloning onto the host. | The host validates source, optional branch, and destination, uses existing Git access, and registers the completed checkout as a Project folder. Failed or cancelled import preserves existing Projects and conversations. File and Git browsing reuse host APIs without arbitrary host filesystem access or a client repository mirror. |
 
 ### 6.4 Channels, DMs, messages, and Threads
 
@@ -510,7 +522,7 @@ These states explain what happened to a message or agent turn. They belong to th
 
 ### Local and network behavior
 
-- Commonspace binds its service to loopback and guards mutations by origin.
+- Both listeners bind to loopback. Tailscale Serve terminates private HTTPS access; Commonspace checks exact owner identity, Host, and browser origin. Scoped MCP and private host control stay local.
 - ACP runs locally between Commonspace and supported harness processes.
 - Commonspace does not copy or manage harness credentials.
 - Connected runtimes may send messages and context to their configured model services. Their network behavior remains under the runtime's control.
@@ -521,7 +533,7 @@ These states explain what happened to a message or agent turn. They belong to th
 
 - Commonspace-managed native session references, absolute host paths, capabilities, and credential fields remain private to the service.
 - Persisted activity and error data is bounded and sanitized.
-- Attachments are stored locally with private metadata and served only through authorized loopback requests.
+- Attachments are stored on the host with private metadata and currently served only through authorized loopback requests.
 - Project previews, Git diffs, and attachments share one known credential-filename policy. Previews check requested and canonical names; Git diffs also check deleted paths and rename sources. Preview delivery and untracked text diffs read through the validated file descriptor. This does not scan or remove sensitive information from arbitrary conversation text or file contents.
 - Git previews disable external diff programs, text converters, filesystem monitor commands, and configured clean/process/smudge filters without rewriting repository configuration. Filter-backed files are compared as stored on disk. The installed browser UI rejects framing by other pages.
 - Portable exports omit managed credential, native-session, capability, and absolute-path fields. Conversation text and exact attachment bytes remain in the archive and may contain sensitive information supplied by their authors.
@@ -558,6 +570,7 @@ Workspace archives are unencrypted private user data. Removing Commonspace-manag
 | E2E-11 | Restart after a conversation exceeds the legacy 500-message boundary | Every accepted message and its context restore, resumable sessions continue exactly, and unrecoverable in-flight work is marked interrupted. |
 | E2E-12 | Export and import into a clean workspace | Conversation data and exact attachment bytes import safely. Managed private fields are omitted from the archive, and local Project roots require explicit remapping. |
 | E2E-13 | Open an added Agent's capabilities and refresh | Native metadata loads on demand with source, scope, and inspection time. Search reveals matching items; unavailable inspection differs from empty inventory. Refresh does not change native configuration, private memory content, or workspace data. When native OAuth state and sign-in are supported, the displayed status and explicit sign-in action use the harness without exposing credentials. |
+| E2E-14 | Launch Electron, close and reopen its window, Quit, relaunch, then Stop Hosting | The workspace renders. Quit preserves the host and its saved conversation. Relaunch attaches to that host. Stop Hosting ends it without erasing durable data. |
 
 ## Definition of done
 
@@ -567,7 +580,7 @@ The current product scope is complete when:
 2. Capability-dependent behavior is tested against each supported harness that advertises it.
 3. All end-to-end acceptance scenarios pass on a clean supported machine.
 4. Existing state versions migrate without dropping conversations, context, references, attachments, or read state, including transcripts beyond legacy count windows.
-5. The browser client works at desktop sizes with keyboard-only operation and Light/Dark/System appearance. Narrow and mobile layouts are deferred.
+5. Electron and browser clients work at desktop sizes with keyboard-only operation and Light/Dark/System appearance. Private phone-browser acceptance covers the connected work flow; the separate Expo app is deferred.
 6. The local service can be installed, started, stopped, updated, and recovered without repository knowledge.
 7. Portable and browser-visible metadata omit Commonspace-managed credentials, absolute paths, native session IDs, and ephemeral capabilities. This guarantee does not imply that user-supplied text or files have been stripped of sensitive content.
 8. Product documentation and the roadmap agree on current behavior.
@@ -576,11 +589,12 @@ The current product scope is complete when:
 
 These decisions do not block current behavior and should be made only when their release slice begins:
 
-- Desktop packaging technology.
+- Desktop installer, signing, and update mechanisms.
+- Remote access deployment, pairing, and revocation mechanisms.
+- Shared access for additional people. The default is one person across devices.
 - Additional ACP harnesses beyond the first-party supported set.
 - Non-folder Project resource types.
 - Relational persistence technology and migration timing.
 - Plugin/extension architecture.
-- Hosted or multi-human collaboration.
 
 These are technical or later-scope choices, not unresolved current product behavior.

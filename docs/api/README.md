@@ -19,7 +19,7 @@ This reference maps the local HTTP routes in [`server/src/app.ts`](../../server/
 
 ## Transport rules
 
-- The server listens on loopback. `/api` rejects non-loopback clients. Except for `GET /api/health` and the bearer-protected `POST /api/mcp`, routes also require a same-origin request. See [`requestIsSameOrigin`](../../server/src/app.ts) for the accepted `Origin`, `Referer`, or `Sec-Fetch-Site` signals.
+- Both listeners bind to loopback. The local API rejects non-loopback clients and requires a same-origin request, except for health and bearer-protected scoped MCP. The optional private browser listener requires the configured Tailscale owner identity and exact HTTPS Host, then checks browser origin for API requests. Scoped MCP, private host control, native directory selection, and editor launch are unavailable remotely. See [Private browser access](../guides/remote-access.md) and the transport guards in [`app.ts`](../../server/src/app.ts).
 - JSON is the normal request and response format. The default JSON body limit is 128 KiB, `/api/send` allows 24 MiB, and `/api/import` uses the workspace import limit. Binary and server-sent event responses are identified on their pages. API responses use `Cache-Control: no-store`.
 - Failure responses from the app's HTTP boundary normally use [CommonspaceApiError](../../packages/shared/src/contracts.ts): `{ "code": string, "error": string }`. Each route owns its success status and error mapping in `app.ts`. A missing route returns `404` with `code: "not_found"`. MCP protocol failures can instead use JSON-RPC errors.
 - `:id` segments in paths are URL path parameters. Query parameters are written after `?`. These pages describe the current source contract, not a public versioned API guarantee.

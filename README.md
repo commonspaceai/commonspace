@@ -8,6 +8,8 @@
 
 Commonspace brings local coding agents into shared conversations, Projects, and Threads. Your conversations keep the work history; each agent runtime keeps control of its own tools, credentials, models, and sessions.
 
+The [Mac Electron source preview](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/development.md#electron-desktop-preview) opens the same workspace in a desktop app. The source host supports [private browser access through Tailscale](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/remote-access.md) and GitHub import. One running Mac owns the Agents, project files, and conversations. Signed installers and a separate Expo app remain on the [roadmap](https://github.com/commonspaceai/commonspace/blob/main/ROADMAP.md).
+
 [Get started](https://github.com/commonspaceai/commonspace/blob/main/docs/start/install.md) · [First conversation](https://github.com/commonspaceai/commonspace/blob/main/docs/start/first-conversation.md) · [Everyday use](https://github.com/commonspaceai/commonspace/blob/main/docs/guides/desktop-usage.md) · [Help](https://github.com/commonspaceai/commonspace/blob/main/docs/start/help.md) · [Contribute](https://github.com/commonspaceai/commonspace/blob/main/CONTRIBUTING.md)
 
 ![Commonspace Channel and Thread workspace](https://raw.githubusercontent.com/commonspaceai/commonspace/main/tests/storybook-visual.spec.ts-snapshots/workspace-conversation-darwin.png)

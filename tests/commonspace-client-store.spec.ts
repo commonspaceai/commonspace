@@ -1,5 +1,6 @@
 import type {
 	CommonspaceBootstrap,
+	ImportGitHubProjectResponse,
 	SendMessageResponse,
 } from "@commonspace/shared";
 import {
@@ -649,6 +650,75 @@ describe("CommonspaceClientStore message admission", () => {
 		admissions[1]?.reject(new Error("cleanup"));
 		await Promise.all([first, second]);
 	});
+
+	it("retries a failed admission with its original identity and conversation", async () => {
+		const response = threadAdmission();
+		const requests: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				if (String(input) === "/api/bootstrap")
+					return jsonResponse(storyBootstrap);
+				requests.push(String(init?.body));
+				if (requests.length === 1) throw new Error("Acceptance response lost");
+				return jsonResponse(response);
+			},
+		);
+		const store = new CommonspaceClientStore();
+		await store.refresh();
+		store.selectConversation(response.accepted.conversation);
+		await expect(store.send({ text: "Delayed admission" })).rejects.toThrow(
+			"Acceptance response lost",
+		);
+		const failed = store.getSnapshot().pendingSubmissions[0];
+		if (failed === undefined) throw new Error("Failed submission missing");
+		store.selectConversation({ kind: "dm", id: "agent-hermes" });
+
+		await store.retryPendingSubmission(failed.id);
+
+		expect(requests[1]).toBe(requests[0]);
+		expect(requests[0]).toContain(`"submissionId":"${failed.id}"`);
+		expect(store.getSnapshot().pendingSubmissions).toEqual([]);
+		expect(store.getSnapshot().activeConversation).toEqual({
+			kind: "dm",
+			id: "agent-hermes",
+		});
+		expect(store.messages(response.accepted.conversation).at(-1)?.id).toBe(
+			response.accepted.id,
+		);
+	});
+
+	it("preserves a recovered composer identity and makes new stores use distinct IDs", async () => {
+		const requests: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				if (String(input) === "/api/bootstrap")
+					return jsonResponse(storyBootstrap);
+				requests.push(String(init?.body));
+				throw new Error("Network unavailable");
+			},
+		);
+		const first = new CommonspaceClientStore();
+		const second = new CommonspaceClientStore();
+		await Promise.all([first.refresh(), second.refresh()]);
+		first.selectConversation({ kind: "dm", id: "agent-hermes" });
+		second.selectConversation({ kind: "dm", id: "agent-hermes" });
+		await expect(first.send({ text: "Recover me" })).rejects.toThrow();
+		const failed = first.getSnapshot().pendingSubmissions[0];
+		if (failed === undefined) throw new Error("Failed submission missing");
+		first.dismissPendingSubmission(failed.id);
+
+		await expect(
+			first.send({ text: "Recover me", submissionId: failed.id }),
+		).rejects.toThrow();
+		await expect(second.send({ text: "Recover me" })).rejects.toThrow();
+
+		expect(requests[1]).toBe(requests[0]);
+		expect(requests[2]).not.toBe(requests[0]);
+		expect(first.getSnapshot().pendingSubmissions[0]?.id).toBe(failed.id);
+		expect(second.getSnapshot().pendingSubmissions[0]?.id).not.toBe(failed.id);
+	});
 });
 
 it("reports an identical failure again after dismissing the current error", async () => {
@@ -671,4 +741,129 @@ it("reports an identical failure again after dismissing the current error", asyn
 		"Network unavailable",
 	);
 	expect(store.getSnapshot().error).toBe("Network unavailable");
+});
+
+function importedProjectResponse(): ImportGitHubProjectResponse {
+	const state = structuredClone(storyBootstrap.state);
+	state.revision += 1;
+	state.projects.push({
+		id: "project-github-import",
+		name: "Review kit",
+		paths: ["review-kit"],
+		createdAt: "2026-10-07T00:00:00.000Z",
+	});
+	return { projectId: "project-github-import", state };
+}
+
+describe("CommonspaceClientStore GitHub project import", () => {
+	it("registers the completed Project without losing conversation selection or history", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValueOnce(jsonResponse(storyBootstrap))
+				.mockResolvedValueOnce(
+					Response.json(importedProjectResponse(), { status: 201 }),
+				),
+		);
+		const store = new CommonspaceClientStore();
+		await store.refresh();
+		store.selectConversation({ kind: "channel", id: "channel-design" });
+		store.selectThread("thread-review");
+
+		const projectId = await store.importGitHubProject({
+			name: "Review kit",
+			repositoryUrl: "https://github.com/example/review-kit",
+		});
+
+		expect(projectId).toBe("project-github-import");
+		expect(store.getSnapshot().bootstrap?.state.projects.at(-1)).toEqual({
+			id: "project-github-import",
+			name: "Review kit",
+			paths: ["review-kit"],
+			createdAt: "2026-10-07T00:00:00.000Z",
+		});
+		expect(store.getSnapshot().bootstrap?.state.messages).toEqual(
+			storyBootstrap.state.messages,
+		);
+		expect(store.getSnapshot()).toMatchObject({
+			activeConversation: { kind: "channel", id: "channel-design" },
+			activeThreadId: "thread-review",
+			error: null,
+		});
+	});
+
+	it("rejects a success response that does not register the returned Project", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValueOnce(jsonResponse(storyBootstrap))
+				.mockResolvedValueOnce(
+					Response.json(
+						{ projectId: "project-missing", state: storyBootstrap.state },
+						{ status: 201 },
+					),
+				),
+		);
+		const store = new CommonspaceClientStore();
+		await store.refresh();
+		const original = store.getSnapshot().bootstrap;
+
+		await expect(
+			store.importGitHubProject({
+				name: "Review kit",
+				repositoryUrl: "https://github.com/example/review-kit",
+			}),
+		).rejects.toThrow(
+			"The imported Project is missing from the workspace response.",
+		);
+
+		expect(store.getSnapshot().bootstrap).toBe(original);
+		expect(store.getSnapshot().error).toContain(
+			"The imported Project is missing from the workspace response.",
+		);
+	});
+
+	it("preserves a newer workspace revision when the import response arrives late", async () => {
+		const pending = deferred<Response>();
+		const imported = importedProjectResponse();
+		const newer = structuredClone(storyBootstrap);
+		newer.state = structuredClone(imported.state);
+		newer.state.revision += 1;
+		const firstProject = newer.state.projects[0];
+		if (firstProject === undefined) throw new Error("Missing fixture Project");
+		newer.state.projects[0] = {
+			...firstProject,
+			name: "Renamed during import",
+		};
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValueOnce(jsonResponse(storyBootstrap))
+				.mockReturnValueOnce(pending.promise)
+				.mockResolvedValueOnce(jsonResponse(newer)),
+		);
+		const store = new CommonspaceClientStore();
+		await store.refresh();
+		const importing = store.importGitHubProject({
+			name: "Review kit",
+			repositoryUrl: "https://github.com/example/review-kit",
+			branch: "release",
+		});
+		await store.refresh();
+		pending.resolve(Response.json(imported, { status: 201 }));
+		await importing;
+
+		expect(store.getSnapshot().bootstrap?.state.revision).toBe(
+			newer.state.revision,
+		);
+		expect(store.getSnapshot().bootstrap?.state.projects[0]?.name).toBe(
+			"Renamed during import",
+		);
+		expect(store.getSnapshot().bootstrap?.state.projects.at(-1)?.id).toBe(
+			"project-github-import",
+		);
+	});
 });

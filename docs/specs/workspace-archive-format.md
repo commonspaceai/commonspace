@@ -35,7 +35,7 @@ The following example shows the envelope and workspace field names. Empty settin
 }
 ```
 
-`format` and `version` identify the archive contract. Archive version 4 is independent of internal persisted-state version 36. It adds optional Project and Channel emoji. Version 3 added required schedules; version 2 added the explicitly chosen Project scope on each routing correction. Versions 1, 2, 3, and 4 are importable. A version-1 correction without the scope field inherits its target assignment's saved Project scope. `exportedAt` and other timestamps use ISO 8601. IDs are opaque strings, and records refer to each other by those IDs. Detailed workspace shapes are defined in [`packages/shared/src/contracts.ts`](../../packages/shared/src/contracts.ts).
+`format` and `version` identify the archive contract. Archive version 4 is independent of internal persisted-state version 37. It adds optional Project and Channel emoji. Version 3 added required schedules; version 2 added the explicitly chosen Project scope on each routing correction. Versions 1, 2, 3, and 4 are importable. A version-1 correction without the scope field inherits its target assignment's saved Project scope. `exportedAt` and other timestamps use ISO 8601. IDs are opaque strings, and records refer to each other by those IDs. Detailed workspace shapes are defined in [`packages/shared/src/contracts.ts`](../../packages/shared/src/contracts.ts).
 
 ### Projects
 

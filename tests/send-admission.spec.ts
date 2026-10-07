@@ -130,13 +130,20 @@ describe("send admission invariants", () => {
 		});
 		await writeStarted.promise;
 		const send = service.send({
+			submissionId: "submission-during-failed-pin",
 			conversation: { kind: "dm", id: "codex" },
 			text: "Saved request",
 		});
 		releaseWrite.resolve();
 		await expect(failedPin).rejects.toThrow("simulated pin write failure");
-		await send;
+		const accepted = await send;
 		await service.whenIdle();
+		const retry = await service.send({
+			submissionId: "submission-during-failed-pin",
+			conversation: { kind: "dm", id: "codex" },
+			text: "Saved request",
+		});
+		expect(retry.accepted.id).toBe(accepted.accepted.id);
 		expect(service.snapshot().pins).toEqual([]);
 		expect(service.snapshot().messages["dm:codex"]).toContainEqual(
 			expect.objectContaining({ text: "Saved request" }),

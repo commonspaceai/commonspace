@@ -1,6 +1,6 @@
 # Install Commonspace
 
-Use the published npm package to run Commonspace in your browser. The usual path is: check Node.js, start Commonspace, and connect one signed-in agent. Source development and background service instructions are later on this page.
+Use the published npm package to run Commonspace in your browser. Check Node.js, start Commonspace, and connect one signed-in agent. The [Electron source preview](#run-from-source) is also available. Signed desktop installers remain planned.
 
 ## Check your computer
 
@@ -96,10 +96,14 @@ git clone https://github.com/commonspaceai/commonspace.git
 cd commonspace
 corepack enable
 pnpm install --frozen-lockfile
-pnpm dev
+pnpm start
 ```
 
-Open `http://127.0.0.1:5173`. See [Development](../guides/development.md) for checks and focused workflows.
+On a Mac, `pnpm start` builds and opens the Electron source preview over the same host and workspace model. Closing its window or choosing **Quit Commonspace** keeps Agent work running. Reopen through **Open Workspace**, Dock activation, or relaunch. Choose **Stop Hosting** to stop the host.
+
+For browser development, use `pnpm dev` and open `http://127.0.0.1:5173`. For a headless foreground host, build with `pnpm build`, then run `pnpm start:web`. See [Development](../guides/development.md#electron-desktop-preview) for source-preview checks.
+
+The source implementation supports [private browser access through Tailscale](../guides/remote-access.md). Choose **GitHub repository** in **Add Project** to clone onto the host. A separate Expo app and signed Mac installers remain [planned](../../ROADMAP.md). These source features do not establish availability in an older published package.
 
 ## Run in the background on macOS
 

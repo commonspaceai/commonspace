@@ -20,6 +20,7 @@ import {
 	type CommonspaceWorkspaceArchive,
 	type ConversationRef,
 	type EditMessageRequest,
+	ImportGitHubProjectRequestSchema,
 	McpAuthenticationStatus,
 	type ProjectFileEntry,
 	type RerouteAssignmentRequest,
@@ -45,6 +46,7 @@ type WorkspaceScenario =
 	| "routing-correction"
 	| "routing-failed"
 	| "offline"
+	| "lost-send-response"
 	| "queued"
 	| "scheduled";
 
@@ -146,6 +148,8 @@ class WorkspaceMockApi {
 	private readonly data: CommonspaceBootstrap = structuredClone(storyBootstrap);
 	private mcpAuthenticated = false;
 	private readonly uploads = new Map<string, CommonspaceArchiveAttachment>();
+	private readonly submissions = new Map<string, string>();
+	private sendResponseLost = false;
 
 	constructor(private readonly scenario: WorkspaceScenario) {
 		this.data.discoveredAgents = structuredClone(
@@ -730,6 +734,21 @@ class WorkspaceMockApi {
 	}
 
 	private send(request: SendMessageRequest) {
+		const acceptedId =
+			request.submissionId === undefined
+				? undefined
+				: this.submissions.get(request.submissionId);
+		if (acceptedId !== undefined) {
+			const accepted = Object.values(this.data.state.messages)
+				.flat()
+				.find((message) => message.id === acceptedId);
+			if (accepted === undefined || accepted.deletedAt !== undefined)
+				throw new Error("The accepted message is no longer available.");
+			const thread = this.data.state.threads.find(
+				(candidate) => candidate.id === accepted.threadId,
+			);
+			return { accepted, thread, state: this.data.state };
+		}
 		const key = `${request.conversation.kind}:${request.conversation.id}`;
 		const list = this.data.state.messages[key] ?? [];
 		this.data.state.messages[key] = list;
@@ -778,6 +797,8 @@ class WorkspaceMockApi {
 				this.saveAttachment(file, "file"),
 			);
 		list.push(accepted);
+		if (request.submissionId !== undefined)
+			this.submissions.set(request.submissionId, accepted.id);
 		if (agent)
 			this.recordReply(
 				accepted,
@@ -969,9 +990,48 @@ class WorkspaceMockApi {
 				);
 			}
 		}),
+		http.post("/api/projects/import-github", async ({ request }) => {
+			const input = ImportGitHubProjectRequestSchema.safeParse(
+				await request.json(),
+			);
+			if (!input.success)
+				return HttpResponse.json(
+					{ error: "GitHub repository, branch, or project name is invalid." },
+					{ status: 400 },
+				);
+			if (
+				this.data.state.projects.some(
+					(project) => project.name === input.data.name,
+				)
+			)
+				return HttpResponse.json(
+					{ error: "A project with this name already exists." },
+					{ status: 409 },
+				);
+			const project: CommonspaceProject = {
+				id: id(),
+				name: input.data.name,
+				paths: [input.data.name],
+				createdAt: now(),
+			};
+			this.data.state.projects.push(project);
+			this.data.state.revision += 1;
+			return HttpResponse.json(
+				{ projectId: project.id, state: this.data.state },
+				{ status: 201 },
+			);
+		}),
 		http.post("/api/send", async ({ request }) => {
 			const input = await trustedRequestJson<SendMessageRequest>(request);
-			return json(this.send(input));
+			const response = this.send(input);
+			if (this.scenario === "lost-send-response" && !this.sendResponseLost) {
+				this.sendResponseLost = true;
+				return HttpResponse.json(
+					{ error: "Acceptance response lost" },
+					{ status: 503 },
+				);
+			}
+			return json(response);
 		}),
 		http.post("/api/select-directory", () =>
 			json({ path: "/mock/workspace/new-project" }),

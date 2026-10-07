@@ -505,6 +505,38 @@ export const ScheduledManagement: Story = {
 export const DirectMessage: Story = {
 	args: { initialPath: "/agents/agent-hermes" },
 };
+
+export const LostSendResponseRecovery: Story = {
+	args: { initialPath: "/agents/agent-hermes" },
+	beforeEach: ({ msw }) => {
+		msw.use(...createWorkspaceMockApi("lost-send-response"));
+	},
+	play: async ({ canvasElement }) => {
+		const page = within(canvasElement.ownerDocument.body);
+		const composer = await page.findByRole("textbox", {
+			name: "Message Agentops",
+		});
+		await userEvent.type(composer, "Keep this request exactly once");
+		await userEvent.keyboard("{Enter}");
+		await waitFor(() =>
+			expect(composer).toHaveValue("Keep this request exactly once"),
+		);
+		await expect(composer).toHaveFocus();
+		await userEvent.keyboard("{Enter}");
+		await waitFor(() => expect(composer).toHaveValue(""));
+		await expect(
+			await page.findByText("Keep this request exactly once"),
+		).toBeVisible();
+		await expect(
+			page.getAllByText("Keep this request exactly once"),
+		).toHaveLength(1);
+		await expect(
+			page.getAllByText(
+				"Got it. I’ll keep the follow-up in this conversation. This is a simulated reply for the Storybook workspace.",
+			),
+		).toHaveLength(1);
+	},
+};
 export const Projects: Story = { args: { initialPath: "/projects" } };
 export const Channels: Story = { args: { initialPath: "/channels" } };
 export const Agents: Story = { args: { initialPath: "/agents" } };

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
 	chmod,
 	mkdir,
@@ -57,6 +58,7 @@ import type {
 	FollowupQueueResponse,
 	HarnessCapabilityInventory,
 	HarnessCapabilityItem,
+	ImportGitHubProjectResponse,
 	RemoveFollowupRequest,
 	ReorderFollowupRequest,
 	RerouteAssignmentRequest,
@@ -87,6 +89,7 @@ import {
 } from "@commonspace/shared";
 import { type Context, context, SpanStatusCode } from "@opentelemetry/api";
 import { SeverityNumber } from "@opentelemetry/api-logs";
+import { z } from "zod";
 import {
 	AcpAgentProcess,
 	type AcpRunInput,
@@ -145,6 +148,10 @@ import {
 	mergeChannelMemoryProjection,
 	projectChannelMemory,
 } from "./memory.js";
+import {
+	importGitHubProject,
+	type ProjectImportOptions,
+} from "./project-import.js";
 import {
 	finalHandoffAgent,
 	mentionedAgents,
@@ -469,6 +476,7 @@ interface RoutingRetryStateChange {
 
 interface PreparedSend {
 	request: SendMessageRequest;
+	submission?: { id: string; fingerprint: string };
 	text: string;
 	attachments: PreparedImageAttachment[];
 	files: PreparedFileAttachment[];
@@ -3262,6 +3270,47 @@ function loadedStateSource(value: JsonValue): LoadedStateSource {
 	return { record, version: record.version };
 }
 
+const submissionIdSchema = z
+	.string()
+	.regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u);
+const messageSubmissionsSchema = z.record(
+	submissionIdSchema,
+	z.strictObject({
+		fingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+		messageId: z.string().min(1).max(200),
+	}),
+);
+
+function messageSubmission(request: SendMessageRequest) {
+	if (request.submissionId === undefined) return undefined;
+	const id = submissionIdSchema.parse(request.submissionId);
+	const fingerprint = createHash("sha256")
+		.update(
+			JSON.stringify([
+				request.conversation.kind,
+				request.conversation.id,
+				request.text,
+				request.projectIds ?? null,
+				request.projectId ?? null,
+				request.threadId ?? null,
+				request.targetAgentId ?? null,
+				(request.attachments ?? []).map(({ name, mimeType, data }) => [
+					name,
+					mimeType,
+					data,
+				]),
+				(request.files ?? []).map(({ name, mimeType, data }) => [
+					name,
+					mimeType,
+					data,
+				]),
+				request.delivery ?? "queue",
+			]),
+		)
+		.digest("hex");
+	return { id, fingerprint };
+}
+
 function loadedAttachmentDeletionIds(value: JsonValue | undefined): string[] {
 	if (!Array.isArray(value))
 		throw new Error("Invalid pending attachment deletion IDs");
@@ -3469,6 +3518,10 @@ function sanitizeLoadedState(value: JsonValue): CommonspaceState {
 			dmSessions,
 			channelIds,
 		),
+		messageSubmissions:
+			version < 37
+				? {}
+				: messageSubmissionsSchema.parse(record.messageSubmissions),
 		projects,
 		channels,
 		threads,
@@ -3698,6 +3751,7 @@ function sanitizeImportedWorkspace(
 			projects,
 			dmSessions: {},
 			agentSessions: {},
+			messageSubmissions: {},
 			schedules:
 				decoded.version < 3 && decoded.workspace.schedules === undefined
 					? []
@@ -4059,6 +4113,20 @@ function validatePermissionSelection(
 	return { index, permission };
 }
 
+export class MessageSubmissionConflictError extends Error {
+	constructor() {
+		super("This submission ID was already used for a different message.");
+		this.name = "MessageSubmissionConflictError";
+	}
+}
+
+export class MessageSubmissionGoneError extends Error {
+	constructor() {
+		super("The accepted message or conversation is no longer available.");
+		this.name = "MessageSubmissionGoneError";
+	}
+}
+
 export class CommonspaceHostService implements CommonspaceMcpProvider {
 	readonly root: string;
 	private readonly statePath: string;
@@ -4135,7 +4203,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private discoveredAgentCandidates: CommonspaceAgentProfile[] = [];
 	private closeOperation: Promise<void> | undefined;
 	private drainOperation: Promise<void> | undefined;
-	private closing = false;
+	private closeState: "open" | "closing" | "closed" = "open";
 	private draining = false;
 	private mcpGateway: CommonspaceMcpGateway | undefined;
 	private mcpEndpoint: string | undefined;
@@ -4490,6 +4558,7 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 	private publicSnapshot(): CommonspaceState {
 		const snapshot = this.snapshot();
 		delete snapshot.pendingAttachmentDeletions;
+		delete snapshot.messageSubmissions;
 		return {
 			...snapshot,
 			dmSessions: {},
@@ -4557,8 +4626,16 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		await this.drainOperation;
 	}
 
+	private get closing(): boolean {
+		return this.closeState !== "open";
+	}
+
+	get isClosed(): boolean {
+		return this.closeState === "closed";
+	}
+
 	async close(): Promise<void> {
-		this.closing = true;
+		if (this.closeState === "open") this.closeState = "closing";
 		if (this.scheduleTimer !== undefined) clearTimeout(this.scheduleTimer);
 		this.scheduleTimer = undefined;
 		this.inferenceShutdown.abort(new Error("Commonspace is shutting down"));
@@ -4595,8 +4672,9 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					}),
 				),
 			);
+			await this.whenAdmissionsIdle();
 			await this.whenIdle();
-			await this.withStateChange(async () => {
+			const runInterruption = await this.withStateChange(async () => {
 				const previousState = this.state;
 				if (
 					!this.markInterruptedRuns(
@@ -4608,15 +4686,17 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 					await this.persist();
 				} catch (error) {
 					this.state = previousState;
-					throw error;
+					return { persistError: error };
 				}
 				this.broadcastRevision();
 			});
 			await this.writeTail;
 			this.mcpCredentials.clear();
 			await this.mcpGateway?.close();
+			this.closeState = "closed";
 			if (permissionInterruption.persistError !== undefined)
 				throw permissionInterruption.persistError;
+			if (runInterruption !== undefined) throw runInterruption.persistError;
 		})();
 		await this.closeOperation;
 	}
@@ -6805,6 +6885,48 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		);
 	}
 
+	importGitHubProject(
+		// biome-ignore lint/plugin: GitHub import validates this HTTP JSON at its owning boundary.
+		input: unknown,
+		options: ProjectImportOptions = {},
+	): Promise<ImportGitHubProjectResponse> {
+		return this.withAdmission(() =>
+			importGitHubProject(
+				{
+					root: this.root,
+					signal: this.inferenceShutdown.signal,
+					snapshot: () => this.snapshot(),
+					mutate: (mutation) => this.commitMutation(mutation),
+					discardUnregisteredCheckout: (path) =>
+						this.discardUnregisteredProjectCheckout(path),
+				},
+				input,
+				options,
+			),
+		);
+	}
+
+	private discardUnregisteredProjectCheckout(path: string): Promise<boolean> {
+		return this.withStateChange(async () => {
+			if (this.state.projects.some((project) => project.paths.includes(path)))
+				return false;
+			try {
+				const value: JsonValue = JSON.parse(
+					await readFile(this.statePath, "utf8"),
+				);
+				const saved = sanitizeLoadedState(value);
+				if (!isDeepStrictEqual(plainRecord(value)?.projects, saved.projects))
+					return false;
+				if (saved.projects.some((project) => project.paths.includes(path)))
+					return false;
+				await rm(path, { recursive: true, force: true });
+				return true;
+			} catch {
+				return false;
+			}
+		});
+	}
+
 	private withMessageSubmissionTelemetry(
 		source: "send" | "edit" | "scheduled",
 		conversationKind: SendMessageRequest["conversation"]["kind"],
@@ -6858,21 +6980,72 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			request.delivery ?? "queue",
 			(markAccepted) =>
 				this.withAdmission(async () => {
+					const submission = messageSubmission(request);
+					if (submission !== undefined) {
+						const replay = await this.withStateChange(async () =>
+							this.replayedSubmission(submission),
+						);
+						if (replay !== undefined) {
+							markAccepted();
+							return replay;
+						}
+					}
 					if (
 						request.delivery !== undefined &&
 						!["queue", "steer", "stop-and-send"].includes(request.delivery)
 					) {
 						throw new Error("invalid follow-up delivery mode");
 					}
-					const preparationStartedAt = this.performancePhaseStartedAt();
-					const prepared = await this.prepareSend(request);
-					this.recordPerformanceMeasurement(
-						CommonspaceHostPerformancePhase.AcceptanceRequestPreparation,
-						preparationStartedAt,
-					);
-					return this.acceptPreparedSend(prepared, markAccepted);
+					try {
+						const preparationStartedAt = this.performancePhaseStartedAt();
+						const prepared = await this.prepareSend(request);
+						if (submission !== undefined) prepared.submission = submission;
+						this.recordPerformanceMeasurement(
+							CommonspaceHostPerformancePhase.AcceptanceRequestPreparation,
+							preparationStartedAt,
+						);
+						return await this.acceptPreparedSend(prepared, markAccepted);
+					} catch (error) {
+						if (submission !== undefined) {
+							const replay = await this.withStateChange(async () =>
+								this.replayedSubmission(submission),
+							);
+							if (replay !== undefined) {
+								markAccepted();
+								return replay;
+							}
+						}
+						throw error;
+					}
 				}),
 		);
+	}
+
+	private replayedSubmission(
+		submission: NonNullable<PreparedSend["submission"]>,
+	): SendMessageResponse | undefined {
+		const receipts = this.state.messageSubmissions;
+		if (receipts === undefined || !Object.hasOwn(receipts, submission.id))
+			return undefined;
+		const receipt = receipts[submission.id];
+		if (receipt === undefined) return undefined;
+		if (receipt.fingerprint !== submission.fingerprint)
+			throw new MessageSubmissionConflictError();
+		const accepted = locateMessageById(
+			this.state.messages,
+			receipt.messageId,
+		)?.message;
+		if (accepted === undefined || accepted.deletedAt !== undefined)
+			throw new MessageSubmissionGoneError();
+		const thread =
+			accepted.threadId === undefined
+				? undefined
+				: this.state.threads.find(
+						(candidate) => candidate.id === accepted.threadId,
+					);
+		if (accepted.threadId !== undefined && thread === undefined)
+			throw new MessageSubmissionGoneError();
+		return this.acceptedSendResponse(structuredClone(accepted), thread);
 	}
 
 	private currentEditableMessage(messageId: string): CommonspaceMessage {
@@ -7187,6 +7360,20 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 		}
 		const { response, abortActiveRuns } = await this.withStateChange(
 			async () => {
+				if (prepared.submission !== undefined) {
+					let replay: SendMessageResponse | undefined;
+					try {
+						replay = this.replayedSubmission(prepared.submission);
+					} catch (error) {
+						await this.removePersistedSendAttachments(prepared);
+						throw error;
+					}
+					if (replay !== undefined) {
+						await this.removePersistedSendAttachments(prepared);
+						markAccepted();
+						return { response: replay, abortActiveRuns: false };
+					}
+				}
 				try {
 					assertCurrent();
 				} catch (error) {
@@ -9131,6 +9318,18 @@ export class CommonspaceHostService implements CommonspaceMcpProvider {
 			createdAt,
 		);
 		thread = this.applyAcceptedSendState(prepared, accepted, thread);
+		if (prepared.submission !== undefined) {
+			this.state = {
+				...this.state,
+				messageSubmissions: {
+					...this.state.messageSubmissions,
+					[prepared.submission.id]: {
+						fingerprint: prepared.submission.fingerprint,
+						messageId: acceptedId,
+					},
+				},
+			};
+		}
 		if (prepared.schedule !== undefined) {
 			this.state = {
 				...this.state,

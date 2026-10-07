@@ -412,6 +412,7 @@ describe.each([
 			const historyCount = adapter === "gemini" ? 6 : 1;
 			for (let index = 0; index < historyCount; index += 1) {
 				await post(first.url, "/api/send", {
+					submissionId: crypto.randomUUID(),
 					conversation,
 					text: `Remember NATIVE_HISTORY_SENTINEL ${index}.`,
 				});
@@ -427,6 +428,7 @@ describe.each([
 			const resumed = await startHost(root, model.url, adapter);
 			const requestsBeforeResume = model.requests.length;
 			await post(resumed.url, "/api/send", {
+				submissionId: crypto.randomUUID(),
 				conversation,
 				text: "Continue after restart.",
 			});
@@ -471,6 +473,7 @@ describe.each([
 				agentId: adapter,
 			});
 			await post(resumed.url, "/api/send", {
+				submissionId: crypto.randomUUID(),
 				conversation,
 				text: "Start a fresh conversation.",
 			});
@@ -562,6 +565,7 @@ describe.each([
 				instructions: "UNRELATED_CONTEXT_SENTINEL",
 			});
 			await post(host.url, "/api/send", {
+				submissionId: crypto.randomUUID(),
 				conversation: { kind: "channel", id: channelId },
 				text: `@${label.replaceAll(" ", "-")} read shared context and post progress.`,
 			});

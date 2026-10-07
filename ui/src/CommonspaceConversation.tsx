@@ -94,6 +94,34 @@ function restoreText(current: string, restored: string): string {
 	return current === "" ? restored : `${restored}\n\n${current}`;
 }
 
+function matchingRecoveredSubmission(
+	submission: CommonspacePendingSubmission | null,
+	conversation: ConversationRef | null,
+	options: Pick<
+		CommonspacePendingSubmission,
+		"text" | "threadId" | "targetAgentId" | "attachments" | "files"
+	>,
+): CommonspacePendingSubmission | null {
+	if (
+		submission === null ||
+		conversation === null ||
+		submission.conversation.kind !== conversation.kind ||
+		submission.conversation.id !== conversation.id
+	)
+		return null;
+	const content = (candidate: typeof options) =>
+		JSON.stringify([
+			candidate.text,
+			candidate.threadId,
+			candidate.targetAgentId,
+			[...candidate.attachments, ...candidate.files].map(
+				({ name, mimeType, data }) => [name, mimeType, data],
+			),
+			candidate.attachments.length,
+		]);
+	return content(submission) === content(options) ? submission : null;
+}
+
 function contextLines(value: string): string[] {
 	return value
 		.split("\n")
@@ -1329,6 +1357,12 @@ export function CommonspaceConversation({
 			: `${snapshot.activeConversation.kind}:${snapshot.activeConversation.id}\u0000${snapshot.activeThreadId ?? ""}`;
 	const [draft, setDraft] = useState("");
 	const [threadDraft, setThreadDraft] = useState("");
+	const recoveredRootSubmission = useRef<CommonspacePendingSubmission | null>(
+		null,
+	);
+	const recoveredThreadSubmission = useRef<CommonspacePendingSubmission | null>(
+		null,
+	);
 	const [focusedComposer, setFocusedComposer] = useState<
 		"channel" | "thread" | null
 	>(null);
@@ -1933,6 +1967,7 @@ export function CommonspaceConversation({
 		void snapshot.activeThreadId;
 		setThreadReplyTarget(null);
 		setThreadDraft("");
+		recoveredThreadSubmission.current = null;
 		setPendingThreadImages([]);
 		setPendingThreadFiles([]);
 		setThreadContextOpen(false);
@@ -2325,6 +2360,7 @@ export function CommonspaceConversation({
 	) => {
 		const thread = submission.threadId !== undefined;
 		if (thread) {
+			recoveredThreadSubmission.current = submission;
 			setThreadDraft((current) => restoreText(current, submission.text));
 			setPendingThreadImages((current) =>
 				restoreAttachments(current, submission.attachments),
@@ -2343,6 +2379,7 @@ export function CommonspaceConversation({
 			}
 			threadComposer.current?.focus();
 		} else {
+			recoveredRootSubmission.current = submission;
 			setDraft((current) => restoreText(current, submission.text));
 			setPendingImages((current) =>
 				restoreAttachments(current, submission.attachments),
@@ -2363,10 +2400,18 @@ export function CommonspaceConversation({
 			if (!composerHasContent(text, pendingImages, pendingFiles)) return;
 			const attachments = pendingImages;
 			const files = pendingFiles;
+			const recovered = matchingRecoveredSubmission(
+				recoveredRootSubmission.current,
+				snapshot.activeConversation,
+				{ text, attachments, files },
+			);
+			recoveredRootSubmission.current = null;
 			const delivery =
-				directMessageActivities.length > 0 && !isChannel
-					? submittedFollowupDelivery(event)
-					: undefined;
+				recovered === null
+					? directMessageActivities.length > 0 && !isChannel
+						? submittedFollowupDelivery(event)
+						: undefined
+					: recovered.delivery;
 			setDraft("");
 			if (rootIsCommand) {
 				await executeSlashCommand(text);
@@ -2376,14 +2421,28 @@ export function CommonspaceConversation({
 			setPendingFiles([]);
 			setCommandFeedback(null);
 			try {
-				await store.send({ text, attachments, delivery, files });
+				await store.send({
+					text,
+					attachments,
+					delivery,
+					files,
+					submissionId: recovered?.id,
+					projectIds: recovered?.projectIds,
+				});
 			} catch (error) {
 				if (!rootInputOccupied.current) {
 					setDraft(text);
 					setPendingImages(attachments);
 					setPendingFiles(files);
-					if (error instanceof CommonspaceSubmissionError)
+					if (error instanceof CommonspaceSubmissionError) {
+						recoveredRootSubmission.current =
+							store
+								.getSnapshot()
+								.pendingSubmissions.find(
+									(submission) => submission.id === error.submissionId,
+								) ?? null;
 						store.dismissPendingSubmission(error.submissionId);
+					}
 				}
 			}
 		};
@@ -2398,10 +2457,24 @@ export function CommonspaceConversation({
 				return;
 			const attachments = pendingThreadImages;
 			const files = pendingThreadFiles;
+			const content: Pick<
+				CommonspacePendingSubmission,
+				"text" | "threadId" | "targetAgentId" | "attachments" | "files"
+			> = { text, threadId: activeThread.id, attachments, files };
+			if (threadReplyTarget !== null)
+				content.targetAgentId = threadReplyTarget.agentId;
+			const recovered = matchingRecoveredSubmission(
+				recoveredThreadSubmission.current,
+				snapshot.activeConversation,
+				content,
+			);
+			recoveredThreadSubmission.current = null;
 			const delivery =
-				activeThreadActivities.length > 0 && threadReplyTarget === null
-					? submittedFollowupDelivery(event)
-					: undefined;
+				recovered === null
+					? activeThreadActivities.length > 0 && threadReplyTarget === null
+						? submittedFollowupDelivery(event)
+						: undefined
+					: recovered.delivery;
 			setThreadDraft("");
 			if (threadIsCommand) {
 				setThreadReplyTarget(null);
@@ -2420,6 +2493,8 @@ export function CommonspaceConversation({
 						attachments,
 						delivery,
 						files,
+						submissionId: recovered?.id,
+						projectIds: recovered?.projectIds,
 					});
 				} else {
 					await store.sendDirectReply({
@@ -2428,6 +2503,8 @@ export function CommonspaceConversation({
 						targetAgentId: threadReplyTarget.agentId,
 						attachments,
 						files,
+						submissionId: recovered?.id,
+						projectIds: recovered?.projectIds,
 					});
 				}
 				setThreadReplyTarget(null);
@@ -2436,8 +2513,15 @@ export function CommonspaceConversation({
 					setThreadDraft(text);
 					setPendingThreadImages(attachments);
 					setPendingThreadFiles(files);
-					if (error instanceof CommonspaceSubmissionError)
+					if (error instanceof CommonspaceSubmissionError) {
+						recoveredThreadSubmission.current =
+							store
+								.getSnapshot()
+								.pendingSubmissions.find(
+									(submission) => submission.id === error.submissionId,
+								) ?? null;
 						store.dismissPendingSubmission(error.submissionId);
+					}
 				}
 			}
 		};

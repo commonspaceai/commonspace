@@ -1,14 +1,28 @@
 import { renameSync, symlinkSync } from "node:fs";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import {
+	copyFile,
+	mkdir,
+	mkdtemp,
+	realpath,
+	rm,
+	stat,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { PRIVATE_HOST_LOCATOR_FILE_NAME } from "@commonspace/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { credentialBearingFileName } from "../server/src/credential-files.ts";
 import {
 	prepareAgentFileAttachments,
 	readBoundedAttachmentBytes,
 } from "../server/src/file-attachments.ts";
+import {
+	createHostLocator,
+	publishHostLocator,
+} from "../server/src/host-locator.ts";
 
 const roots: string[] = [];
 
@@ -61,6 +75,58 @@ describe("Agent file attachment copy boundary", () => {
 			size: 20,
 		});
 		expect(prepared[0]?.data.toString("utf8")).toBe("synthetic test value");
+	});
+
+	it("rejects published and temporary host locators with original, benign, and aliased artifact names", async () => {
+		const root = await mkdtemp(join(tmpdir(), "commonspace-host-attachment-"));
+		roots.push(root);
+		await publishHostLocator(
+			await createHostLocator(root, "http://127.0.0.1:12345"),
+		);
+		const locatorPath = join(root, "host", PRIVATE_HOST_LOCATOR_FILE_NAME);
+		expect((await stat(locatorPath)).isFile()).toBe(true);
+		const temporaryPath = join(
+			root,
+			"host",
+			`.${PRIVATE_HOST_LOCATOR_FILE_NAME}.pending.tmp`,
+		);
+		await copyFile(locatorPath, temporaryPath);
+		await symlink(locatorPath, join(root, "evidence.json"));
+		await writeFile(join(root, "report.txt"), "safe host report");
+		const prepared = await prepareAgentFileAttachments(
+			[
+				{
+					name: PRIVATE_HOST_LOCATOR_FILE_NAME,
+					uri: pathToFileURL(locatorPath).href,
+					mimeType: "application/json",
+				},
+				{
+					name: "evidence.json",
+					uri: pathToFileURL(locatorPath).href,
+					mimeType: "application/json",
+				},
+				{
+					name: "evidence.json",
+					uri: pathToFileURL(join(root, "evidence.json")).href,
+					mimeType: "application/json",
+				},
+				{
+					name: "evidence.json",
+					uri: pathToFileURL(temporaryPath).href,
+					mimeType: "application/json",
+				},
+				{
+					name: "report.txt",
+					uri: pathToFileURL(join(root, "report.txt")).href,
+					mimeType: "text/plain",
+				},
+			],
+			[await realpath(root)],
+			() => undefined,
+		);
+
+		expect(prepared.map((file) => file.metadata.name)).toEqual(["report.txt"]);
+		expect(prepared[0]?.data.toString("utf8")).toBe("safe host report");
 	});
 
 	it("rejects a file that grows after its validated size", async () => {
