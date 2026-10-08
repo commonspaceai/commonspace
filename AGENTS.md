@@ -43,3 +43,43 @@ For behavior changes, identify a project-owned invariant and a realistic defect.
 Select checks using [Contributing](CONTRIBUTING.md#verify). Run required integration gates on the settled change; do not repeat broad checks or reviews without a new change, failure, or unresolved concern. After `pnpm check`, use `pnpm verify:live:built` when live verification is required so the same build is checked once.
 
 For documentation-only changes, check links, commands, and Markdown syntax. See [Contributing](CONTRIBUTING.md) for change-specific verification.
+
+## Running in Cursor cloud agents
+
+Cursor cloud agents can install, build, lint, test, and run the project out of the box. The environment configuration is in `.cursor/environment.json`.
+
+### Commands that work
+
+All core development commands work in the cloud agent VM:
+
+- `pnpm install --frozen-lockfile` — install dependencies (idempotent, cached after first run)
+- `pnpm biome:check` — check formatting and linting (warnings are pre-existing)
+- `pnpm lint` — run ESLint
+- `pnpm typecheck` — check TypeScript contracts
+- `pnpm test` — run unit and integration tests
+- `pnpm verify:adapters` — run native agent adapter tests
+- `pnpm build` — build all packages
+- `pnpm build:storybook` — build Storybook
+- `pnpm test:e2e:built` — run browser E2E tests (after build)
+- `pnpm test:messaging:built` — run Storybook messaging tests (after Storybook build)
+
+Playwright browsers are installed automatically during the cloud agent setup.
+
+### What can't run in cloud agents
+
+These checks require specific platforms, GUI access, or credentials:
+
+- **Visual tests** (`pnpm test:visual:built`) — require macOS baselines, run in CI on macOS runners
+- **Desktop packaging and verification** (`pnpm verify:desktop`, `pnpm verify:release`) — require Electron and platform-specific packaging
+- **Windows-specific tests** (`pnpm test:platform` subset) — require Windows environment
+- **Live agent verification** (`pnpm verify:live:built`, `pnpm verify:acp:*`, `pnpm verify:acp:mcp:*`) — require real agent credentials and service access
+- **Service installation** (`pnpm service:*`) — require system permissions and init system
+
+### Known test failures
+
+The following tests may fail in cloud agent VMs due to timing or environment differences:
+
+- `tests/cli-startup.spec.ts` — one test fails with exit code 1 instead of 0 (pre-existing)
+- `pnpm test:storybook` — 2/357 tests may fail due to timing/rendering issues (pre-existing, flaky)
+
+Run `pnpm check` for the complete static and unit test gate that parallels CI quality checks.
