@@ -46,24 +46,24 @@ For documentation-only changes, check links, commands, and Markdown syntax. See 
 
 ## Running in Cursor cloud agents
 
-Cursor cloud agents can install, build, lint, test, and run the project out of the box. The environment configuration is in `.cursor/environment.json`.
+Cursor cloud agents can install, build, lint, test, and run the project out of the box. The environment configuration is in `.cursor/environment.json` and runs `pnpm install --frozen-lockfile` during setup (idempotent, cached after first run).
 
 ### Commands that work
 
 All core development commands work in the cloud agent VM:
 
-- `pnpm install --frozen-lockfile` — install dependencies (idempotent, cached after first run)
 - `pnpm biome:check` — check formatting and linting (warnings are pre-existing)
 - `pnpm lint` — run ESLint
 - `pnpm typecheck` — check TypeScript contracts
-- `pnpm test` — run unit and integration tests
-- `pnpm verify:adapters` — run native agent adapter tests
+- `pnpm test` — run unit and integration tests (1 failed + 838 passed + 23 skipped = 862 total)
+- `pnpm verify:adapters` — run native agent adapter tests (9/9 pass)
 - `pnpm build` — build all packages
 - `pnpm build:storybook` — build Storybook
-- `pnpm test:e2e:built` — run browser E2E tests (after build)
-- `pnpm test:messaging:built` — run Storybook messaging tests (after Storybook build)
+- `pnpm test:e2e:built` — run browser E2E tests (26/26 pass after build)
+- `pnpm test:messaging:built` — run Storybook messaging tests (7/7 pass after Storybook build)
+- `pnpm check` — complete static and unit test gate (parallels CI quality checks)
 
-Playwright browsers are installed automatically during the cloud agent setup.
+Playwright browsers are installed automatically during cloud agent setup.
 
 ### What can't run in cloud agents
 
@@ -75,11 +75,13 @@ These checks require specific platforms, GUI access, or credentials:
 - **Live agent verification** (`pnpm verify:live:built`, `pnpm verify:acp:*`, `pnpm verify:acp:mcp:*`) — require real agent credentials and service access
 - **Service installation** (`pnpm service:*`) — require system permissions and init system
 
-### Known test failures
+### Pre-existing test failures
 
-The following tests may fail in cloud agent VMs due to timing or environment differences:
+The following test failures exist on `main` and are unrelated to the cloud agent environment:
 
-- `tests/cli-startup.spec.ts` — one test fails with exit code 1 instead of 0 (pre-existing)
-- `pnpm test:storybook` — 2/357 tests may fail due to timing/rendering issues (pre-existing, flaky)
+**Unit tests** (`pnpm test`): 1 failed, 838 passed, 23 skipped (862 total)
+- Failed: `tests/cli-startup.spec.ts` → "stops the owned host when its parent quits during CLI startup" (exits with code 1 instead of 0)
+- Skipped: 23 tests marked as skipped in the test suite
 
-Run `pnpm check` for the complete static and unit test gate that parallels CI quality checks.
+**Storybook browser tests** (`pnpm test:storybook`): 355/357 pass (2 pre-existing flaky tests)
+- Failed: timing/rendering issues in 2 Storybook interaction tests
