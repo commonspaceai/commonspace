@@ -43,3 +43,7 @@ For behavior changes, identify a project-owned invariant and a realistic defect.
 Select checks using [Contributing](CONTRIBUTING.md#verify). Run required integration gates on the settled change; do not repeat broad checks or reviews without a new change, failure, or unresolved concern. After `pnpm check`, use `pnpm verify:live:built` when live verification is required so the same build is checked once.
 
 For documentation-only changes, check links, commands, and Markdown syntax. See [Contributing](CONTRIBUTING.md) for change-specific verification.
+
+## Cursor Cloud Agents
+
+This repository is its own Cloud Agent project. `.cursor/environment.json` installs Kitchen from `ralphbibera/skills`, then `corepack pnpm install --frozen-lockfile`. Invoke `/poteto-mode` after install. Product development still follows the commands in [Development](docs/guides/development.md).

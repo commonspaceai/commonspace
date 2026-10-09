@@ -1,0 +1,5 @@
+{
+  "name": "commonspace",
+  "install": "bash .cursor/install.sh",
+  "repositoryDependencies": ["github.com/ralphbibera/skills"]
+}
